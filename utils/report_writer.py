@@ -8,7 +8,7 @@ import pandas as pd
 from rich.console import Console
 from rich.table import Table
 
-from utils.config_loader import reports_dir
+from utils.config_loader import reports_dir, ROOT
 
 REPORT_COLUMNS = {
     "orders": [
@@ -66,7 +66,7 @@ REPORT_COLUMNS = {
 
 # 返回当前 set 在 backtest/live 下的报告目录。
 def run_reports_dir(settings: dict[str, Any], run_type: str):
-    return run_type / reports_dir(settings)
+    return ROOT / run_type / settings["project"]["reports_dir"]
 
 
 # 只保留人工看交易结果需要的列。

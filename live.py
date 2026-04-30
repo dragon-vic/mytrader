@@ -62,18 +62,6 @@ def main(config_name: str | None = None) -> None:
     selected = (sys.argv[1] if len(sys.argv) > 1 else None) or config_name
     settings = load_settings(selected)
     node = build_live_node(settings)
-    print(
-        json.dumps(
-            {
-                "exchange": "binance",
-                "environment": settings["live"]["environment"],
-                "account_type": settings["live"]["account_type"],
-                "instruments": [str(instrument.id) for instrument in make_instruments(settings)],
-                "proxy_url": proxy_url(settings),
-            },
-            indent=2,
-        ),
-    )
 
     run_for_seconds(node, int(settings["live"]["run_seconds"]))
     write_trader_reports(node.trader, settings, "live")
