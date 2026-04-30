@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from external.external_signal import EXTERNAL_SIGNAL_CLIENT_NAME
-from external.external_signal import ExternalSignal
-from external.external_signal import external_signal_type
+from external.data_engine import EXTERNAL_SIGNAL_CLIENT_NAME
+from external.data_engine import ExternalSignal
+from external.data_engine import external_signal_type
 from nautilus_trader.config import StrategyConfig
 from nautilus_trader.model.data import BarType
 from nautilus_trader.model.enums import OrderSide
@@ -14,12 +14,15 @@ from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.model.instruments import Instrument
 from nautilus_trader.trading.strategy import Strategy
 
+from utils.report_writer import write_trader_reports
+
 
 class ExternalStgConfig(StrategyConfig, frozen=True):
     instrument_id: InstrumentId
     bar_type: BarType
     trade_size: Decimal
     close_positions_on_stop: bool = True
+    setting:dict= None
 
 
 class ExternalStg(Strategy):

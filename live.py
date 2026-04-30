@@ -9,9 +9,9 @@ from nautilus_trader.config import LoggingConfig
 from nautilus_trader.config import TradingNodeConfig
 from nautilus_trader.live.node import TradingNode
 
-from external.external_signal import EXTERNAL_SIGNAL_CLIENT_NAME
-from external.external_signal import ExternalSignalDataClientConfig
-from external.external_signal import ExternalSignalLiveDataClientFactory
+from external.data_engine import EXTERNAL_SIGNAL_CLIENT_NAME
+from external.data_engine import ExternalSignalDataClientConfig
+from external.data_engine import ExternalSignalLiveDataClientFactory
 from utils.binance_clients import BINANCE_CLIENT_NAME
 from utils.binance_clients import binance_data_config
 from utils.binance_clients import binance_exec_config
@@ -19,6 +19,7 @@ from utils.binance_clients import cache_config
 from utils.config_loader import load_settings
 from utils.config_loader import proxy_url
 from utils.instrument_factory import make_instruments
+from utils.report_writer import write_trader_reports
 from utils.strategy_factory import build_strategy
 
 # 为当前 set 构建 Binance live/testnet node。
@@ -75,6 +76,7 @@ def main(config_name: str | None = None) -> None:
     )
 
     run_for_seconds(node, int(settings["live"]["run_seconds"]))
+    write_trader_reports(node.trader, settings, "live")
     node.dispose()
 
 
