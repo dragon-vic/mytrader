@@ -1,0 +1,74 @@
+# 常改：按分钟随机方向下单的时间信号策略。
+strategy:
+  name: external_stg                  # 策略名称，仅用于识别
+  trade_size: "0.001"                # 每次下单数量，BTC 合约数量
+  params:                            # 传给 TimeRandomConfig 的策略参数
+    close_positions_on_stop: true    # 策略停止时是否平仓
+  module: strategies.external_stg     # 策略模块路径
+  class: ExternalStg                  # 策略类名
+  config_class: ExternalStgConfig     # 策略配置类名
+
+# 常改：策略外部的时间随机信号源。
+external:
+  source: external_stg                # 外部信号源类型，按时间生成随机方向
+  random_seed: 42                    # 随机种子，固定后回测结果可复现
+
+# 常改：BTC U 本位合约 1m 市场。
+market:
+  symbol: BTC/USDT                   # 人看的交易对
+  base_currency: BTC                 # 基础币
+  quote_currency: USDT               # 计价币
+  settlement_currency: USDT          # 结算币
+  timeframe: 1m                      # K 线周期，1m 表示每分钟触发一次
+  limit: 1000                        # 每批拉取 K 线数量
+  batches: 3                         # 拉取批次数
+  since: null                        # 预留起始时间，当前未使用
+  exchange: binance                  # 交易所名称
+  venue: BINANCE                     # NT venue
+  raw_symbol: BTCUSDT                # Binance 原生 symbol
+  instrument_symbol: BTCUSDT-PERP    # NT 合约 instrument symbol
+  proxy_url: http://127.0.0.1:7890   # HTTP/WS 代理
+
+# 常改：回测资金和日志级别。
+backtest:
+  starting_balance: "100000 USDT"    # 回测初始资金
+  account_type: MARGIN               # NT 回测账户类型
+  oms_type: NETTING                  # 净持仓模式
+  log_level: INFO                    # NT 日志级别
+  log_bypass: false                  # false 时显示 NT logo 和完整日志
+
+# 常改：默认合约测试网 live 参数。
+live:
+  environment: TESTNET               # TESTNET / LIVE
+  run_seconds: 300                   # live 运行秒数
+  account_type: USDT_FUTURES         # Binance U 本位合约账户
+  proxy_url: http://127.0.0.1:7890   # live 代理
+  api_key_env: BINANCE_FUTURES_TESTNET_API_KEY       # .env 里的 API key 变量名
+  api_secret_env: BINANCE_FUTURES_TESTNET_API_SECRET # .env 里的 API secret 变量名
+
+# 低频：BTC 合约精度、最小下单量和手续费。
+instrument:
+  kind: perpetual                    # instrument 类型，perpetual 表示永续合约
+  base_currency: BTC                 # 基础币
+  quote_currency: USDT               # 计价币
+  settlement_currency: USDT          # 结算币
+  is_inverse: false                  # false 表示 U 本位正向合约
+  price_precision: 2                 # 价格小数位
+  size_precision: 3                  # 数量小数位
+  price_increment: "0.01"            # 最小价格跳动
+  size_increment: "0.001"            # 最小数量跳动
+  multiplier: "1"                    # 合约乘数
+  min_quantity: "0.001"              # 最小下单数量
+  max_quantity: "10000"              # 最大下单数量
+  min_notional: "5"                  # 最小名义金额
+  max_price: "10000000"              # 允许的最大价格
+  margin_init: "1"                   # 回测用初始保证金比例
+  margin_maint: "1"                  # 回测用维持保证金比例
+  maker_fee: "0.0002"                # maker 手续费率
+  taker_fee: "0.0005"                # taker 手续费率
+
+# 低频：项目目录。
+project:
+  name: nt_quant                     # 项目名
+  data_dir: data                     # 数据目录
+  reports_dir: reports               # 报告目录

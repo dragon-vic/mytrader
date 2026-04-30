@@ -1,0 +1,141 @@
+# 常改：多币种相对动量策略参数。
+strategy:
+  name: cross_momentum               # 策略名称，仅用于识别
+  trade_notional: "100"              # 每个目标仓位的名义金额，单位 USDT
+  params:                            # 传给 CrossMomentumConfig 的策略参数
+    benchmark_index: 0               # 基准币索引，0 对应下面 markets 里的 BTC
+    lookback_bars: 3                 # 动量回看 bar 数，1h 下 3 表示 3 小时
+    long_count: 2                    # 每次做多相对最强的币数量
+    short_count: 2                   # 每次做空相对最弱的币数量
+    min_abs_score: 0                 # 相对动量最小阈值，0 表示始终排序交易
+    request_bars: true               # live 启动时是否请求历史 bar 预热
+    warmup_days: 7                   # live 预热请求最近多少天历史 bar
+    close_positions_on_stop: true    # 策略停止时是否平仓
+  module: strategies.cross_momentum  # 策略模块路径
+  class: CrossMomentum               # 策略类名
+  config_class: CrossMomentumConfig  # 策略配置类名
+
+# 常改：多个 U 本位合约 1h 市场。
+markets:
+  - symbol: BTC/USDT                 # 人看的交易对
+    base_currency: BTC               # 基础币
+    quote_currency: USDT             # 计价币
+    settlement_currency: USDT        # 结算币
+    timeframe: 1h                    # K 线周期
+    limit: 1000                      # 每批拉取 K 线数量
+    batches: 3                       # 拉取批次数
+    since: null                      # 预留起始时间，当前未使用
+    exchange: binance                # 交易所名称
+    venue: BINANCE                   # NT venue
+    raw_symbol: BTCUSDT              # Binance 原生 symbol
+    instrument_symbol: BTCUSDT-PERP  # NT 合约 instrument symbol
+    proxy_url: http://127.0.0.1:7890 # HTTP/WS 代理
+  - symbol: ETH/USDT
+    base_currency: ETH
+    quote_currency: USDT
+    settlement_currency: USDT
+    timeframe: 1h
+    limit: 1000
+    batches: 3
+    since: null
+    exchange: binance
+    venue: BINANCE
+    raw_symbol: ETHUSDT
+    instrument_symbol: ETHUSDT-PERP
+    proxy_url: http://127.0.0.1:7890
+  - symbol: BNB/USDT
+    base_currency: BNB
+    quote_currency: USDT
+    settlement_currency: USDT
+    timeframe: 1h
+    limit: 1000
+    batches: 3
+    since: null
+    exchange: binance
+    venue: BINANCE
+    raw_symbol: BNBUSDT
+    instrument_symbol: BNBUSDT-PERP
+    proxy_url: http://127.0.0.1:7890
+  - symbol: DOGE/USDT
+    base_currency: DOGE
+    quote_currency: USDT
+    settlement_currency: USDT
+    timeframe: 1h
+    limit: 1000
+    batches: 3
+    since: null
+    exchange: binance
+    venue: BINANCE
+    raw_symbol: DOGEUSDT
+    instrument_symbol: DOGEUSDT-PERP
+    proxy_url: http://127.0.0.1:7890
+  - symbol: TRUMP/USDT
+    base_currency: TRUMP
+    quote_currency: USDT
+    settlement_currency: USDT
+    timeframe: 1h
+    limit: 1000
+    batches: 3
+    since: null
+    exchange: binance
+    venue: BINANCE
+    raw_symbol: TRUMPUSDT
+    instrument_symbol: TRUMPUSDT-PERP
+    proxy_url: http://127.0.0.1:7890
+  - symbol: SOL/USDT
+    base_currency: SOL
+    quote_currency: USDT
+    settlement_currency: USDT
+    timeframe: 1h
+    limit: 1000
+    batches: 3
+    since: null
+    exchange: binance
+    venue: BINANCE
+    raw_symbol: SOLUSDT
+    instrument_symbol: SOLUSDT-PERP
+    proxy_url: http://127.0.0.1:7890
+
+# 常改：回测资金和日志级别。
+backtest:
+  starting_balance: "100000 USDT"    # 回测初始资金
+  account_type: MARGIN               # NT 回测账户类型
+  oms_type: NETTING                  # 净持仓模式
+  log_level: INFO                    # NT 日志级别
+  log_bypass: false                  # false 时显示 NT logo 和完整日志
+
+# 常改：默认合约测试网 live 参数。
+live:
+  environment: TESTNET               # TESTNET / LIVE
+  run_seconds: 300                   # live 运行秒数
+  account_type: USDT_FUTURES         # Binance U 本位合约账户
+  proxy_url: http://127.0.0.1:7890   # live 代理
+  api_key_env: BINANCE_FUTURES_TESTNET_API_KEY       # .env 里的 API key 变量名
+  api_secret_env: BINANCE_FUTURES_TESTNET_API_SECRET # .env 里的 API secret 变量名
+
+# 低频：通用合约精度，回测先用统一精度。
+instrument:
+  kind: perpetual                    # instrument 类型，perpetual 表示永续合约
+  base_currency: BTC                 # 单市场 set 的默认基础币，多市场会被 markets 覆盖
+  quote_currency: USDT               # 计价币
+  settlement_currency: USDT          # 结算币
+  is_inverse: false                  # false 表示 U 本位正向合约
+  price_precision: 8                 # 价格小数位
+  size_precision: 3                  # 数量小数位
+  price_increment: "0.00000001"      # 最小价格跳动
+  size_increment: "0.001"            # 最小数量跳动
+  multiplier: "1"                    # 合约乘数
+  min_quantity: "0.001"              # 最小下单数量
+  max_quantity: "100000000"          # 最大下单数量
+  min_notional: "5"                  # 最小名义金额
+  max_price: "10000000"              # 允许的最大价格
+  margin_init: "1"                   # 回测用初始保证金比例
+  margin_maint: "1"                  # 回测用维持保证金比例
+  maker_fee: "0.0002"                # maker 手续费率
+  taker_fee: "0.0005"                # taker 手续费率
+
+# 低频：项目目录。
+project:
+  name: nt_quant                     # 项目名
+  data_dir: data                     # 数据目录
+  reports_dir: reports               # 报告目录

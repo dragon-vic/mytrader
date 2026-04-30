@@ -1,0 +1,72 @@
+# 常改：策略和参数。
+strategy:
+  name: futures_trend                # 策略名称，仅用于识别
+  trade_size: "0.01"                 # 每次下单数量，ETH 合约数量
+  params:                            # 传给 FuturesTrendConfig 的策略参数
+    fast_ema_period: 12              # 快 EMA 周期
+    slow_ema_period: 36              # 慢 EMA 周期
+    atr_period: 14                   # ATR 周期
+    min_atr: 0                       # 最小 ATR 过滤，小于该值不交易
+    request_bars: true               # live 启动时是否请求历史 bar 预热
+    warmup_days: 1                   # live 预热请求最近多少天历史 bar
+    close_positions_on_stop: true    # 策略停止时是否平仓
+  module: strategies.futures_trend   # 策略模块路径
+  class: FuturesTrend                # 策略类名
+  config_class: FuturesTrendConfig   # 策略配置类名
+
+# 常改：交易对、周期和拉取数据量。
+market:
+  symbol: ETH/USDT                   # 人看的交易对
+  timeframe: 1m                      # K 线周期
+  limit: 1000                        # 每批拉取 K 线数量
+  batches: 5                         # 拉取批次数，总数据量约等于 limit * batches
+  since: null                        # 预留起始时间，当前未使用
+  exchange: binance                  # 交易所名称
+  venue: BINANCE                     # NT venue
+  raw_symbol: ETHUSDT                # Binance 原生 symbol
+  instrument_symbol: ETHUSDT-PERP    # NT 合约 instrument symbol
+  proxy_url: http://127.0.0.1:7890   # HTTP/WS 代理
+
+# 常改：回测资金和日志级别。
+backtest:
+  starting_balance: "100000 USDT"    # 回测初始资金
+  account_type: MARGIN               # NT 回测账户类型
+  oms_type: NETTING                  # 净持仓模式
+  log_level: INFO                    # NT 日志级别
+  log_bypass: false                  # false 时显示 NT logo 和完整日志
+
+# 常改：测试网/实盘环境和运行时长。
+live:
+  environment: TESTNET               # TESTNET / LIVE
+  run_seconds: 300                   # live 运行秒数
+  account_type: USDT_FUTURES         # Binance U 本位合约账户
+  proxy_url: http://127.0.0.1:7890   # live 代理
+  api_key_env: BINANCE_FUTURES_TESTNET_API_KEY       # .env 里的 API key 变量名
+  api_secret_env: BINANCE_FUTURES_TESTNET_API_SECRET # .env 里的 API secret 变量名
+
+# 低频：交易品种精度、最小下单量和手续费。
+instrument:
+  kind: perpetual                    # instrument 类型，perpetual 表示永续合约
+  base_currency: ETH                 # 基础币
+  quote_currency: USDT               # 计价币
+  settlement_currency: USDT          # 结算币
+  is_inverse: false                  # false 表示 U 本位正向合约
+  price_precision: 2                 # 价格小数位
+  size_precision: 3                  # 数量小数位
+  price_increment: "0.01"            # 最小价格跳动
+  size_increment: "0.001"            # 最小数量跳动
+  multiplier: "1"                    # 合约乘数
+  min_quantity: "0.001"              # 最小下单数量
+  max_quantity: "10000"              # 最大下单数量
+  min_notional: "5"                  # 最小名义金额
+  max_price: "1000000"               # 允许的最大价格
+  margin_init: "1"                   # 回测用初始保证金比例
+  margin_maint: "1"                  # 回测用维持保证金比例
+  maker_fee: "0.0002"                # maker 手续费率
+  taker_fee: "0.0005"                # taker 手续费率
+
+# 低频：项目目录。
+project:
+  name: nt_quant                     # 项目名
+  data_dir: data                     # 数据目录
+  reports_dir: reports               # 报告目录
