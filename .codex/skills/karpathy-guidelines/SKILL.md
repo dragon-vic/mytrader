@@ -30,14 +30,21 @@ For this project, environment, Conda, system directories, global config, and net
 - Unless the user says otherwise, new live-oriented configs should target Binance USDT futures testnet.
 - Keep the first iteration minimal. Do not add extra framework layers until a real need appears.
 - Temporary checks should be run from shell, not kept as permanent scripts.
+- Keep `external/external_data.py`; it is a separate external signal sender process maintained by the user, even if the main NT process does not import it.
 - Do not update README unless the user explicitly asks. Explain usage in chat instead.
 - Use short Chinese comments around functions or non-obvious blocks when editing code, enough to state what the function does without verbose narration.
 - Function purpose comments should be placed on the line above the function definition so they remain visible when code is folded.
-- Strategy selection is config-driven. A set file under `config/` declares `strategy.module`, `strategy.class`, and `strategy.config_class`; entry scripts should not need edits for each new strategy.
+- Strategy selection is config-driven. A set file under `config/` declares `strategy.name`; `runtime.py` derives `strategy.module`, `strategy.class`, and `strategy.config_class` unless they are explicitly overridden.
+- `backtest.py` and `live.py` must stay generic. Do not add branches for a specific strategy or a specific config set in these entry scripts.
+- Keep YAML config layered. Put environment-level values such as project paths, exchange name/venue, proxy, and external data-client host/port in `config/global.yaml`.
+- Put strategy/run-level values such as strategy params, market list, instrument precision/limits/fees, backtest account settings, and live account settings in each strategy set YAML.
+- `runtime.py` loads `config/global.yaml` first, then recursively overlays the selected strategy set. Strategy set values override global values when keys overlap.
+- `live.py` may register shared data clients such as the external signal client for every node; strategies that need them subscribe, strategies that do not need them ignore them.
 - In set files under `config/`, put frequently changed strategy, market, backtest, and live run parameters near the top; keep stable instrument and project plumbing near the bottom.
 - Entry `main(config_name=None)` functions should let CLI config names override function arguments; function arguments are only the fallback for IDE runs without CLI args.
 - Do not add defensive guards or fallback checks that duplicate NautilusTrader's normal event guarantees. Keep strategy callbacks close to NT examples unless there is a specific observed failure.
 - Do not catch exceptions to hide or convert errors during normal development. Let errors surface, then fix the underlying cause.
+- Do not return `None` as an error state that forces callers to branch. For required config, credentials, and dependencies, access them directly and let missing values raise.
 - Confirm with the user before making functional behavior changes. Small formatting, comments, and documentation-like local cleanup can be done directly.
 - Before touching Conda, global config, system directories, or live-trading credentials, explain the action and wait for explicit confirmation.
 

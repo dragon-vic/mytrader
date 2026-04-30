@@ -1,0 +1,16 @@
+# 全局：项目目录。
+project:
+  name: nt_quant                     # 项目名
+  data_dir: data                     # 数据目录
+  reports_dir: reports               # 报告目录
+
+# 全局：交易所和代理，和具体策略无关。
+exchange:
+  name: binance                      # 交易所名称
+  venue: BINANCE                     # NT venue
+  proxy_url: http://127.0.0.1:7890   # HTTP/WS 统一代理
+
+# 全局：本地外部信号 data client。
+external_signal:
+  host: 127.0.0.1                    # 外部信号监听地址
+  port: 9001                         # 外部信号监听端口

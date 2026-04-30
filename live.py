@@ -9,17 +9,20 @@ from nautilus_trader.config import LoggingConfig
 from nautilus_trader.config import TradingNodeConfig
 from nautilus_trader.live.node import TradingNode
 
-from runtime import BINANCE_CLIENT_NAME
-from runtime import binance_data_config
-from runtime import binance_exec_config
-from runtime import build_strategy
-from runtime import cache_config
-from runtime import load_settings
-from runtime import make_instruments
-from runtime import proxy_url
+from external.external_signal import EXTERNAL_SIGNAL_CLIENT_NAME
+from external.external_signal import ExternalSignalDataClientConfig
+from external.external_signal import ExternalSignalLiveDataClientFactory
+from utils.binance_clients import BINANCE_CLIENT_NAME
+from utils.binance_clients import binance_data_config
+from utils.binance_clients import binance_exec_config
+from utils.binance_clients import cache_config
+from utils.config_loader import load_settings
+from utils.config_loader import proxy_url
+from utils.instrument_factory import make_instruments
+from utils.strategy_factory import build_strategy
 
 # 为当前 set 构建 Binance live/testnet node。
-def build_live_node(settings: dict) -> tuple[TradingNode, bool]:
+def build_live_node(settings: dict) -> TradingNode:
     exec_config = binance_exec_config(settings)
 
     trade_config = TradingNodeConfig(
@@ -28,18 +31,22 @@ def build_live_node(settings: dict) -> tuple[TradingNode, bool]:
         logging=LoggingConfig(log_level="INFO", log_colors=True),
         data_clients={
             BINANCE_CLIENT_NAME: binance_data_config(settings),
+            EXTERNAL_SIGNAL_CLIENT_NAME: ExternalSignalDataClientConfig(
+                host=settings["external_signal"]["host"],
+                port=int(settings["external_signal"]["port"]),
+            ),
         },
-        exec_clients={BINANCE_CLIENT_NAME: exec_config} if exec_config is not None else {},
+        exec_clients={BINANCE_CLIENT_NAME: exec_config},
     )
 
     node = TradingNode(config=trade_config)
 
     node.add_data_client_factory(BINANCE_CLIENT_NAME, BinanceLiveDataClientFactory)
-    if exec_config is not None:
-        node.add_exec_client_factory(BINANCE_CLIENT_NAME, BinanceLiveExecClientFactory)
-        node.trader.add_strategy(build_strategy(settings))
+    node.add_data_client_factory(EXTERNAL_SIGNAL_CLIENT_NAME, ExternalSignalLiveDataClientFactory)
+    node.add_exec_client_factory(BINANCE_CLIENT_NAME, BinanceLiveExecClientFactory)
+    node.trader.add_strategy(build_strategy(settings))
     node.build()
-    return node, exec_config is not None
+    return node
 
 
 # 使用 NT node 自己的事件循环，避免和外部 asyncio loop 冲突。
@@ -53,7 +60,7 @@ def run_for_seconds(node: TradingNode, seconds: int) -> None:
 def main(config_name: str | None = None) -> None:
     selected = (sys.argv[1] if len(sys.argv) > 1 else None) or config_name
     settings = load_settings(selected)
-    node, has_exec_keys = build_live_node(settings)
+    node = build_live_node(settings)
     print(
         json.dumps(
             {
@@ -62,20 +69,15 @@ def main(config_name: str | None = None) -> None:
                 "account_type": settings["live"]["account_type"],
                 "instruments": [str(instrument.id) for instrument in make_instruments(settings)],
                 "proxy_url": proxy_url(settings),
-                "has_exec_keys": has_exec_keys,
             },
             indent=2,
         ),
     )
 
-    if has_exec_keys:
-        run_for_seconds(node, int(settings["live"]["run_seconds"]))
-    else:
-        print("live_node_built=ok")
-        print("exec_keys_missing=true")
-        print("not_started=true")
+    run_for_seconds(node, int(settings["live"]["run_seconds"]))
     node.dispose()
 
 
 if __name__ == "__main__":
-    main()
+    # external_stg_1
+    main("external_stg_1")

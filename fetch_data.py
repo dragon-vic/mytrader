@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import sys
 
-from runtime import ensure_dirs
-from runtime import fetch_ohlcv
-from runtime import load_settings
-from runtime import market_configs
-from runtime import raw_ohlcv_path
-from runtime import save_ohlcv
+from utils.config_loader import ensure_dirs
+from utils.config_loader import load_settings
+from utils.config_loader import market_configs
+from utils.market_data import fetch_ohlcv
+from utils.market_data import raw_ohlcv_path
+from utils.market_data import save_ohlcv
 
 
 # 命令行参数优先；没有命令行参数时才用 main(...) 传入的 set。
