@@ -1,0 +1,12 @@
+# 常改：交易对、周期和数据量。
+market:
+  symbol: ORCA/USDT                   # 交易对
+  timeframe: 1m                      # K 线周期
+  limit: 1000                        # 每批拉取数量
+  batches: 5                         # 拉取批数
+
+
+# 常改：策略和参数。
+strategy:
+  name: funding                 # 策略名，会派生 module/class/config_class
+  trade_size: "10"                # 每次下单数量，BTC 合约数量

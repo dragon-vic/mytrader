@@ -40,6 +40,8 @@ For this project, environment, Conda, system directories, global config, and net
 - Put strategy/run-level values such as strategy params, market list, instrument precision/limits/fees, backtest account settings, and live account settings in each strategy set YAML.
 - `runtime.py` loads `config/global.yaml` first, then recursively overlays the selected strategy set. Strategy set values override global values when keys overlap.
 - `live.py` may register shared data clients such as the external signal client for every node; strategies that need them subscribe, strategies that do not need them ignore them.
+- Reports are stored as `reports/{run_type}/{config_name}`. Backtest writes final reports after the run; live writes fills immediately from `OrderFilled` events and writes final order/position snapshots after the run.
+- Strategies must not import report-writing utilities. Live report writing belongs beside the node/trader setup and should subscribe to `events.order.{strategy_id}` through `Trader`.
 - In set files under `config/`, put frequently changed strategy, market, backtest, and live run parameters near the top; keep stable instrument and project plumbing near the bottom.
 - Entry `main(config_name=None)` functions should let CLI config names override function arguments; function arguments are only the fallback for IDE runs without CLI args.
 - Do not add defensive guards or fallback checks that duplicate NautilusTrader's normal event guarantees. Keep strategy callbacks close to NT examples unless there is a specific observed failure.

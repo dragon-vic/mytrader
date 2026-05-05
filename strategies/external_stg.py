@@ -14,8 +14,6 @@ from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.model.instruments import Instrument
 from nautilus_trader.trading.strategy import Strategy
 
-from utils.report_writer import write_trader_reports
-
 
 class ExternalStgConfig(StrategyConfig, frozen=True):
     instrument_id: InstrumentId

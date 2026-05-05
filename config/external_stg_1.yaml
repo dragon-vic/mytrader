@@ -19,7 +19,7 @@ market:
 # 常改：live 运行参数。
 live:
   environment: TESTNET               # TESTNET / LIVE
-  run_seconds: 300                   # live 运行秒数
+  run_seconds: 600                   # live 运行秒数
   account_type: USDT_FUTURES         # Binance U 本位合约账户
   api_key_env: BINANCE_FUTURES_TESTNET_API_KEY       # .env 里的 API key 变量名
   api_secret_env: BINANCE_FUTURES_TESTNET_API_SECRET # .env 里的 API secret 变量名

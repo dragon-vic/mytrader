@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import sys
 
 from nautilus_trader.adapters.binance.factories import BinanceLiveDataClientFactory
@@ -13,41 +12,42 @@ from external.data_engine import EXTERNAL_SIGNAL_CLIENT_NAME
 from external.data_engine import ExternalSignalDataClientConfig
 from external.data_engine import ExternalSignalLiveDataClientFactory
 from utils.binance_clients import BINANCE_CLIENT_NAME
-from utils.binance_clients import binance_data_config
-from utils.binance_clients import binance_exec_config
-from utils.binance_clients import cache_config
+from utils.binance_clients import BinanceConfigBuilder
 from utils.config_loader import load_settings
-from utils.config_loader import proxy_url
-from utils.instrument_factory import make_instruments
-from utils.report_writer import write_trader_reports
+from utils.report_writer import TraderReportWriter
 from utils.strategy_factory import build_strategy
 
-# 为当前 set 构建 Binance live/testnet node。
-def build_live_node(settings: dict) -> TradingNode:
-    exec_config = binance_exec_config(settings)
 
+# 为当前 set 构建 Binance live/testnet node，并挂上 live 成交落盘。
+def build_live_node(settings: dict) -> tuple[TradingNode, TraderReportWriter]:
+    binance = BinanceConfigBuilder(settings)
     trade_config = TradingNodeConfig(
         trader_id="TRADER-001",
-        cache=cache_config(settings),
+        cache=binance.cache_config(),
         logging=LoggingConfig(log_level="INFO", log_colors=True),
         data_clients={
-            BINANCE_CLIENT_NAME: binance_data_config(settings),
+            BINANCE_CLIENT_NAME: binance.data_config(),
             EXTERNAL_SIGNAL_CLIENT_NAME: ExternalSignalDataClientConfig(
                 host=settings["external_signal"]["host"],
                 port=int(settings["external_signal"]["port"]),
             ),
         },
-        exec_clients={BINANCE_CLIENT_NAME: exec_config},
+        exec_clients={BINANCE_CLIENT_NAME: binance.exec_config()},
     )
 
     node = TradingNode(config=trade_config)
-
     node.add_data_client_factory(BINANCE_CLIENT_NAME, BinanceLiveDataClientFactory)
     node.add_data_client_factory(EXTERNAL_SIGNAL_CLIENT_NAME, ExternalSignalLiveDataClientFactory)
     node.add_exec_client_factory(BINANCE_CLIENT_NAME, BinanceLiveExecClientFactory)
-    node.trader.add_strategy(build_strategy(settings))
+
+    strategy = build_strategy(settings)
+    node.trader.add_strategy(strategy)
+
+    report_writer = TraderReportWriter.from_settings(settings, "live")
+    report_writer.attach_live_fills(node.trader, strategy.id)
+
     node.build()
-    return node
+    return node, report_writer
 
 
 # 使用 NT node 自己的事件循环，避免和外部 asyncio loop 冲突。
@@ -61,13 +61,12 @@ def run_for_seconds(node: TradingNode, seconds: int) -> None:
 def main(config_name: str | None = None) -> None:
     selected = (sys.argv[1] if len(sys.argv) > 1 else None) or config_name
     settings = load_settings(selected)
-    node = build_live_node(settings)
+    node, report_writer = build_live_node(settings)
 
     run_for_seconds(node, int(settings["live"]["run_seconds"]))
-    write_trader_reports(node.trader, settings, "live")
+    report_writer.write_final_reports(node.trader, names=("orders", "positions"))
     node.dispose()
 
 
 if __name__ == "__main__":
-    # external_stg_1
-    main("external_stg_1")
+    main("funding")

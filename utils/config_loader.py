@@ -105,7 +105,7 @@ def ensure_dirs(settings: dict[str, Any]) -> None:
 
 # 返回当前 set 的报告目录。
 def reports_dir(settings: dict[str, Any]) -> Path:
-    return ROOT / settings["project"]["reports_dir"] / settings["project"]["config_name"]
+    return ROOT / settings["project"]["reports_dir"]
 
 
 # 返回当前 set 的市场列表；旧 set 只有 market，新 set 可以有 markets。
