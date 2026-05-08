@@ -44,7 +44,7 @@ def build_backtest_engine(settings: dict) -> BacktestEngine:
         engine.add_instrument(instrument)
     for market in store.markets:
         engine.add_data(store.load_bars(market))
-    engine.add_strategy(build_strategy(settings))
+    engine.add_strategy(build_strategy(settings, "backtest"))
     return engine
 
 

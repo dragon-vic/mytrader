@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import requests
 from nautilus_trader.adapters.binance.common.enums import BinanceAccountType
 from nautilus_trader.adapters.binance.common.enums import BinanceEnvironment
 from nautilus_trader.adapters.binance.common.enums import BinanceKlineInterval
@@ -91,6 +92,36 @@ class MarketDataStore:
         if market["exchange"].lower() != "binance":
             raise ValueError("This minimal project currently supports Binance only.")
         return asyncio.run(self.fetch_ohlcv_async(market))
+
+    # 拉取 set 里声明的额外行情数据，目前用于 funding rate。
+    def fetch_extra_data(self) -> list[Path]:
+        params = self.settings["strategy"].get("params", {})
+        paths = []
+        if "funding_csv_path" in params:
+            market = self.markets[0]
+            df = self.fetch_funding_rates(market, int(self.settings.get("data", {}).get("funding_limit", 1000)))
+            path = ROOT / params["funding_csv_path"]
+            self.save_funding_rates(df, path)
+            paths.append(path)
+        return paths
+
+    # 通过 Binance 官方 REST 拉取 U 本位永续资金费历史。
+    def fetch_funding_rates(self, market: dict[str, Any], limit: int) -> pd.DataFrame:
+        params = self.settings["strategy"].get("params", {})
+        proxy = proxy_url(self.settings)
+        response = requests.get(
+            f"{params.get('funding_api_base_url', 'https://fapi.binance.com')}/fapi/v1/fundingRate",
+            params={"symbol": self.factory.raw_symbol(market), "limit": limit},
+            proxies={"http": proxy, "https": proxy} if proxy else None,
+            timeout=10,
+        )
+        response.raise_for_status()
+        return pd.DataFrame(response.json()).sort_values("fundingTime")
+
+    # 保存 funding rate CSV，字段保持 Binance 原始命名，供策略直接读取。
+    def save_funding_rates(self, df: pd.DataFrame, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        df.to_csv(path, index=False)
 
     # 保存 OHLCV 到 CSV。
     def save_ohlcv(self, df: pd.DataFrame, path: Path) -> None:

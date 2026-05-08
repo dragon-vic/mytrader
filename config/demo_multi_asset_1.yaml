@@ -1,0 +1,56 @@
+# 常改：策略和参数。
+strategy:
+  name: demo_multi_asset             # 综合样例策略
+  trade_notional: "100"              # 每个品种每次下单名义金额
+  params:
+    fast_ema_period: 10              # 快 EMA
+    slow_ema_period: 30              # 慢 EMA
+    request_bars: true               # live 预热
+    warmup_days: 1                   # 预热天数
+    close_positions_on_stop: true    # 停止时平仓
+
+# 常改：多个交易对。
+markets:
+  - symbol: BTC/USDT
+    timeframe: 1m
+    limit: 1000
+    batches: 3
+  - symbol: ETH/USDT
+    timeframe: 1m
+    limit: 1000
+    batches: 3
+
+# 常改：live 运行参数。
+live:
+  environment: TESTNET
+  run_seconds: 300
+  account_type: USDT_FUTURES
+  api_key_env: BINANCE_FUTURES_TESTNET_API_KEY
+  api_secret_env: BINANCE_FUTURES_TESTNET_API_SECRET
+
+# 常改：回测资金和账户。
+backtest:
+  starting_balance: "100000 USDT"
+  account_type: MARGIN
+  oms_type: NETTING
+  log_level: INFO
+  log_bypass: true
+
+# 低频：回测用通用永续合约精度。
+instrument:
+  kind: perpetual
+  settlement_currency: USDT
+  is_inverse: false
+  price_precision: 2
+  size_precision: 3
+  price_increment: "0.01"
+  size_increment: "0.001"
+  multiplier: "1"
+  min_quantity: "0.001"
+  max_quantity: "10000000"
+  min_notional: "5"
+  max_price: "10000000"
+  margin_init: "1"
+  margin_maint: "1"
+  maker_fee: "0.0002"
+  taker_fee: "0.0005"

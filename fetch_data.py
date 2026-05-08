@@ -24,6 +24,9 @@ def main(config_name: str | None = None) -> None:
         print(f"start={df['timestamp'].iloc[0]}")
         print(f"end={df['timestamp'].iloc[-1]}")
 
+    for path in store.fetch_extra_data():
+        print(f"saved={path}")
+
 
 if __name__ == "__main__":
     main()
