@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import sys
-
 from nautilus_trader.backtest.engine import BacktestEngine
 from nautilus_trader.config import BacktestEngineConfig
 from nautilus_trader.config import LoggingConfig
@@ -13,6 +11,7 @@ from nautilus_trader.model.objects import Money
 from utils.binance_clients import BinanceConfigBuilder
 from utils.config_loader import load_settings
 from utils.market_data import MarketDataStore
+from utils.report_writer import prepare_report_dir
 from utils.report_writer import print_backtest_summary
 from utils.report_writer import write_backtest_result
 from utils.report_writer import write_trader_reports
@@ -55,15 +54,11 @@ def write_reports(engine: BacktestEngine, result, settings: dict) -> None:
     print_backtest_summary(payload)
 
 
-# 命令行参数优先；没有命令行参数时才用 main(...) 传入的 set。
-def main(config_name: str | None = None) -> None:
-    selected = (sys.argv[1] if len(sys.argv) > 1 else None) or config_name
-    settings = load_settings(selected)
+# 运行回测，由 run.py 负责传入配置名。
+def main(config_name: str) -> None:
+    settings = load_settings(config_name)
+    prepare_report_dir(settings, "backtest")
     engine = build_backtest_engine(settings)
     engine.run()
     write_reports(engine, engine.get_result(), settings)
     engine.dispose()
-
-
-if __name__ == "__main__":
-    main()

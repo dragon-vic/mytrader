@@ -18,42 +18,41 @@ FILL_COLUMNS = [
     "last_qty",
     "last_px",
     "commission",
-    "client_order_id",
     "position_id",
+    "client_order_id",
 ]
 
 ACCOUNT_COLUMNS = [
     "ts_event",
-    "account_id",
-    "account_type",
-    "base_currency",
     "currency",
     "total",
-    "locked",
     "free",
-    "is_reported",
+    "locked",
     "event_type",
     "info_type",
     "info_reason",
     "info",
+    "account_id",
+    "account_type",
+    "base_currency",
+    "is_reported",
 ]
 
 POSITION_COLUMNS = [
     "ts_event",
-    "event_type",
     "instrument_id",
-    "position_id",
-    "side",
-    "quantity",
-    "last_qty",
-    "last_px",
+    "event_side",
+    "fill_quantity",
+    "fill_price",
     "realized_pnl",
     "adjustment_type",
     "quantity_change",
     "pnl_change",
     "reason",
+    "event_type",
     "account_id",
     "strategy_id",
+    "position_id",
 ]
 
 
@@ -113,6 +112,9 @@ class DataRecorder(Actor):
         row["quantity_change"] = row.get("quantity_change", "")
         row["pnl_change"] = row.get("pnl_change", "")
         row["reason"] = row.get("reason", "")
+        row["event_side"] = row.get("side") or row.get("order_side") or row.get("entry", "")
+        row["fill_quantity"] = row.get("last_qty", "")
+        row["fill_price"] = row.get("last_px", "")
         self._append_csv("position_events.csv", {column: row.get(column) for column in POSITION_COLUMNS})
 
     # 追加一行 CSV，写完立即关闭文件，方便运行中读取。

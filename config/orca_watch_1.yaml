@@ -1,38 +1,40 @@
 # 常改：交易对和行情周期。
 market:
   symbol: ORCA/USDT                 # Binance U 本位 ORCA 永续
-  timeframe: 1m                     # bar 回测备用，live 默认用 tick
+  timeframe: 1m                     # live 订阅 1m bar
   limit: 1000                       # 拉取 K 线数量
   batches: 1                        # 拉取批次数
 
 # 常改：策略参数。
 strategy:
-  name: orca_short                  # 会自动推导 strategies.orca_short / OrcaShort / OrcaShortConfig
-  trade_notional: "1000"            # 目标开空名义金额，单位 USDT
+  name: orca_watch                  # 自动推导 strategies.orca_watch / OrcaWatch / OrcaWatchConfig
+  trade_size: "0"                   # 只为兼容构建入口；本策略不下单，不使用这个值
   params:
-    use_trade_ticks: true           # live 用成交 tick 触发启动逻辑
-    close_positions_on_stop: true   # 正常停止或外部信号停止时平仓
+    request_bars: true              # 启动时请求一段历史 1m bar
+    warmup_minutes: 10              # 请求最近多少分钟历史 bar
+    subscribe_ticks: false          # 默认只看 1m bar；需要 tick 时改 true
+    subscribe_external: true        # 订阅外部信号，只记录不交易
 
 # 常改：live 运行参数。
 live:
-  environment: TESTNET              # TESTNET / LIVE
+  environment: TESTNET              # 启动时会被 live.py 的模式选择覆盖
   account_type: USDT_FUTURES        # Binance U 本位合约账户
-  api_key_env: BINANCE_FUTURES_TESTNET_API_KEY       # .env 里的 API key 变量名
-  api_secret_env: BINANCE_FUTURES_TESTNET_API_SECRET # .env 里的 API secret 变量名
-  log_level_file: INFO              # live_raw.log 文件日志级别
+  api_key_env: BINANCE_FUTURES_TESTNET_API_KEY       # 测试网 API key 变量名
+  api_secret_env: BINANCE_FUTURES_TESTNET_API_SECRET # 测试网 API secret 变量名
+  log_level_file: INFO              # 文件日志级别
 
-# 常改：回测账户参数。
+# 常改：回测账户参数；本策略主要用于 live 观察。
 backtest:
   starting_balance: "100000 USDT"   # 回测初始资金
   account_type: MARGIN              # NT 回测账户类型
   oms_type: NETTING                 # 净持仓模式
   log_level: INFO                   # NT 控制台日志级别
-  log_bypass: true                  # 回测批量跑时减少完整 NT 日志
+  log_bypass: true                  # 回测时减少完整 NT 日志
 
 # 低频：ORCAUSDT 永续合约精度和限制。
 instrument:
   kind: perpetual                   # U 本位永续合约
-  settlement_currency: USDT         # 结算币
+  settlement_currency: USDT         # 结算币种
   is_inverse: false                 # false 表示 U 本位正向合约
   price_precision: 7                # Binance ORCAUSDT pricePrecision
   size_precision: 1                 # Binance ORCAUSDT quantityPrecision
