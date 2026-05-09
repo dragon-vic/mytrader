@@ -5,6 +5,6 @@ __pycache__/
 data/
 reports/
 logs/
-
+.gitignore
 .venv/
 .ipynb_checkpoints/
