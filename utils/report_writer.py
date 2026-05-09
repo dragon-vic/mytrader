@@ -10,135 +10,16 @@ import pandas as pd
 from rich.console import Console
 from rich.table import Table
 
+from utils.arguments import EMPTY_SUMMARY
+from utils.arguments import LIVE_REPORT_FILE
+from utils.arguments import LIVE_RESULT_FILES
+from utils.arguments import OBSOLETE_REPORT_FILES
+from utils.arguments import REPORT_COLUMNS
+from utils.arguments import REPORT_FILES
+from utils.arguments import SUMMARY_FILE
+from utils.arguments import SUMMARY_LABELS
 from utils.config_loader import ROOT
 from utils.report_labels import to_chinese_columns
-
-
-REPORT_COLUMNS = {
-    "orders": [
-        "ts_init",
-        "ts_last",
-        "instrument_id",
-        "side",
-        "quantity",
-        "filled_qty",
-        "avg_px",
-        "commissions",
-        "status",
-        "position_id",
-        "client_order_id",
-    ],
-    "fills": [
-        "ts_event",
-        "instrument_id",
-        "order_side",
-        "last_qty",
-        "last_px",
-        "commission",
-        "position_id",
-        "client_order_id",
-    ],
-    "positions": [
-        "ts_opened",
-        "ts_closed",
-        "instrument_id",
-        "entry",
-        "quantity",
-        "peak_qty",
-        "avg_px_open",
-        "avg_px_close",
-        "realized_pnl",
-        "realized_return",
-        "commissions",
-        "duration_ns",
-        "position_id",
-        "opening_order_id",
-        "closing_order_id",
-    ],
-    "position_events": [
-        "ts_event",
-        "instrument_id",
-        "event_side",
-        "fill_quantity",
-        "fill_price",
-        "realized_pnl",
-        "adjustment_type",
-        "quantity_change",
-        "pnl_change",
-        "reason",
-        "event_type",
-        "account_id",
-        "strategy_id",
-        "position_id",
-    ],
-}
-
-REPORT_FILES = {
-    "orders": "orders_aggregate.csv",
-    "fills": "fills.csv",
-    "positions": "positions_aggregate.csv",
-}
-
-LIVE_REPORT_FILE = "live_report_aggregate.csv"
-SUMMARY_FILE = "summary_aggregate.md"
-
-LIVE_RESULT_FILES = (
-    "fills.csv",
-    "account_changes.csv",
-    "position_events.csv",
-    "orders.csv",
-    "orders_aggregate.csv",
-    "positions.csv",
-    "positions_aggregate.csv",
-    "live_report.csv",
-    "live_report_aggregate.csv",
-    "summary.md",
-    "summary_aggregate.md",
-    "live.log",
-    "live_raw.log",
-)
-
-OBSOLETE_REPORT_FILES = (
-    "account_states.csv",
-    "trades.csv",
-    "summary.csv",
-    "fills_clean.csv",
-    "funding_decisions.csv",
-)
-
-EMPTY_SUMMARY = {
-    "trades": 0,
-    "win_rate": 0.0,
-    "realized_pnl": 0.0,
-    "estimated_funding_income": 0.0,
-    "actual_funding_income": 0.0,
-    "net_with_funding": 0.0,
-    "avg_trade_net": 0.0,
-    "best_trade_net": 0.0,
-    "worst_trade_net": 0.0,
-    "gross_profit": 0.0,
-    "gross_loss": 0.0,
-    "profit_factor": "",
-    "total_commissions": 0.0,
-    "avg_duration_min": 0.0,
-}
-
-SUMMARY_LABELS = {
-    "trades": "交易次数",
-    "win_rate": "胜率",
-    "realized_pnl": "已实现盈亏",
-    "estimated_funding_income": "预估资金费收入",
-    "actual_funding_income": "实际资金费收入",
-    "net_with_funding": "含资金费净收益",
-    "avg_trade_net": "单笔平均净收益",
-    "best_trade_net": "最佳单笔净收益",
-    "worst_trade_net": "最差单笔净收益",
-    "gross_profit": "盈利交易合计",
-    "gross_loss": "亏损交易合计",
-    "profit_factor": "盈利因子",
-    "total_commissions": "总手续费",
-    "avg_duration_min": "平均持仓分钟",
-}
 
 
 # 返回当前 set 在 backtest/live 下的报告目录。
@@ -183,7 +64,7 @@ class TraderReportWriter:
                 path.unlink()
 
     # 保存 NT trader 在运行结束后生成的订单、成交和持仓报告。
-    def write_final_reports(self, trader, names=("orders", "fills", "positions")) -> None:
+    def write_final_reports(self, trader, names=("orders", "fills", "positions", "accounts")) -> None:
         self.clear_files(
             (
                 "orders.csv",
@@ -191,6 +72,7 @@ class TraderReportWriter:
                 "fills.csv",
                 "positions.csv",
                 "positions_aggregate.csv",
+                "accounts_aggregate.csv",
                 "position_events.csv",
                 "live_report.csv",
                 "live_report_aggregate.csv",
@@ -206,7 +88,7 @@ class TraderReportWriter:
         }
         reports = {}
         for name in names:
-            df = report_fns[name]()
+            df = self.account_report(trader) if name == "accounts" else report_fns[name]()
             if not df.empty:
                 reports[name] = report_columns(name, df)
                 self.write_csv(reports[name], REPORT_FILES[name])
@@ -215,6 +97,11 @@ class TraderReportWriter:
         self.localize_runtime_csv("account_changes.csv")
         self.localize_runtime_csv("strategy_events.csv")
         self.localize_runtime_csv("funding_fees.csv")
+
+    # 从 NT cache 的全部账户生成最终账户快照。
+    def account_report(self, trader) -> pd.DataFrame:
+        account = trader._cache.accounts()[0]
+        return trader.generate_account_report(account_id=account.id)
 
     # 写出给人看的 CSV 时，最后一步统一改中文列名。
     def write_csv(self, df: pd.DataFrame, filename: str) -> None:
@@ -432,16 +319,205 @@ def write_backtest_result(result, settings: dict[str, Any]) -> dict[str, Any]:
 
 
 # 打印回测核心摘要。
-def print_backtest_summary(payload: dict[str, Any]) -> None:
-    table = Table(title="Backtest Summary")
-    table.add_column("Metric")
-    table.add_column("Value")
-    for key in ("iterations", "total_events", "total_orders", "total_positions", "elapsed_time"):
-        table.add_row(key, str(payload.get(key)))
-    for currency, stats in payload.get("stats_pnls", {}).items():
-        table.add_row(f"{currency} PnL", str(stats.get("PnL (total)")))
-        table.add_row(f"{currency} Win Rate", str(stats.get("Win Rate")))
-    Console().print(table)
+def print_backtest_summary(payload: dict[str, Any], settings: dict[str, Any]) -> None:
+    output_dir = run_reports_dir(settings, "backtest")
+    elapsed_days = float(payload.get("elapsed_time") or 0) / 86400
+    console = Console()
+    console.print(build_backtest_overview_table(payload, settings))
+    for table in (
+        build_trade_stats_table(output_dir, elapsed_days),
+        build_instrument_stats_table(output_dir),
+        build_order_stats_table(output_dir),
+    ):
+        if table is not None:
+            console.print(table)
+
+
+# 用 NT 回测结果组装总体概览表。
+def build_backtest_overview_table(payload: dict[str, Any], settings: dict[str, Any]) -> Table:
+    table = Table(title="回测总览")
+    table.add_column("指标")
+    table.add_column("数值", justify="right")
+
+    markets = settings.get("markets") or [settings["market"]]
+    symbols = ", ".join(market["instrument_symbol"] for market in markets)
+    timeframes = ", ".join(sorted({market["timeframe"] for market in markets}))
+    stats_pnls = payload.get("stats_pnls", {})
+    currency = next(iter(stats_pnls), "")
+    pnl_stats = stats_pnls.get(currency, {})
+    return_stats = payload.get("stats_returns", {})
+
+    rows = [
+        ("配置名", settings["project"]["config_name"]),
+        ("策略名", settings["strategy"]["name"]),
+        ("标的", symbols),
+        ("K线周期", timeframes),
+        ("回测开始", format_timestamp_ns(payload.get("backtest_start"))),
+        ("回测结束", format_timestamp_ns(payload.get("backtest_end"))),
+        ("回测天数", format_number(float(payload.get("elapsed_time") or 0) / 86400)),
+        ("初始资金", settings["backtest"]["starting_balance"]),
+        ("总收益", format_number(pnl_stats.get("PnL (total)"), currency)),
+        ("总收益率", format_number(pnl_stats.get("PnL% (total)"), "%")),
+        ("胜率", format_percent(pnl_stats.get("Win Rate"))),
+        ("最大盈利单", format_number(pnl_stats.get("Max Winner"), currency)),
+        ("最大亏损单", format_number(pnl_stats.get("Max Loser"), currency)),
+        ("期望收益", format_number(pnl_stats.get("Expectancy"), currency)),
+        ("盈利因子", format_number(return_stats.get("Profit Factor"))),
+        ("Sharpe", format_number(return_stats.get("Sharpe Ratio (252 days)"))),
+        ("Sortino", format_number(return_stats.get("Sortino Ratio (252 days)"))),
+        ("迭代次数", format_int(payload.get("iterations"))),
+        ("事件数", format_int(payload.get("total_events"))),
+        ("订单数", format_int(payload.get("total_orders"))),
+        ("持仓数", format_int(payload.get("total_positions"))),
+    ]
+    for label, value in rows:
+        table.add_row(label, value)
+    return table
+
+
+# 从持仓汇总表组装交易统计表。
+def build_trade_stats_table(output_dir: Path, elapsed_days: float) -> Table | None:
+    positions = read_report_csv(output_dir, "positions_aggregate.csv")
+    if positions.empty:
+        return None
+
+    pnl = positions["已实现盈亏"].map(money_to_float)
+    fees = positions["手续费合计"].map(commissions_to_float)
+    duration_min = pd.to_numeric(positions["持仓纳秒"], errors="coerce") / 60_000_000_000
+    wins = pnl[pnl > 0]
+    losses = pnl[pnl < 0]
+    gross_profit = wins.sum()
+
+    table = Table(title="交易统计")
+    table.add_column("指标")
+    table.add_column("数值", justify="right")
+    rows = [
+        ("已完成交易数", format_int(len(positions))),
+        ("多单数量", format_int((positions["开仓方向"] == "BUY").sum())),
+        ("空单数量", format_int((positions["开仓方向"] == "SELL").sum())),
+        ("平均每日交易数", format_number(len(positions) / elapsed_days if elapsed_days else 0)),
+        ("胜率", format_percent((pnl > 0).mean())),
+        ("净收益", format_number(pnl.sum())),
+        ("平均单笔收益", format_number(pnl.mean())),
+        ("单笔收益中位数", format_number(pnl.median())),
+        ("盈利单平均收益", format_number(wins.mean())),
+        ("亏损单平均亏损", format_number(losses.mean())),
+        ("最大盈利", format_number(pnl.max())),
+        ("最大亏损", format_number(pnl.min())),
+        ("总手续费", format_number(fees.sum())),
+        ("手续费/毛利润", format_percent(fees.sum() / gross_profit if gross_profit else 0)),
+        ("平均持仓分钟", format_number(duration_min.mean())),
+        ("最长持仓分钟", format_number(duration_min.max())),
+    ]
+    for label, value in rows:
+        table.add_row(label, value)
+    return table
+
+
+# 从持仓汇总表按标的聚合统计。
+def build_instrument_stats_table(output_dir: Path) -> Table | None:
+    positions = read_report_csv(output_dir, "positions_aggregate.csv")
+    if positions.empty:
+        return None
+
+    data = positions.copy()
+    data["净收益"] = data["已实现盈亏"].map(money_to_float)
+    data["手续费"] = data["手续费合计"].map(commissions_to_float)
+
+    table = Table(title="标的统计")
+    for column, justify in (
+        ("标的", "left"),
+        ("交易数", "right"),
+        ("胜率", "right"),
+        ("净收益", "right"),
+        ("平均收益", "right"),
+        ("最大盈利", "right"),
+        ("最大亏损", "right"),
+        ("手续费", "right"),
+    ):
+        table.add_column(column, justify=justify)
+
+    for instrument, group in data.groupby("标的"):
+        pnl = group["净收益"]
+        table.add_row(
+            str(instrument),
+            format_int(len(group)),
+            format_percent((pnl > 0).mean()),
+            format_number(pnl.sum()),
+            format_number(pnl.mean()),
+            format_number(pnl.max()),
+            format_number(pnl.min()),
+            format_number(group["手续费"].sum()),
+        )
+    return table
+
+
+# 从订单和成交表组装执行统计表。
+def build_order_stats_table(output_dir: Path) -> Table | None:
+    orders = read_report_csv(output_dir, "orders_aggregate.csv")
+    fills = read_report_csv(output_dir, "fills.csv")
+    if orders.empty and fills.empty:
+        return None
+
+    table = Table(title="订单执行统计")
+    table.add_column("指标")
+    table.add_column("数值", justify="right")
+
+    if not orders.empty:
+        filled_qty = pd.to_numeric(orders["已成交数量"], errors="coerce").fillna(0)
+        table.add_row("订单总数", format_int(len(orders)))
+        table.add_row("有成交订单数", format_int((filled_qty > 0).sum()))
+        table.add_row("已完成订单数", format_int((orders["订单状态"] == "FILLED").sum()))
+        table.add_row("已取消订单数", format_int((orders["订单状态"] == "CANCELED").sum()))
+        table.add_row("已拒绝订单数", format_int((orders["订单状态"] == "REJECTED").sum()))
+
+    if not fills.empty:
+        qty = pd.to_numeric(fills["成交数量"], errors="coerce").fillna(0)
+        price = pd.to_numeric(fills["成交价格"], errors="coerce")
+        fees = fills["手续费"].map(money_to_float)
+        table.add_row("成交记录数", format_int(len(fills)))
+        table.add_row("买入成交数", format_int((fills["订单方向"] == "BUY").sum()))
+        table.add_row("卖出成交数", format_int((fills["订单方向"] == "SELL").sum()))
+        table.add_row("成交数量合计", format_number(qty.sum()))
+        table.add_row("平均成交价", format_number(price.mean()))
+        table.add_row("成交手续费", format_number(fees.sum()))
+    return table
+
+
+# 读取报告 CSV，文件不存在表示本次没有生成这类报告。
+def read_report_csv(output_dir: Path, filename: str) -> pd.DataFrame:
+    path = output_dir / filename
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_csv(path)
+
+
+# 把纳秒时间戳转成北京时间字符串。
+def format_timestamp_ns(value) -> str:
+    if value is None:
+        return ""
+    return pd.to_datetime(value, unit="ns", utc=True).tz_convert("Asia/Shanghai").strftime("%Y-%m-%d %H:%M:%S")
+
+
+# 终端表格里的数字统一保留两位小数。
+def format_number(value, suffix: str = "") -> str:
+    if value is None or pd.isna(value):
+        return ""
+    return f"{float(value):.2f}{suffix}"
+
+
+# 终端表格里的整数不显示小数位。
+def format_int(value) -> str:
+    if value is None or pd.isna(value):
+        return ""
+    return f"{int(value)}"
+
+
+# NT 胜率这类字段是 0-1 小数，终端显示成百分比。
+def format_percent(value) -> str:
+    if value is None or pd.isna(value):
+        return ""
+    return f"{float(value) * 100:.2f}%"
 
 
 # 从 Money 字符串里提取数字部分。

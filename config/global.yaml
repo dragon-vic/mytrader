@@ -17,11 +17,16 @@ external_signal:
 
 # 常改：live 运行参数。
 live:
-  environment: TESTNET               # TESTNET / LIVE
-  run_seconds: 8640000                  # live 运行秒数
   account_type: USDT_FUTURES         # Binance U 本位合约账户
-  api_key_env: BINANCE_FUTURES_TESTNET_API_KEY       # .env 里的 API key 变量名
-  api_secret_env: BINANCE_FUTURES_TESTNET_API_SECRET # .env 里的 API secret 变量名
+  modes:
+    testnet:
+      environment: TESTNET           # Binance 测试网
+      api_key_env: BINANCE_FUTURES_TESTNET_API_KEY
+      api_secret_env: BINANCE_FUTURES_TESTNET_API_SECRET
+    live:
+      environment: LIVE              # Binance 实盘
+      api_key_env: BINANCE_FUTURES_API_KEY
+      api_secret_env: BINANCE_FUTURES_API_SECRET
 
 # 低频：当前 set 的永续合约 instrument 精度和限制。
 instrument:

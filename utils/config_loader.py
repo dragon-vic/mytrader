@@ -5,8 +5,9 @@ from typing import Any
 
 import yaml
 
+from utils.arguments import DEFAULT_CONFIG_NAME
+
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_CONFIG_NAME = "funding"
 
 
 # 加载一个具名 set，让每个策略保留自己的市场和参数。

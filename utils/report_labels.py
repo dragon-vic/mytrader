@@ -20,6 +20,7 @@ COLUMN_LABELS = {
     "locked": "冻结余额",
     "free": "可用余额",
     "is_reported": "交易所上报",
+    "reported": "交易所上报",
     "event_type": "事件类型",
     "info_type": "附加类型",
     "info_reason": "附加原因",

@@ -48,7 +48,9 @@ For this project, environment, Conda, system directories, global config, and net
 - Do not catch exceptions to hide or convert errors during normal development. Let errors surface, then fix the underlying cause.
 - Do not return `None` as an error state that forces callers to branch. For required config, credentials, and dependencies, access them directly and let missing values raise.
 - Confirm with the user before making functional behavior changes. Small formatting, comments, and documentation-like local cleanup can be done directly.
+- Do not change large framework or NautilusTrader lifecycle logic for a small local requirement such as report writing, formatting, or convenience output. Solve small requirements in the narrow module that owns them, and ask before touching core run/build/stop flows.
 - Before touching Conda, global config, system directories, or live-trading credentials, explain the action and wait for explicit confirmation.
+- On Windows PowerShell 5, bare `Get-Content` can display normal UTF-8 Chinese files as mojibake. When reading files that may contain Chinese text, use `Get-Content -Encoding UTF8` or Python `Path.read_text(encoding="utf-8")`. Do not treat display mojibake as file corruption, and do not add BOM or rewrite file encodings unless the user explicitly asks.
 
 ## Simplicity First
 

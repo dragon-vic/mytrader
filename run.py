@@ -8,11 +8,8 @@ from pathlib import Path
 import backtest
 import live
 
-
-MODE_OPTIONS = [
-    ("模拟盘", "testnet"),("回测", "backtest"),("实盘", "live"),
-]
-
+from utils.arguments import MODE_OPTIONS
+from utils.arguments import RUN_MODES
 
 
 # 返回 config 目录下可运行的 set 名称。
@@ -49,8 +46,8 @@ def choose(title: str, options: list[str]) -> str:
 
 # 把命令行模式名转换成内部模式。
 def parse_mode(raw: str) -> str:
-    if raw not in ("backtest", "testnet", "live"):
-        raise ValueError("mode must be one of: backtest, testnet, live")
+    if raw not in RUN_MODES:
+        raise ValueError(f"mode must be one of: {', '.join(RUN_MODES)}")
     return raw
 
 

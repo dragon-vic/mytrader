@@ -10,50 +10,15 @@ from nautilus_trader.model.events import AccountState
 from nautilus_trader.model.events import OrderFilled
 from nautilus_trader.model.events import PositionEvent
 
-
-FILL_COLUMNS = [
-    "ts_event",
-    "instrument_id",
-    "order_side",
-    "last_qty",
-    "last_px",
-    "commission",
-    "position_id",
-    "client_order_id",
-]
-
-ACCOUNT_COLUMNS = [
-    "ts_event",
-    "currency",
-    "total",
-    "free",
-    "locked",
-    "event_type",
-    "info_type",
-    "info_reason",
-    "info",
-    "account_id",
-    "account_type",
-    "base_currency",
-    "is_reported",
-]
-
-POSITION_COLUMNS = [
-    "ts_event",
-    "instrument_id",
-    "event_side",
-    "fill_quantity",
-    "fill_price",
-    "realized_pnl",
-    "adjustment_type",
-    "quantity_change",
-    "pnl_change",
-    "reason",
-    "event_type",
-    "account_id",
-    "strategy_id",
-    "position_id",
-]
+from utils.arguments import ACCOUNT_CHANGES_FILE
+from utils.arguments import ACCOUNT_COLUMNS
+from utils.arguments import EVENT_ACCOUNT_TOPIC
+from utils.arguments import EVENT_ORDER_TOPIC
+from utils.arguments import EVENT_POSITION_TOPIC
+from utils.arguments import FILLS_FILE
+from utils.arguments import FILL_COLUMNS
+from utils.arguments import POSITION_COLUMNS
+from utils.arguments import POSITION_EVENTS_FILE
 
 
 class DataRecorderConfig(ActorConfig, frozen=True):
@@ -68,22 +33,22 @@ class DataRecorder(Actor):
     # 启动时订阅所有 live 事件，后续由 actor 统一落盘。
     def on_start(self) -> None:
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.msgbus.subscribe("events.order.*", self.handle_order_event)
-        self.msgbus.subscribe("events.position.*", self.handle_position_event)
-        self.msgbus.subscribe("events.account.*", self.handle_account_event)
+        self.msgbus.subscribe(EVENT_ORDER_TOPIC, self.handle_order_event)
+        self.msgbus.subscribe(EVENT_POSITION_TOPIC, self.handle_position_event)
+        self.msgbus.subscribe(EVENT_ACCOUNT_TOPIC, self.handle_account_event)
 
     # 停止时退订 actor 自己注册的事件。
     def on_stop(self) -> None:
-        self.msgbus.unsubscribe("events.order.*", self.handle_order_event)
-        self.msgbus.unsubscribe("events.position.*", self.handle_position_event)
-        self.msgbus.unsubscribe("events.account.*", self.handle_account_event)
+        self.msgbus.unsubscribe(EVENT_ORDER_TOPIC, self.handle_order_event)
+        self.msgbus.unsubscribe(EVENT_POSITION_TOPIC, self.handle_position_event)
+        self.msgbus.unsubscribe(EVENT_ACCOUNT_TOPIC, self.handle_account_event)
 
     # 只把真实成交实时写入 fills.csv。
     def handle_order_event(self, event) -> None:
         if isinstance(event, OrderFilled):
             row = OrderFilled.to_dict(event)
             row["ts_event"] = pd.to_datetime(row["ts_event"], unit="ns", utc=True)
-            self._append_csv("fills.csv", {column: row.get(column) for column in FILL_COLUMNS})
+            self._append_csv(FILLS_FILE, {column: row.get(column) for column in FILL_COLUMNS})
 
     # 把账户余额变化展开成一币种一行，并保留 info 字段用于判断 funding。
     def handle_account_event(self, event: AccountState) -> None:
@@ -101,7 +66,7 @@ class DataRecorder(Actor):
                 "info_reason": info_reason,
                 "info": json.dumps(info, ensure_ascii=False),
             }
-            self._append_csv("account_changes.csv", {column: row.get(column) for column in ACCOUNT_COLUMNS})
+            self._append_csv(ACCOUNT_CHANGES_FILE, {column: row.get(column) for column in ACCOUNT_COLUMNS})
 
     # 把 live 仓位事件落盘，方便和账户变化对照。
     def handle_position_event(self, event: PositionEvent) -> None:
@@ -115,7 +80,7 @@ class DataRecorder(Actor):
         row["event_side"] = row.get("side") or row.get("order_side") or row.get("entry", "")
         row["fill_quantity"] = row.get("last_qty", "")
         row["fill_price"] = row.get("last_px", "")
-        self._append_csv("position_events.csv", {column: row.get(column) for column in POSITION_COLUMNS})
+        self._append_csv(POSITION_EVENTS_FILE, {column: row.get(column) for column in POSITION_COLUMNS})
 
     # 追加一行 CSV，写完立即关闭文件，方便运行中读取。
     def _append_csv(self, filename: str, row: dict) -> None:

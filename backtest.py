@@ -51,7 +51,7 @@ def build_backtest_engine(settings: dict) -> BacktestEngine:
 def write_reports(engine: BacktestEngine, result, settings: dict) -> None:
     payload = write_backtest_result(result, settings)
     write_trader_reports(engine.trader, settings, "backtest")
-    print_backtest_summary(payload)
+    print_backtest_summary(payload, settings)
 
 
 # 运行回测，由 run.py 负责传入配置名。

@@ -53,7 +53,6 @@ D:\app\miniconda\envs\nt\python.exe fetch_data.py funding
 # 跑 funding 回测
 D:\app\miniconda\envs\nt\python.exe backtest.py funding
 
-# 跑 funding 测试网/live，默认读取 config/funding.yaml 的 live.run_seconds
 D:\app\miniconda\envs\nt\python.exe live.py funding
 
 # 跑综合样例回测
@@ -300,7 +299,6 @@ D:\app\miniconda\envs\nt\python.exe backtest.py demo_multi_asset_1
 命令使用 30 秒临时覆盖，不改 yaml：
 
 ```powershell
-D:\app\miniconda\envs\nt\python.exe -c "from utils.config_loader import load_settings; from live import build_live_node, run_for_seconds; settings = load_settings('funding'); settings['live']['run_seconds'] = 30; node, report_writer = build_live_node(settings); run_for_seconds(node, int(settings['live']['run_seconds'])); report_writer.write_final_reports(node.trader, names=('orders', 'positions')); node.dispose()"
 ```
 
 结果：

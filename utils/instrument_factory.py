@@ -15,6 +15,7 @@ from nautilus_trader.model.objects import Money
 from nautilus_trader.model.objects import Price
 from nautilus_trader.model.objects import Quantity
 
+from utils.arguments import TIMEFRAME_UNITS
 from utils.config_loader import market_configs
 
 
@@ -22,10 +23,9 @@ from utils.config_loader import market_configs
 def timeframe_to_bar_spec(timeframe: str) -> str:
     unit = timeframe[-1]
     value = int(timeframe[:-1])
-    mapping = {"m": "MINUTE", "h": "HOUR", "d": "DAY"}
-    if unit not in mapping:
+    if unit not in TIMEFRAME_UNITS:
         raise ValueError(f"Unsupported timeframe: {timeframe}")
-    return f"{value}-{mapping[unit]}"
+    return f"{value}-{TIMEFRAME_UNITS[unit]}"
 
 
 # 配置值为空时返回 None，否则构建 NT Money。

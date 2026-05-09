@@ -14,14 +14,17 @@ from nautilus_trader.model.data import DataType
 from nautilus_trader.model.identifiers import ClientId
 from nautilus_trader.model.identifiers import InstrumentId
 
-
-EXTERNAL_SIGNAL_CLIENT_NAME = "EXTERNAL_SIGNAL"
+from utils.arguments import EXTERNAL_SIGNAL_CLIENT_NAME
+from utils.arguments import EXTERNAL_SIGNAL_DEFAULT_HOST
+from utils.arguments import EXTERNAL_SIGNAL_DEFAULT_INSTRUMENT
+from utils.arguments import EXTERNAL_SIGNAL_DEFAULT_PORT
+from utils.arguments import EXTERNAL_SIGNAL_DEFAULT_SIDE
 
 
 @customdataclass
 class ExternalSignal(Data):
-    instrument_id: InstrumentId = InstrumentId.from_str("BTCUSDT-PERP.BINANCE")
-    side: str = "BUY"
+    instrument_id: InstrumentId = InstrumentId.from_str(EXTERNAL_SIGNAL_DEFAULT_INSTRUMENT)
+    side: str = EXTERNAL_SIGNAL_DEFAULT_SIDE
     sent_ns: int = 0
 
 
@@ -31,8 +34,8 @@ def external_signal_type() -> DataType:
 
 
 class ExternalSignalDataClientConfig(LiveDataClientConfig, frozen=True):
-    host: str = "127.0.0.1"
-    port: int = 9001
+    host: str = EXTERNAL_SIGNAL_DEFAULT_HOST
+    port: int = EXTERNAL_SIGNAL_DEFAULT_PORT
 
 
 class ExternalSignalDataClient(LiveDataClient):

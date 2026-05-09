@@ -1,6 +1,6 @@
 # 常改：交易对和行情周期。
 market:
-  symbol: ORCA/USDT                 # Binance U 本位 ORCA 永续
+  symbol: TRUMP/USDT                 # Binance U 本位 ORCA 永续
   timeframe: 1m                     # live 订阅 1m bar
   limit: 1000                       # 拉取 K 线数量
   batches: 1                        # 拉取批次数
@@ -17,10 +17,7 @@ strategy:
 
 # 常改：live 运行参数。
 live:
-  environment: TESTNET              # 启动时会被 live.py 的模式选择覆盖
   account_type: USDT_FUTURES        # Binance U 本位合约账户
-  api_key_env: BINANCE_FUTURES_TESTNET_API_KEY       # 测试网 API key 变量名
-  api_secret_env: BINANCE_FUTURES_TESTNET_API_SECRET # 测试网 API secret 变量名
   log_level_file: INFO              # 文件日志级别
 
 # 常改：回测账户参数；本策略主要用于 live 观察。

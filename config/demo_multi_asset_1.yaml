@@ -22,11 +22,7 @@ markets:
 
 # 常改：live 运行参数。
 live:
-  environment: TESTNET
-  run_seconds: 300
   account_type: USDT_FUTURES
-  api_key_env: BINANCE_FUTURES_TESTNET_API_KEY
-  api_secret_env: BINANCE_FUTURES_TESTNET_API_SECRET
 
 # 常改：回测资金和账户。
 backtest:

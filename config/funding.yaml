@@ -32,10 +32,7 @@ data:
 
 # 常改：live 运行参数。
 live:
-  environment: TESTNET              # TESTNET / LIVE
   account_type: USDT_FUTURES        # Binance U 本位合约账户
-  api_key_env: BINANCE_FUTURES_TESTNET_API_KEY
-  api_secret_env: BINANCE_FUTURES_TESTNET_API_SECRET
   log_level_file: INFO              # live_raw.log 文件日志级别
 
 # 常改：回测资金和账户。

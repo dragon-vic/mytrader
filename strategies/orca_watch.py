@@ -27,6 +27,7 @@ class OrcaWatchConfig(StrategyConfig, frozen=True):
     subscribe_external: bool = True
 
 
+
 class OrcaWatch(Strategy):
     def __init__(self, config: OrcaWatchConfig) -> None:
         super().__init__(config)
@@ -47,10 +48,7 @@ class OrcaWatch(Strategy):
 
     # 每根 1m bar 到达时记录行情摘要。
     def on_bar(self, bar: Bar) -> None:
-        self.log.info(
-            f"bar ts={bar.ts_event} open={bar.open} high={bar.high} "
-            f"low={bar.low} close={bar.close} volume={bar.volume}"
-        )
+        pass
 
     # 可选 tick 订阅开启时记录最新成交。
     def on_trade_tick(self, tick: TradeTick) -> None:
