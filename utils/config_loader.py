@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import platform
 from pathlib import Path
 from typing import Any
 
@@ -116,4 +117,6 @@ def market_configs(settings: dict[str, Any]) -> list[dict[str, Any]]:
 
 # 读取当前 set 的代理地址。
 def proxy_url(settings: dict[str, Any]) -> str | None:
+    if platform.system() == "Linux":
+        return None
     return settings["exchange"].get("proxy_url")

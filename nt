@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# 解析脚本真实路径，支持把这个文件软链接到 ~/.local/bin/nt。
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  case "$SOURCE" in
+    /*) ;;
+    *) SOURCE="$DIR/$SOURCE" ;;
+  esac
+done
+
+PROJECT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+PYTHON_BIN="${NT_PYTHON:-python}"
+
+cd "$PROJECT_DIR"
+exec "$PYTHON_BIN" run.py "$@"

@@ -118,6 +118,9 @@ def main() -> None:
     if len(sys.argv) != 1:
         raise ValueError("Usage: python run.py [config_name] [backtest|testnet|live]")
 
+    if not sys.stdin.isatty():
+        raise RuntimeError("交互模式需要真实终端；非终端环境请用 python run.py 配置名 模式")
+
     selected_config = choose("请选择配置：", config_names())
     selected_label = choose("请选择模式：", [label for label, _mode in MODE_OPTIONS])
     mode = dict(MODE_OPTIONS)[selected_label]
