@@ -74,6 +74,11 @@ def build_live_node(settings: dict) -> tuple[TradingNode, TraderReportWriter]:
             log_directory=str(log_dir),
             log_file_name=live_raw_log_name(settings),
             log_colors=True,
+            log_component_levels={
+                "Portfolio": "WARNING",
+                "ExecClient-BINANCE": "WARNING",
+                settings["strategy"]["class"]: "WARNING",
+            },
             clear_log_file=True,
         ),
         data_clients={
