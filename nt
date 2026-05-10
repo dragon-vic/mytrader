@@ -2,8 +2,6 @@
 set -euo pipefail
 
 PROJECT_DIR="$HOME/mytrader"
-START_MARKER="TradingNode: RUNNING"
-START_TIMEOUT_SECONDS=60
 
 PYTHON_BIN="$HOME/miniconda/envs/nt/bin/python"
 if [ ! -x "$PYTHON_BIN" ]; then
@@ -118,63 +116,37 @@ mode_value() {
   esac
 }
 
-wait_for_running() {
-  local pid="$1"
-  local config_name="$2"
-  local mode="$3"
-  local log_path="logs/${config_name}-${mode}-running.log"
-  local start_epoch
-  local deadline
-  local now
-  local modified_epoch
-
-  start_epoch="$(date +%s)"
-  deadline=$((start_epoch + START_TIMEOUT_SECONDS))
-
-  while true; do
-    now="$(date +%s)"
-    if [ "$now" -gt "$deadline" ]; then
-      echo "后台进程已启动，PID=$pid；尚未在 ${START_TIMEOUT_SECONDS}s 内看到运行成功日志。"
-      echo "请查看：$log_path"
-      return
-    fi
-
-    if ! kill -0 "$pid" 2>/dev/null; then
-      echo "后台进程已退出，未看到运行成功日志。"
-      echo "请查看：$log_path"
-      return
-    fi
-
-    if [ -f "$log_path" ]; then
-      modified_epoch="$(stat -c %Y "$log_path")"
-      if [ "$modified_epoch" -ge "$start_epoch" ] && grep -q "$START_MARKER" "$log_path"; then
-        echo "运行成功：$config_name $mode 已在后台运行，PID=$pid"
-        echo "日志：$log_path"
-        return
-      fi
-    fi
-
-    sleep 1
-  done
-}
-
 run_background() {
   local config_name="$1"
   local mode="$2"
-  local launcher_log="logs/${config_name}-${mode}-launcher.log"
+  local running_log="logs/${config_name}-${mode}-running.log"
+  local session_name="nt-${config_name}-${mode}"
+  local tmux_command
   local pid
 
-  mkdir -p logs
-  nohup "$PYTHON_BIN" run.py "$config_name" "$mode" > "$launcher_log" 2>&1 &
-  pid="$!"
-
-  if [ "$mode" = "backtest" ]; then
-    echo "后台进程已启动：$config_name $mode，PID=$pid"
-    echo "日志：$launcher_log"
-    return
+  if ! command -v tmux >/dev/null 2>&1; then
+    echo "后台运行需要 tmux，请先安装 tmux，或选择前台运行。" >&2
+    exit 1
   fi
 
-  wait_for_running "$pid" "$config_name" "$mode"
+  mkdir -p logs
+  if tmux has-session -t "$session_name" 2>/dev/null; then
+    session_name="${session_name}-$(date +%Y%m%d%H%M%S)"
+  fi
+
+  printf -v tmux_command "exec %q run.py %q %q" "$PYTHON_BIN" "$config_name" "$mode"
+  tmux new-session -d -s "$session_name" -c "$PROJECT_DIR" "$tmux_command"
+  pid="$(tmux display-message -p -t "$session_name" "#{pane_pid}")"
+
+  echo "后台进程已启动：$config_name $mode"
+  echo "tmux会话：$session_name"
+  echo "PID：$pid"
+  if [ "$mode" != "backtest" ]; then
+    echo "运行日志：$running_log"
+  fi
+  echo "重新打开：tmux attach -t $session_name"
+  echo "临时退出：Ctrl+b 然后按 d"
+  echo "停止运行：重新打开后按回车"
 }
 
 if [ "$#" -gt 0 ]; then
