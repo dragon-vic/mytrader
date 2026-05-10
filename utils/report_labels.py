@@ -12,7 +12,6 @@ COLUMN_LABELS = {
     "commission": "手续费",
     "client_order_id": "客户端订单ID",
     "position_id": "仓位ID",
-    "event_id": "事件ID",
     "account_id": "账户ID",
     "account_type": "账户类型",
     "base_currency": "基础币种",

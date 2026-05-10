@@ -141,7 +141,7 @@ class TraderReportWriter:
 
     # 写出给人看的 CSV 时，最后一步统一改中文列名。
     def write_csv(self, df: pd.DataFrame, filename: str) -> None:
-        drop_empty_columns(to_chinese_columns(drop_duplicate_events(df))).to_csv(
+        drop_empty_columns(to_chinese_columns(df)).to_csv(
             self.output_dir / filename,
             index=False,
             encoding="utf-8-sig",
@@ -570,14 +570,6 @@ def read_report_csv(output_dir: Path, filename: str) -> pd.DataFrame:
 def drop_empty_columns(df: pd.DataFrame) -> pd.DataFrame:
     empty = df.isna() | df.astype(str).apply(lambda column: column.str.strip().isin(("", "nan", "None", "NaT")))
     return df.loc[:, ~empty.all(axis=0)]
-
-
-# 有 event_id 的 report 按事件 ID 去重，避免 NT 重复发布同一个账户或仓位事件。
-def drop_duplicate_events(df: pd.DataFrame) -> pd.DataFrame:
-    for column in ("event_id", "事件ID"):
-        if column in df.columns:
-            return df.drop_duplicates(subset=[column], keep="first")
-    return df
 
 
 # 把纳秒时间戳转成北京时间字符串。

@@ -19,7 +19,7 @@ from utils.arguments import TIMEFRAME_UNITS
 from utils.config_loader import market_configs
 
 
-# 把 1m/1h/1d 这种周期转成 NT BarType 需要的 bar spec。
+# 把 1s/1m/1h/1d 这种周期转成 NT BarType 需要的 bar spec。
 def timeframe_to_bar_spec(timeframe: str) -> str:
     unit = timeframe[-1]
     value = int(timeframe[:-1])
@@ -126,7 +126,8 @@ class InstrumentFactory:
     # 构建指定市场对应的 NT BarType。
     def bar_type(self, market: dict[str, Any]) -> BarType:
         spec = timeframe_to_bar_spec(market["timeframe"])
-        return BarType.from_str(f"{market['instrument_symbol']}.{market['venue']}-{spec}-LAST-EXTERNAL")
+        aggregation_source = "INTERNAL" if market["timeframe"].endswith("s") else "EXTERNAL"
+        return BarType.from_str(f"{market['instrument_symbol']}.{market['venue']}-{spec}-LAST-{aggregation_source}")
 
     # 构建当前 set 的全部 BarType。
     def bar_types(self) -> list[BarType]:

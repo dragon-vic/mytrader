@@ -40,7 +40,7 @@ DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 
 # 行情和 funding 默认接口参数。
 FUNDING_API_BASE_URL = "https://fapi.binance.com"
-TIMEFRAME_UNITS = {"m": "MINUTE", "h": "HOUR", "d": "DAY"}
+TIMEFRAME_UNITS = {"s": "SECOND", "m": "MINUTE", "h": "HOUR", "d": "DAY"}
 
 # 报告文件名。
 ORDERS_FILE = "orders.csv"
@@ -155,7 +155,6 @@ ACCOUNT_COLUMNS = [
     "account_type",
     "base_currency",
     "is_reported",
-    "event_id",
 ]
 
 POSITION_COLUMNS = [
