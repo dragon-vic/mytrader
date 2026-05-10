@@ -33,7 +33,7 @@ class Watch(Strategy):
         self.entry_submitted = False
         self.entry_notional = Decimal("6")
         self.request_bars_on_start = False
-        self.warmup_minutes = 1
+        self.warmup_minutes = 10
         self.subscribe_ticks_on_start = False
         self.subscribe_external_on_start = True
 
