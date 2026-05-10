@@ -36,6 +36,7 @@ class Watch(Strategy):
         self.warmup_minutes = 10
         self.subscribe_ticks_on_start = False
         self.subscribe_external_on_start = True
+        self.first_trade = True
 
     # 启动时订阅行情、外部信号和全局订单/仓位/账户事件。
     def on_start(self) -> None:
@@ -55,9 +56,13 @@ class Watch(Strategy):
             self.subscribe_data(external_signal_type(), client_id=ClientId(EXTERNAL_SIGNAL_CLIENT_NAME))
         self.log.info(f"Watch started: instrument={self.config.instrument_id}, bar_type={self.config.bar_type}")
 
-        last_bar = self.cache.bar(self.config.bar_type)
-        if last_bar is not None:
-            self.submit_entry_sell(Decimal(str(last_bar.close)))
+
+
+    def on_bar(self, bar: Bar) -> None:
+        if self.first_trade:
+            self.submit_entry_sell(Decimal(str(bar.close)))
+        self.first_trade = False
+
 
     # 按 USDT 名义金额换算数量并提交市价空单。
     def submit_entry_sell(self, reference_price: Decimal) -> None:

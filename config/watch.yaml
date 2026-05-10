@@ -1,7 +1,7 @@
 # 常改：交易对和行情周期。
 market:
   symbol: TRUMP/USDT                 # Binance U 本位 ORCA 永续
-  timeframe: 1m                     # live 订阅 1s bar
+  timeframe: 1s                     # live 订阅 1s bar
   limit: 1000                       # 拉取 K 线数量
   batches: 1                        # 拉取批次数
 
