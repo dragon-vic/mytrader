@@ -180,15 +180,10 @@ class TraderReportWriter:
     # 从 NT cache 回写完整仓位事件，补齐停止阶段平仓事件。
     def write_position_events(self, trader) -> None:
         rows = []
-        seen_event_ids = set()
         for position in trader._cache.positions():
             for index, event in enumerate(position.events):
-                if event.event_id in seen_event_ids:
-                    continue
-                seen_event_ids.add(event.event_id)
                 row = type(event).to_dict(event)
                 row["ts_event"] = pd.to_datetime(event.ts_event, unit="ns", utc=True)
-                row["event_id"] = str(event.event_id)
                 if index == 0:
                     row["event_type"] = "PositionOpened"
                 elif position.ts_closed and event.ts_event == position.ts_closed:
@@ -204,12 +199,8 @@ class TraderReportWriter:
                 row["fill_price"] = row.get("last_px", "")
                 rows.append({column: row.get(column) for column in REPORT_COLUMNS["position_events"]})
             for event in position.adjustments:
-                if event.event_id in seen_event_ids:
-                    continue
-                seen_event_ids.add(event.event_id)
                 row = type(event).to_dict(event)
                 row["ts_event"] = pd.to_datetime(event.ts_event, unit="ns", utc=True)
-                row["event_id"] = str(event.event_id)
                 row["event_type"] = type(event).__name__
                 row["event_side"] = ""
                 row["fill_quantity"] = ""

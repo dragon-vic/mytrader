@@ -88,7 +88,6 @@ class DataRecorder(Actor):
         row = type(event).to_dict(event)
         self.log.info(f"[POSITION] {event}")
         row["ts_event"] = pd.to_datetime(event.ts_event, unit="ns", utc=True)
-        row["event_id"] = str(event.event_id)
         row["event_type"] = type(event).__name__
         row["adjustment_type"] = row.get("adjustment_type", "")
         row["quantity_change"] = row.get("quantity_change", "")
