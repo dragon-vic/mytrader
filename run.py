@@ -16,50 +16,26 @@ def config_names() -> list[str]:
 
 
 def clear_screen() -> None:
-    os.system("cls" if os.name == "nt" else "clear")
+    os.system("cls")
 
 
+# 读取 Windows 控制台方向键和回车。
 def read_key() -> str:
-    if os.name == "nt":
-        import msvcrt
+    import msvcrt
 
-        key = msvcrt.getch()
+    key = msvcrt.getch()
 
-        if key == b"\r":
-            return "enter"
+    if key == b"\r":
+        return "enter"
 
-        if key in (b"\x00", b"\xe0"):
-            direction = msvcrt.getch()
-            if direction == b"H":
-                return "up"
-            if direction == b"P":
-                return "down"
+    if key in (b"\x00", b"\xe0"):
+        direction = msvcrt.getch()
+        if direction == b"H":
+            return "up"
+        if direction == b"P":
+            return "down"
 
-        return ""
-
-    import termios
-    import tty
-
-    fd = sys.stdin.fileno()
-    old_settings = termios.tcgetattr(fd)
-
-    try:
-        tty.setraw(fd)
-        ch = sys.stdin.read(1)
-
-        if ch in ("\r", "\n"):
-            return "enter"
-
-        if ch == "\x1b":
-            seq = sys.stdin.read(2)
-            if seq == "[A":
-                return "up"
-            if seq == "[B":
-                return "down"
-
-        return ""
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+    return ""
 
 
 def render_menu(title: str, options: list[str], selected: int) -> None:
@@ -101,9 +77,6 @@ def parse_mode(raw: str) -> str:
 
 
 def run(config_name: str, mode: str) -> None:
-    if mode == "live":
-        input(f"确认运行实盘 配置：{config_name}，回车继续：")
-
     if mode == "backtest":
         backtest.main(config_name)
     else:
@@ -124,6 +97,8 @@ def main() -> None:
     selected_config = choose("请选择配置：", config_names())
     selected_label = choose("请选择模式：", [label for label, _mode in MODE_OPTIONS])
     mode = dict(MODE_OPTIONS)[selected_label]
+    if mode == "live":
+        input(f"确认运行实盘 配置：{selected_config}，回车继续：")
 
     run(selected_config, mode)
 

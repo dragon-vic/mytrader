@@ -2,6 +2,8 @@
 set -euo pipefail
 
 PROJECT_DIR="$HOME/mytrader"
+START_MARKER="TradingNode: RUNNING"
+START_TIMEOUT_SECONDS=60
 
 if [ -x "$HOME/miniconda3/envs/nt/bin/python" ]; then
   PYTHON_BIN="$HOME/miniconda3/envs/nt/bin/python"
@@ -13,4 +15,191 @@ else
 fi
 
 cd "$PROJECT_DIR"
-exec "$PYTHON_BIN" run.py "$@"
+
+clear_screen() {
+  clear > /dev/tty
+}
+
+read_key() {
+  local key
+  IFS= read -rsn1 key < /dev/tty
+
+  case "$key" in
+    "")
+      echo "enter"
+      ;;
+    $'\x1b')
+      IFS= read -rsn2 -t 0.1 key < /dev/tty || true
+      case "$key" in
+        "[A")
+          echo "up"
+          ;;
+        "[B")
+          echo "down"
+          ;;
+        *)
+          echo ""
+          ;;
+      esac
+      ;;
+    *)
+      echo ""
+      ;;
+  esac
+}
+
+choose() {
+  local title="$1"
+  shift
+  local options=("$@")
+  local selected=0
+  local key
+  local index
+
+  if [ "${#options[@]}" -eq 0 ]; then
+    echo "没有可选择项：$title" >&2
+    exit 1
+  fi
+
+  while true; do
+    clear_screen
+    echo "$title" > /dev/tty
+    echo > /dev/tty
+
+    for index in "${!options[@]}"; do
+      if [ "$index" -eq "$selected" ]; then
+        printf "> %s\n" "${options[$index]}" > /dev/tty
+      else
+        printf "  %s\n" "${options[$index]}" > /dev/tty
+      fi
+    done
+
+    key="$(read_key)"
+    case "$key" in
+      enter)
+        printf "%s" "${options[$selected]}"
+        return
+        ;;
+      up)
+        selected=$(( (selected - 1 + ${#options[@]}) % ${#options[@]} ))
+        ;;
+      down)
+        selected=$(( (selected + 1) % ${#options[@]} ))
+        ;;
+    esac
+  done
+}
+
+config_names() {
+  local file
+  local name
+
+  for file in config/*.yaml; do
+    [ -e "$file" ] || continue
+    name="$(basename "$file" .yaml)"
+    if [ "$name" != "global" ]; then
+      printf "%s\n" "$name"
+    fi
+  done | sort
+}
+
+mode_value() {
+  case "$1" in
+    "模拟盘")
+      echo "testnet"
+      ;;
+    "回测")
+      echo "backtest"
+      ;;
+    "实盘")
+      echo "live"
+      ;;
+    *)
+      echo "未知模式：$1" >&2
+      exit 1
+      ;;
+  esac
+}
+
+wait_for_running() {
+  local pid="$1"
+  local config_name="$2"
+  local mode="$3"
+  local log_path="logs/${config_name}-${mode}-running.log"
+  local start_epoch
+  local deadline
+  local now
+  local modified_epoch
+
+  start_epoch="$(date +%s)"
+  deadline=$((start_epoch + START_TIMEOUT_SECONDS))
+
+  while true; do
+    now="$(date +%s)"
+    if [ "$now" -gt "$deadline" ]; then
+      echo "后台进程已启动，PID=$pid；尚未在 ${START_TIMEOUT_SECONDS}s 内看到运行成功日志。"
+      echo "请查看：$log_path"
+      return
+    fi
+
+    if ! kill -0 "$pid" 2>/dev/null; then
+      echo "后台进程已退出，未看到运行成功日志。"
+      echo "请查看：$log_path"
+      return
+    fi
+
+    if [ -f "$log_path" ]; then
+      modified_epoch="$(stat -c %Y "$log_path")"
+      if [ "$modified_epoch" -ge "$start_epoch" ] && grep -q "$START_MARKER" "$log_path"; then
+        echo "运行成功：$config_name $mode 已在后台运行，PID=$pid"
+        echo "日志：$log_path"
+        return
+      fi
+    fi
+
+    sleep 1
+  done
+}
+
+run_background() {
+  local config_name="$1"
+  local mode="$2"
+  local launcher_log="logs/${config_name}-${mode}-launcher.log"
+  local pid
+
+  mkdir -p logs
+  nohup "$PYTHON_BIN" run.py "$config_name" "$mode" > "$launcher_log" 2>&1 &
+  pid="$!"
+
+  if [ "$mode" = "backtest" ]; then
+    echo "后台进程已启动：$config_name $mode，PID=$pid"
+    echo "日志：$launcher_log"
+    return
+  fi
+
+  wait_for_running "$pid" "$config_name" "$mode"
+}
+
+if [ "$#" -gt 0 ]; then
+  exec "$PYTHON_BIN" run.py "$@"
+fi
+
+if [ ! -t 0 ]; then
+  echo "交互模式需要真实终端；非终端环境请用 ./nt 配置名 模式" >&2
+  exit 1
+fi
+
+mapfile -t CONFIGS < <(config_names)
+CONFIG_NAME="$(choose "请选择配置：" "${CONFIGS[@]}")"
+MODE_LABEL="$(choose "请选择模式：" "模拟盘" "回测" "实盘")"
+MODE="$(mode_value "$MODE_LABEL")"
+RUN_STYLE="$(choose "请选择运行方式：" "前台运行" "后台运行")"
+
+case "$RUN_STYLE" in
+  "前台运行")
+    exec "$PYTHON_BIN" run.py "$CONFIG_NAME" "$MODE"
+    ;;
+  "后台运行")
+    run_background "$CONFIG_NAME" "$MODE"
+    ;;
+esac
