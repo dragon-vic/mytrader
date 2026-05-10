@@ -13,6 +13,8 @@ RUN_MODES = ("backtest", "testnet", "live")
 DEFAULT_CONFIG_NAME = "funding"
 DEFAULT_TRADER_ID = "TRADER-001"
 DEFAULT_LIVE_LOG_FILE = "live_raw"
+LOGS_DIR = "logs"
+LIVE_LOG_MARKER = "TradingNode: RUNNING"
 
 # NT msgbus topic。
 NODE_STOP_TOPIC = "controls.node.stop"
@@ -40,34 +42,32 @@ FUNDING_API_BASE_URL = "https://fapi.binance.com"
 TIMEFRAME_UNITS = {"m": "MINUTE", "h": "HOUR", "d": "DAY"}
 
 # 报告文件名。
-FILLS_FILE = "fills.csv"
+ORDERS_FILE = "orders.csv"
+POSITIONS_FILE = "positions.csv"
+RESULT_FILE = "result.csv"
 ACCOUNT_CHANGES_FILE = "account_changes.csv"
 POSITION_EVENTS_FILE = "position_events.csv"
-LIVE_REPORT_FILE = "live_report_aggregate.csv"
 SUMMARY_FILE = "summary_aggregate.md"
 
 REPORT_FILES = {
-    "orders": "orders_aggregate.csv",
-    "fills": FILLS_FILE,
-    "positions": "positions_aggregate.csv",
-    "accounts": "accounts_aggregate.csv",
+    "orders": ORDERS_FILE,
+    "accounts": RESULT_FILE,
 }
 
 LIVE_RESULT_FILES = (
-    FILLS_FILE,
+    ORDERS_FILE,
+    POSITIONS_FILE,
+    RESULT_FILE,
     ACCOUNT_CHANGES_FILE,
     POSITION_EVENTS_FILE,
-    "orders.csv",
     "orders_aggregate.csv",
-    "positions.csv",
     "positions_aggregate.csv",
     "accounts_aggregate.csv",
+    "fills.csv",
     "live_report.csv",
-    LIVE_REPORT_FILE,
+    "live_report_aggregate.csv",
     "summary.md",
     SUMMARY_FILE,
-    "live.log",
-    f"{DEFAULT_LIVE_LOG_FILE}.log",
 )
 
 OBSOLETE_REPORT_FILES = (
@@ -90,16 +90,6 @@ REPORT_COLUMNS = {
         "avg_px",
         "commissions",
         "status",
-        "position_id",
-        "client_order_id",
-    ],
-    "fills": [
-        "ts_event",
-        "instrument_id",
-        "order_side",
-        "last_qty",
-        "last_px",
-        "commission",
         "position_id",
         "client_order_id",
     ],
@@ -134,6 +124,7 @@ REPORT_COLUMNS = {
     ],
     "position_events": [
         "ts_event",
+        "event_type",
         "instrument_id",
         "event_side",
         "fill_quantity",
@@ -143,24 +134,11 @@ REPORT_COLUMNS = {
         "quantity_change",
         "pnl_change",
         "reason",
-        "event_type",
         "account_id",
         "strategy_id",
         "position_id",
     ],
 }
-
-# live 实时落盘列。
-FILL_COLUMNS = [
-    "ts_event",
-    "instrument_id",
-    "order_side",
-    "last_qty",
-    "last_px",
-    "commission",
-    "position_id",
-    "client_order_id",
-]
 
 ACCOUNT_COLUMNS = [
     "ts_event",

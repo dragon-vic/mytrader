@@ -7,16 +7,12 @@ import pandas as pd
 from nautilus_trader.common.actor import Actor
 from nautilus_trader.config import ActorConfig
 from nautilus_trader.model.events import AccountState
-from nautilus_trader.model.events import OrderFilled
 from nautilus_trader.model.events import PositionEvent
 
 from utils.arguments import ACCOUNT_CHANGES_FILE
 from utils.arguments import ACCOUNT_COLUMNS
 from utils.arguments import EVENT_ACCOUNT_TOPIC
-from utils.arguments import EVENT_ORDER_TOPIC
 from utils.arguments import EVENT_POSITION_TOPIC
-from utils.arguments import FILLS_FILE
-from utils.arguments import FILL_COLUMNS
 from utils.arguments import POSITION_COLUMNS
 from utils.arguments import POSITION_EVENTS_FILE
 
@@ -33,22 +29,14 @@ class DataRecorder(Actor):
     # 启动时订阅所有 live 事件，后续由 actor 统一落盘。
     def on_start(self) -> None:
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.msgbus.subscribe(EVENT_ORDER_TOPIC, self.handle_order_event)
         self.msgbus.subscribe(EVENT_POSITION_TOPIC, self.handle_position_event)
         self.msgbus.subscribe(EVENT_ACCOUNT_TOPIC, self.handle_account_event)
+        self.log.info(f"data recoder 初始化完成")
 
     # 停止时退订 actor 自己注册的事件。
     def on_stop(self) -> None:
-        self.msgbus.unsubscribe(EVENT_ORDER_TOPIC, self.handle_order_event)
         self.msgbus.unsubscribe(EVENT_POSITION_TOPIC, self.handle_position_event)
         self.msgbus.unsubscribe(EVENT_ACCOUNT_TOPIC, self.handle_account_event)
-
-    # 只把真实成交实时写入 fills.csv。
-    def handle_order_event(self, event) -> None:
-        if isinstance(event, OrderFilled):
-            row = OrderFilled.to_dict(event)
-            row["ts_event"] = pd.to_datetime(row["ts_event"], unit="ns", utc=True)
-            self._append_csv(FILLS_FILE, {column: row.get(column) for column in FILL_COLUMNS})
 
     # 把账户余额变化展开成一币种一行，并保留 info 字段用于判断 funding。
     def handle_account_event(self, event: AccountState) -> None:
@@ -60,7 +48,7 @@ class DataRecorder(Actor):
             row = {
                 **balance,
                 **state,
-                "ts_event": pd.to_datetime(state["ts_event"], unit="ns", utc=True),
+                "ts_event": pd.to_datetime(event.ts_event, unit="ns", utc=True),
                 "event_type": state.get("type", ""),
                 "info_type": info_type,
                 "info_reason": info_reason,
@@ -71,8 +59,8 @@ class DataRecorder(Actor):
     # 把 live 仓位事件落盘，方便和账户变化对照。
     def handle_position_event(self, event: PositionEvent) -> None:
         row = type(event).to_dict(event)
-        row["ts_event"] = pd.to_datetime(row["ts_event"], unit="ns", utc=True)
-        row["event_type"] = row.get("type", type(event).__name__)
+        row["ts_event"] = pd.to_datetime(event.ts_event, unit="ns", utc=True)
+        row["event_type"] = type(event).__name__
         row["adjustment_type"] = row.get("adjustment_type", "")
         row["quantity_change"] = row.get("quantity_change", "")
         row["pnl_change"] = row.get("pnl_change", "")

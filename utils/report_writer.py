@@ -3,19 +3,24 @@ from __future__ import annotations
 import json
 import shutil
 from dataclasses import asdict
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 from rich.console import Console
 from rich.table import Table
 
 from utils.arguments import EMPTY_SUMMARY
-from utils.arguments import LIVE_REPORT_FILE
+from utils.arguments import LIVE_LOG_MARKER
 from utils.arguments import LIVE_RESULT_FILES
+from utils.arguments import LOGS_DIR
 from utils.arguments import OBSOLETE_REPORT_FILES
+from utils.arguments import POSITIONS_FILE
 from utils.arguments import REPORT_COLUMNS
 from utils.arguments import REPORT_FILES
+from utils.arguments import RESULT_FILE
 from utils.arguments import SUMMARY_FILE
 from utils.arguments import SUMMARY_LABELS
 from utils.config_loader import ROOT
@@ -25,6 +30,33 @@ from utils.report_labels import to_chinese_columns
 # 返回当前 set 在 backtest/live 下的报告目录。
 def run_reports_dir(settings: dict[str, Any], run_type: str) -> Path:
     return ROOT / settings["project"]["reports_dir"] / run_type / settings["project"]["config_name"]
+
+
+# 返回 live 日志目录。
+def live_logs_dir() -> Path:
+    return ROOT / LOGS_DIR
+
+
+# 返回本次运行的 NT 原始日志文件名，不带后缀。
+def live_raw_log_name(settings: dict[str, Any]) -> str:
+    return f"{settings['project']['config_name']}-{settings['mode']}-running"
+
+
+# 返回本次运行的 NT 原始日志路径。
+def live_raw_log_path(settings: dict[str, Any]) -> Path:
+    return live_logs_dir() / f"{live_raw_log_name(settings)}.log"
+
+
+# 返回最终清洗日志路径，避免同一分钟重复运行时覆盖旧日志。
+def final_live_log_path(settings: dict[str, Any]) -> Path:
+    end_time = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d-%H%M")
+    base = live_logs_dir() / f"{settings['project']['config_name']}-{settings['mode']}-{end_time}.log"
+    path = base
+    index = 2
+    while path.exists():
+        path = base.with_name(f"{base.stem}_{index}{base.suffix}")
+        index += 1
+    return path
 
 
 # 每次运行前清空当前 set 的报告目录，避免旧文件混进新结果。
@@ -63,8 +95,8 @@ class TraderReportWriter:
             if path.exists():
                 path.unlink()
 
-    # 保存 NT trader 在运行结束后生成的订单、成交和持仓报告。
-    def write_final_reports(self, trader, names=("orders", "fills", "positions", "accounts")) -> None:
+    # 保存 NT trader 在运行结束后生成的订单、持仓和账户结果。
+    def write_final_reports(self, trader, names=("orders", "positions", "accounts")) -> None:
         self.clear_files(
             (
                 "orders.csv",
@@ -73,6 +105,7 @@ class TraderReportWriter:
                 "positions.csv",
                 "positions_aggregate.csv",
                 "accounts_aggregate.csv",
+                "result.csv",
                 "position_events.csv",
                 "live_report.csv",
                 "live_report_aggregate.csv",
@@ -83,7 +116,6 @@ class TraderReportWriter:
 
         report_fns = {
             "orders": trader.generate_orders_report,
-            "fills": trader.generate_fills_report,
             "positions": trader.generate_positions_report,
         }
         reports = {}
@@ -91,7 +123,10 @@ class TraderReportWriter:
             df = self.account_report(trader) if name == "accounts" else report_fns[name]()
             if not df.empty:
                 reports[name] = report_columns(name, df)
-                self.write_csv(reports[name], REPORT_FILES[name])
+                if name == "orders":
+                    self.write_csv(self.format_orders(reports[name]), REPORT_FILES[name])
+                elif name == "accounts":
+                    self.write_csv(self.filter_nonzero_accounts(reports[name]), REPORT_FILES[name])
         self.write_position_events(trader)
         self.write_clean_reports(reports.get("positions", pd.DataFrame()))
         self.localize_runtime_csv("account_changes.csv")
@@ -105,7 +140,7 @@ class TraderReportWriter:
 
     # 写出给人看的 CSV 时，最后一步统一改中文列名。
     def write_csv(self, df: pd.DataFrame, filename: str) -> None:
-        to_chinese_columns(df).to_csv(self.output_dir / filename, index=False, encoding="utf-8-sig")
+        drop_empty_columns(to_chinese_columns(df)).to_csv(self.output_dir / filename, index=False, encoding="utf-8-sig")
 
     # 把运行中已经落盘的英文 CSV 在结束时改成中文表头。
     def localize_runtime_csv(self, filename: str) -> None:
@@ -114,14 +149,42 @@ class TraderReportWriter:
             df = pd.read_csv(path)
             self.write_csv(df, filename)
 
+    # 订单表前两列时间改成北京时间。
+    def format_orders(self, orders: pd.DataFrame) -> pd.DataFrame:
+        data = orders.copy()
+        for column in ("ts_init", "ts_last"):
+            if column in data.columns:
+                data[column] = pd.to_datetime(data[column], unit="ns", utc=True).dt.tz_convert(
+                    "Asia/Shanghai",
+                ).dt.strftime("%Y-%m-%d %H:%M:%S")
+        return data
+
+    # 账户最终结果只保留有余额的币。
+    def filter_nonzero_accounts(self, accounts: pd.DataFrame) -> pd.DataFrame:
+        data = accounts.copy()
+        if "currency" in data.columns:
+            data = data.groupby("currency", as_index=False, sort=False).tail(1)
+        balances = pd.DataFrame(
+            {
+                column: data[column].map(money_to_float) if column in data.columns else 0.0
+                for column in ("total", "free", "locked")
+            },
+        )
+        return data[balances.abs().sum(axis=1) > 0]
+
     # 从 NT cache 回写完整仓位事件，补齐停止阶段平仓事件。
     def write_position_events(self, trader) -> None:
         rows = []
         for position in trader._cache.positions():
-            for event in [*position.events, *position.adjustments]:
+            for index, event in enumerate(position.events):
                 row = type(event).to_dict(event)
-                row["ts_event"] = pd.to_datetime(row["ts_event"], unit="ns", utc=True)
-                row["event_type"] = row.get("type", type(event).__name__)
+                row["ts_event"] = pd.to_datetime(event.ts_event, unit="ns", utc=True)
+                if index == 0:
+                    row["event_type"] = "PositionOpened"
+                elif position.ts_closed and event.ts_event == position.ts_closed:
+                    row["event_type"] = "PositionClosed"
+                else:
+                    row["event_type"] = "PositionChanged"
                 row["adjustment_type"] = row.get("adjustment_type", "")
                 row["quantity_change"] = row.get("quantity_change", "")
                 row["pnl_change"] = row.get("pnl_change", "")
@@ -130,14 +193,22 @@ class TraderReportWriter:
                 row["fill_quantity"] = row.get("last_qty", "")
                 row["fill_price"] = row.get("last_px", "")
                 rows.append({column: row.get(column) for column in REPORT_COLUMNS["position_events"]})
+            for event in position.adjustments:
+                row = type(event).to_dict(event)
+                row["ts_event"] = pd.to_datetime(event.ts_event, unit="ns", utc=True)
+                row["event_type"] = type(event).__name__
+                row["event_side"] = ""
+                row["fill_quantity"] = ""
+                row["fill_price"] = ""
+                rows.append({column: row.get(column) for column in REPORT_COLUMNS["position_events"]})
         if rows:
             self.write_csv(pd.DataFrame(rows), "position_events.csv")
 
-    # 生成更容易看的 live_report 和中文 summary.md。
+    # 生成更容易看的 positions.csv 和中文 summary.md。
     def write_clean_reports(self, positions: pd.DataFrame) -> None:
         trades = self.build_trades(positions)
         if not trades.empty:
-            self.write_csv(trades, LIVE_REPORT_FILE)
+            self.write_csv(trades, POSITIONS_FILE)
         summary = self.build_summary(trades)
         self.write_summary_markdown(summary)
 
@@ -285,10 +356,10 @@ class TraderReportWriter:
             lines.append(f"- {label}: {row.get(key, '')}")
         (self.output_dir / SUMMARY_FILE).write_text("\n".join(lines) + "\n", encoding="utf-8-sig")
 
-    # 从第一条市场数据标记开始保留 live 日志。
-    def write_clean_live_log(self, marker: str = "FIRST_MARKET_DATA") -> None:
-        source = self.output_dir / "live_raw.log"
-        target = self.output_dir / "live.log"
+    # 从 TradingNode RUNNING 标记开始保留 live 日志。
+    def write_clean_live_log(self, settings: dict[str, Any], marker: str = LIVE_LOG_MARKER) -> None:
+        source = live_raw_log_path(settings)
+        target = final_live_log_path(settings)
         if not source.exists():
             return
 
@@ -299,6 +370,7 @@ class TraderReportWriter:
                 start = index
                 break
         target.write_text("\n".join(lines[start:]) + "\n", encoding="utf-8")
+        source.unlink()
 
 
 # 保存 NT trader 生成的订单、持仓报告。
@@ -377,13 +449,13 @@ def build_backtest_overview_table(payload: dict[str, Any], settings: dict[str, A
 
 # 从持仓汇总表组装交易统计表。
 def build_trade_stats_table(output_dir: Path, elapsed_days: float) -> Table | None:
-    positions = read_report_csv(output_dir, "positions_aggregate.csv")
+    positions = read_report_csv(output_dir, POSITIONS_FILE)
     if positions.empty:
         return None
 
     pnl = positions["已实现盈亏"].map(money_to_float)
     fees = positions["手续费合计"].map(commissions_to_float)
-    duration_min = pd.to_numeric(positions["持仓纳秒"], errors="coerce") / 60_000_000_000
+    duration_min = pd.to_numeric(positions["持仓分钟"], errors="coerce")
     wins = pnl[pnl > 0]
     losses = pnl[pnl < 0]
     gross_profit = wins.sum()
@@ -393,8 +465,8 @@ def build_trade_stats_table(output_dir: Path, elapsed_days: float) -> Table | No
     table.add_column("数值", justify="right")
     rows = [
         ("已完成交易数", format_int(len(positions))),
-        ("多单数量", format_int((positions["开仓方向"] == "BUY").sum())),
-        ("空单数量", format_int((positions["开仓方向"] == "SELL").sum())),
+        ("多单数量", format_int((positions["方向"] == "BUY").sum())),
+        ("空单数量", format_int((positions["方向"] == "SELL").sum())),
         ("平均每日交易数", format_number(len(positions) / elapsed_days if elapsed_days else 0)),
         ("胜率", format_percent((pnl > 0).mean())),
         ("净收益", format_number(pnl.sum())),
@@ -416,7 +488,7 @@ def build_trade_stats_table(output_dir: Path, elapsed_days: float) -> Table | No
 
 # 从持仓汇总表按标的聚合统计。
 def build_instrument_stats_table(output_dir: Path) -> Table | None:
-    positions = read_report_csv(output_dir, "positions_aggregate.csv")
+    positions = read_report_csv(output_dir, POSITIONS_FILE)
     if positions.empty:
         return None
 
@@ -454,33 +526,20 @@ def build_instrument_stats_table(output_dir: Path) -> Table | None:
 
 # 从订单和成交表组装执行统计表。
 def build_order_stats_table(output_dir: Path) -> Table | None:
-    orders = read_report_csv(output_dir, "orders_aggregate.csv")
-    fills = read_report_csv(output_dir, "fills.csv")
-    if orders.empty and fills.empty:
+    orders = read_report_csv(output_dir, "orders.csv")
+    if orders.empty:
         return None
 
     table = Table(title="订单执行统计")
     table.add_column("指标")
     table.add_column("数值", justify="right")
 
-    if not orders.empty:
-        filled_qty = pd.to_numeric(orders["已成交数量"], errors="coerce").fillna(0)
-        table.add_row("订单总数", format_int(len(orders)))
-        table.add_row("有成交订单数", format_int((filled_qty > 0).sum()))
-        table.add_row("已完成订单数", format_int((orders["订单状态"] == "FILLED").sum()))
-        table.add_row("已取消订单数", format_int((orders["订单状态"] == "CANCELED").sum()))
-        table.add_row("已拒绝订单数", format_int((orders["订单状态"] == "REJECTED").sum()))
-
-    if not fills.empty:
-        qty = pd.to_numeric(fills["成交数量"], errors="coerce").fillna(0)
-        price = pd.to_numeric(fills["成交价格"], errors="coerce")
-        fees = fills["手续费"].map(money_to_float)
-        table.add_row("成交记录数", format_int(len(fills)))
-        table.add_row("买入成交数", format_int((fills["订单方向"] == "BUY").sum()))
-        table.add_row("卖出成交数", format_int((fills["订单方向"] == "SELL").sum()))
-        table.add_row("成交数量合计", format_number(qty.sum()))
-        table.add_row("平均成交价", format_number(price.mean()))
-        table.add_row("成交手续费", format_number(fees.sum()))
+    filled_qty = pd.to_numeric(orders["已成交数量"], errors="coerce").fillna(0)
+    table.add_row("订单总数", format_int(len(orders)))
+    table.add_row("有成交订单数", format_int((filled_qty > 0).sum()))
+    table.add_row("已完成订单数", format_int((orders["订单状态"] == "FILLED").sum()))
+    table.add_row("已取消订单数", format_int((orders["订单状态"] == "CANCELED").sum()))
+    table.add_row("已拒绝订单数", format_int((orders["订单状态"] == "REJECTED").sum()))
     return table
 
 
@@ -490,6 +549,12 @@ def read_report_csv(output_dir: Path, filename: str) -> pd.DataFrame:
     if not path.exists():
         return pd.DataFrame()
     return pd.read_csv(path)
+
+
+# 删除整列都没有有效值的列，避免 report 里出现全空字段。
+def drop_empty_columns(df: pd.DataFrame) -> pd.DataFrame:
+    empty = df.isna() | df.astype(str).apply(lambda column: column.str.strip().isin(("", "nan", "None", "NaT")))
+    return df.loc[:, ~empty.all(axis=0)]
 
 
 # 把纳秒时间戳转成北京时间字符串。

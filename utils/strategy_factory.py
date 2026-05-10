@@ -16,7 +16,7 @@ def build_strategy(settings: dict[str, Any], run_type: str = "backtest"):
     module = importlib.import_module(strategy["module"])
     config_cls = getattr(module, strategy["config_class"])
     instruments = InstrumentFactory(settings)
-    params = strategy_params(settings, config_cls, run_type)
+    params = strategy_params(settings, config_cls, run_type, instruments)
 
     if "markets" in settings:
         config = config_cls(
@@ -45,9 +45,16 @@ def build_strategy(settings: dict[str, Any], run_type: str = "backtest"):
 
 
 # 按策略配置字段自动补充运行类型、报告路径和全局代理。
-def strategy_params(settings: dict[str, Any], config_cls, run_type: str) -> dict[str, Any]:
+def strategy_params(
+    settings: dict[str, Any],
+    config_cls,
+    run_type: str,
+    instruments: InstrumentFactory,
+) -> dict[str, Any]:
     params = dict(settings["strategy"].get("params", {}))
     fields = getattr(config_cls, "__annotations__", {})
+    if params.get("external_order_claims") is True:
+        params["external_order_claims"] = [item.id for item in instruments.instruments()]
     if "event_log_path" in fields and params.get("event_log_path", "auto") == "auto":
         params["event_log_path"] = str(run_reports_dir(settings, run_type) / "strategy_events.csv")
     if "proxy_url" in fields and "proxy_url" not in params:

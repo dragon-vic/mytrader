@@ -51,6 +51,7 @@ For this project, environment, Conda, system directories, global config, and net
 - Do not change large framework or NautilusTrader lifecycle logic for a small local requirement such as report writing, formatting, or convenience output. Solve small requirements in the narrow module that owns them, and ask before touching core run/build/stop flows.
 - Before touching Conda, global config, system directories, or live-trading credentials, explain the action and wait for explicit confirmation.
 - On Windows PowerShell 5, bare `Get-Content` can display normal UTF-8 Chinese files as mojibake. When reading files that may contain Chinese text, use `Get-Content -Encoding UTF8` or Python `Path.read_text(encoding="utf-8")`. Do not treat display mojibake as file corruption, and do not add BOM or rewrite file encodings unless the user explicitly asks.
+- For this project, run Python with the nt conda environment executable directly: `D:\app\miniconda\envs\nt\python.exe`. Do not use base `python` or `conda run` unless the user explicitly asks.
 
 ## Simplicity First
 

@@ -7,13 +7,10 @@ market:
 
 # 常改：策略参数。
 strategy:
-  name: orca_watch                  # 自动推导 strategies.orca_watch / OrcaWatch / OrcaWatchConfig
+  name: watch                       # 自动推导 strategies.watch / Watch / WatchConfig
   trade_size: "0"                   # 只为兼容构建入口；本策略不下单，不使用这个值
   params:
-    request_bars: true              # 启动时请求一段历史 1m bar
-    warmup_minutes: 10              # 请求最近多少分钟历史 bar
-    subscribe_ticks: false          # 默认只看 1m bar；需要 tick 时改 true
-    subscribe_external: true        # 订阅外部信号，只记录不交易
+    external_order_claims: true     # true 表示自动认领当前 set 里所有 instrument 的外部订单
 
 # 常改：live 运行参数。
 live:

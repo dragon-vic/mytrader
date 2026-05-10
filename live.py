@@ -13,7 +13,6 @@ from nautilus_trader.live.node import TradingNode
 from actors.data_recorder import DataRecorder
 from actors.data_recorder import DataRecorderConfig
 from utils.arguments import BINANCE_CLIENT_NAME
-from utils.arguments import DEFAULT_LIVE_LOG_FILE
 from utils.arguments import DEFAULT_TRADER_ID
 from utils.arguments import NODE_STOP_TOPIC
 from external.data_engine import EXTERNAL_SIGNAL_CLIENT_NAME
@@ -21,6 +20,8 @@ from external.data_engine import ExternalSignalDataClientConfig
 from external.data_engine import ExternalSignalLiveDataClientFactory
 from utils.binance_clients import BinanceConfigBuilder
 from utils.config_loader import load_settings
+from utils.report_writer import live_logs_dir
+from utils.report_writer import live_raw_log_name
 from utils.report_writer import prepare_report_dir
 from utils.report_writer import TraderReportWriter
 from utils.strategy_factory import build_strategy
@@ -62,14 +63,16 @@ def attach_node_stop_handler(node: TradingNode) -> None:
 def build_live_node(settings: dict) -> tuple[TradingNode, TraderReportWriter]:
     binance = BinanceConfigBuilder(settings)
     output_dir = prepare_report_dir(settings, "live")
+    log_dir = live_logs_dir()
+    log_dir.mkdir(parents=True, exist_ok=True)
     trade_config = TradingNodeConfig(
         trader_id=settings.get("runtime", {}).get("trader_id", DEFAULT_TRADER_ID),
         cache=binance.cache_config(),
         logging=LoggingConfig(
             log_level="INFO",
             log_level_file=settings["live"].get("log_level_file", "INFO"),
-            log_directory=str(output_dir),
-            log_file_name=settings["live"].get("log_file_name", DEFAULT_LIVE_LOG_FILE),
+            log_directory=str(log_dir),
+            log_file_name=live_raw_log_name(settings),
             log_colors=True,
             clear_log_file=True,
         ),
@@ -120,6 +123,6 @@ def main(config_name: str, mode: str | None = None) -> None:
     try:
         run_live_node(node)
         report_writer.write_final_reports(node.trader)
-        report_writer.write_clean_live_log()
+        report_writer.write_clean_live_log(settings)
     finally:
         node.dispose()
