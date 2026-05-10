@@ -5,12 +5,9 @@ PROJECT_DIR="$HOME/mytrader"
 START_MARKER="TradingNode: RUNNING"
 START_TIMEOUT_SECONDS=60
 
-if [ -x "$HOME/miniconda3/envs/nt/bin/python" ]; then
-  PYTHON_BIN="$HOME/miniconda3/envs/nt/bin/python"
-elif [ -x "$HOME/anaconda3/envs/nt/bin/python" ]; then
-  PYTHON_BIN="$HOME/anaconda3/envs/nt/bin/python"
-else
-  echo "找不到 conda 环境 nt 的 python，请确认环境位置" >&2
+PYTHON_BIN="$HOME/miniconda/envs/nt/bin/python"
+if [ ! -x "$PYTHON_BIN" ]; then
+  echo "找不到 conda 环境 nt 的 python：$PYTHON_BIN" >&2
   exit 1
 fi
 

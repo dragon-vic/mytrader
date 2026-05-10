@@ -91,6 +91,9 @@ def main() -> None:
     if len(sys.argv) != 1:
         raise ValueError("Usage: python run.py [config_name] [backtest|testnet|live]")
 
+    if os.name != "nt":
+        raise RuntimeError("Linux 交互模式请运行 ./nt；如果 nt 命令仍进入 run.py，请检查 type nt 是否指向本仓库脚本")
+
     if not sys.stdin.isatty():
         raise RuntimeError("交互模式需要真实终端；非终端环境请用 python run.py 配置名 模式")
 
