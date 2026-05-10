@@ -1,19 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 解析脚本真实路径，支持把这个文件软链接到 ~/.local/bin/nt。
-SOURCE="${BASH_SOURCE[0]}"
-while [ -L "$SOURCE" ]; do
-  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
-  SOURCE="$(readlink "$SOURCE")"
-  case "$SOURCE" in
-    /*) ;;
-    *) SOURCE="$DIR/$SOURCE" ;;
-  esac
-done
+PROJECT_DIR="$HOME/mytrader"
 
-PROJECT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
-PYTHON_BIN="${NT_PYTHON:-python}"
+if [ -x "$HOME/miniconda3/envs/nt/bin/python" ]; then
+  PYTHON_BIN="$HOME/miniconda3/envs/nt/bin/python"
+elif [ -x "$HOME/anaconda3/envs/nt/bin/python" ]; then
+  PYTHON_BIN="$HOME/anaconda3/envs/nt/bin/python"
+else
+  echo "找不到 conda 环境 nt 的 python，请确认环境位置" >&2
+  exit 1
+fi
 
 cd "$PROJECT_DIR"
 exec "$PYTHON_BIN" run.py "$@"

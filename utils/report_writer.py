@@ -13,7 +13,8 @@ from rich.console import Console
 from rich.table import Table
 
 from utils.arguments import EMPTY_SUMMARY
-from utils.arguments import LIVE_LOG_MARKER
+from utils.arguments import LIVE_LOG_START_MARKER
+from utils.arguments import LIVE_LOG_STOP_MARKER
 from utils.arguments import LIVE_RESULT_FILES
 from utils.arguments import LOGS_DIR
 from utils.arguments import OBSOLETE_REPORT_FILES
@@ -356,8 +357,13 @@ class TraderReportWriter:
             lines.append(f"- {label}: {row.get(key, '')}")
         (self.output_dir / SUMMARY_FILE).write_text("\n".join(lines) + "\n", encoding="utf-8-sig")
 
-    # 从 TradingNode RUNNING 标记开始保留 live 日志。
-    def write_clean_live_log(self, settings: dict[str, Any], marker: str = LIVE_LOG_MARKER) -> None:
+    # 保留 TradingNode RUNNING 到 STOPPING 之间的 live 日志。
+    def write_clean_live_log(
+        self,
+        settings: dict[str, Any],
+        start_marker: str = LIVE_LOG_START_MARKER,
+        stop_marker: str = LIVE_LOG_STOP_MARKER,
+    ) -> None:
         source = live_raw_log_path(settings)
         target = final_live_log_path(settings)
         if not source.exists():
@@ -366,10 +372,15 @@ class TraderReportWriter:
         lines = source.read_text(encoding="utf-8", errors="replace").splitlines()
         start = 0
         for index, line in enumerate(lines):
-            if marker in line:
+            if start_marker in line:
                 start = index
                 break
-        target.write_text("\n".join(lines[start:]) + "\n", encoding="utf-8")
+        end = len(lines)
+        for index, line in enumerate(lines[start:], start=start):
+            if stop_marker in line:
+                end = index
+                break
+        target.write_text("\n".join(lines[start:end]) + "\n", encoding="utf-8")
         source.unlink()
 
 

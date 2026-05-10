@@ -14,7 +14,8 @@ DEFAULT_CONFIG_NAME = "funding"
 DEFAULT_TRADER_ID = "TRADER-001"
 DEFAULT_LIVE_LOG_FILE = "live_raw"
 LOGS_DIR = "logs"
-LIVE_LOG_MARKER = "TradingNode: RUNNING"
+LIVE_LOG_START_MARKER = "TradingNode: RUNNING"
+LIVE_LOG_STOP_MARKER = "TradingNode: STOPPING"
 
 # NT msgbus topic。
 NODE_STOP_TOPIC = "controls.node.stop"

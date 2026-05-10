@@ -95,9 +95,19 @@ class Watch(Strategy):
     def on_position_event(self, event: PositionEvent) -> None:
         pass
 
-    # 其他事件只打 debug，避免正常日志太吵。
+    # 非订单事件完整打出来，临时观察 live 会收到哪些事件。
     def on_event(self, event) -> None:
-        pass
+        if isinstance(event, OrderEvent):
+            return
+        self.log.info(f"non_order_event type={type(event).__name__} payload={self.event_payload(event)}")
+
+    # 把 NT 事件尽量展开成字段，方便从日志里观察。
+    def event_payload(self, event):
+        if hasattr(type(event), "to_dict"):
+            return type(event).to_dict(event)
+        if hasattr(event, "__dict__"):
+            return event.__dict__
+        return event
 
     # 停止时平掉本策略关注 instrument 的全部仓位。
     def on_stop(self) -> None:
