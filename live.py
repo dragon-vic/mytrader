@@ -78,6 +78,7 @@ def build_live_node(settings: dict) -> tuple[TradingNode, TraderReportWriter]:
                 "Portfolio": "WARNING",
                 "ExecClient-BINANCE": "WARNING",
                 settings["strategy"]["class"]: "WARNING",
+                "DataRecorder": "INFO",
             },
             clear_log_file=True,
         ),

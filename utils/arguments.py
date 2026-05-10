@@ -138,6 +138,7 @@ REPORT_COLUMNS = {
         "account_id",
         "strategy_id",
         "position_id",
+        "event_id",
     ],
 }
 
@@ -155,6 +156,7 @@ ACCOUNT_COLUMNS = [
     "account_type",
     "base_currency",
     "is_reported",
+    "event_id",
 ]
 
 POSITION_COLUMNS = [
@@ -172,6 +174,7 @@ POSITION_COLUMNS = [
     "account_id",
     "strategy_id",
     "position_id",
+    "event_id",
 ]
 
 # summary_aggregate.md 字段和中文标签。

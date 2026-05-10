@@ -141,7 +141,11 @@ class TraderReportWriter:
 
     # 写出给人看的 CSV 时，最后一步统一改中文列名。
     def write_csv(self, df: pd.DataFrame, filename: str) -> None:
-        drop_empty_columns(to_chinese_columns(df)).to_csv(self.output_dir / filename, index=False, encoding="utf-8-sig")
+        drop_empty_columns(to_chinese_columns(drop_duplicate_events(df))).to_csv(
+            self.output_dir / filename,
+            index=False,
+            encoding="utf-8-sig",
+        )
 
     # 把运行中已经落盘的英文 CSV 在结束时改成中文表头。
     def localize_runtime_csv(self, filename: str) -> None:
@@ -176,10 +180,15 @@ class TraderReportWriter:
     # 从 NT cache 回写完整仓位事件，补齐停止阶段平仓事件。
     def write_position_events(self, trader) -> None:
         rows = []
+        seen_event_ids = set()
         for position in trader._cache.positions():
             for index, event in enumerate(position.events):
+                if event.event_id in seen_event_ids:
+                    continue
+                seen_event_ids.add(event.event_id)
                 row = type(event).to_dict(event)
                 row["ts_event"] = pd.to_datetime(event.ts_event, unit="ns", utc=True)
+                row["event_id"] = str(event.event_id)
                 if index == 0:
                     row["event_type"] = "PositionOpened"
                 elif position.ts_closed and event.ts_event == position.ts_closed:
@@ -195,8 +204,12 @@ class TraderReportWriter:
                 row["fill_price"] = row.get("last_px", "")
                 rows.append({column: row.get(column) for column in REPORT_COLUMNS["position_events"]})
             for event in position.adjustments:
+                if event.event_id in seen_event_ids:
+                    continue
+                seen_event_ids.add(event.event_id)
                 row = type(event).to_dict(event)
                 row["ts_event"] = pd.to_datetime(event.ts_event, unit="ns", utc=True)
+                row["event_id"] = str(event.event_id)
                 row["event_type"] = type(event).__name__
                 row["event_side"] = ""
                 row["fill_quantity"] = ""
@@ -566,6 +579,14 @@ def read_report_csv(output_dir: Path, filename: str) -> pd.DataFrame:
 def drop_empty_columns(df: pd.DataFrame) -> pd.DataFrame:
     empty = df.isna() | df.astype(str).apply(lambda column: column.str.strip().isin(("", "nan", "None", "NaT")))
     return df.loc[:, ~empty.all(axis=0)]
+
+
+# 有 event_id 的 report 按事件 ID 去重，避免 NT 重复发布同一个账户或仓位事件。
+def drop_duplicate_events(df: pd.DataFrame) -> pd.DataFrame:
+    for column in ("event_id", "事件ID"):
+        if column in df.columns:
+            return df.drop_duplicates(subset=[column], keep="first")
+    return df
 
 
 # 把纳秒时间戳转成北京时间字符串。
