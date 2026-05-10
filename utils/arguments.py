@@ -21,7 +21,7 @@ LIVE_LOG_STOP_MARKER = "TradingNode: STOPPING"
 NODE_STOP_TOPIC = "controls.node.stop"
 EVENT_ORDER_TOPIC = "events.order.*"
 EVENT_POSITION_TOPIC = "events.position.*"
-EVENT_ACCOUNT_TOPIC = "events.account.*"
+EVENT_ACCOUNT_TOPIC = "events.account.BINANCE-USDT_FUTURES-master"
 
 # Binance 和外部信号 data client 名称。
 BINANCE_CLIENT_NAME = "BINANCE"

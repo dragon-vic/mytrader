@@ -27,6 +27,7 @@ class DataRecorder(Actor):
     def __init__(self, config: DataRecorderConfig) -> None:
         super().__init__(config)
         self.output_dir = Path(config.output_dir)
+        self.seen_account_event_ids = set()
 
     # 启动时订阅所有 live 事件，后续由 actor 统一落盘。
     def on_start(self) -> None:
@@ -48,6 +49,10 @@ class DataRecorder(Actor):
 
     # 把账户余额变化展开成一币种一行，并保留 info 字段用于判断 funding。
     def handle_account_event(self, event: AccountState) -> None:
+        if event.event_id in self.seen_account_event_ids:
+            return
+        self.seen_account_event_ids.add(event.event_id)
+
         state = AccountState.to_dict(event)
         self.log.info(f"[ACCOUNT] {event}")
         info = state.get("info") or {}

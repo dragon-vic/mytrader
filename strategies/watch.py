@@ -75,9 +75,6 @@ class Watch(Strategy):
         self.entry_submitted = True
         self.log.info(f"Watch entry sell submitted: notional={self.entry_notional}, quantity={quantity}")
 
-    # 每根 1m bar 到达时记录行情摘要。
-    def on_bar(self, bar: Bar) -> None:
-        self.submit_entry_sell(Decimal(str(bar.close)))
 
     # 可选 tick 订阅开启时记录最新成交。
     def on_trade_tick(self, tick: TradeTick) -> None:
