@@ -19,6 +19,10 @@ from utils.arguments import POSITION_COLUMNS
 from utils.arguments import POSITION_EVENTS_FILE
 
 
+YELLOW = "\033[33m"
+RESET = "\033[0m"
+
+
 class DataRecorderConfig(ActorConfig, frozen=True):
     output_dir: str
 
@@ -35,6 +39,8 @@ class DataRecorder(Actor):
         self.msgbus.subscribe(EVENT_ORDER_TOPIC, self.handle_order_event)
         self.msgbus.subscribe(EVENT_POSITION_TOPIC, self.handle_position_event)
         self.msgbus.subscribe(EVENT_ACCOUNT_TOPIC, self.handle_account_event)
+        self.msgbus.subscribe("events.account.*", self.handle_funding)
+
         self.log.info("DataRecorder started")
 
     # 停止时退订 actor 自己注册的事件。
@@ -42,19 +48,23 @@ class DataRecorder(Actor):
         self.msgbus.unsubscribe(EVENT_ORDER_TOPIC, self.handle_order_event)
         self.msgbus.unsubscribe(EVENT_POSITION_TOPIC, self.handle_position_event)
         self.msgbus.unsubscribe(EVENT_ACCOUNT_TOPIC, self.handle_account_event)
+        self.msgbus.unsubscribe(EVENT_ACCOUNT_TOPIC, self.handle_account_event)
+
+    def  handle_funding(self, event: AccountState) -> None:
+        self.log.info(f"{YELLOW}[FUNDING]{RESET} {event}")
 
     # 订单事件由 actor 统一打日志，避免策略和 NT 组件重复输出。
     def handle_order_event(self, event: OrderEvent) -> None:
-        self.log.info(f"[ORDER] {event}")
+        self.log.info(f"{YELLOW}[ORDER]{RESET} {event}")
 
     # 把账户余额变化展开成一币种一行，并保留 info 字段用于判断 funding。
     def handle_account_event(self, event: AccountState) -> None:
-        if event.event_id in self.seen_account_event_ids:
-            return
-        self.seen_account_event_ids.add(event.event_id)
-
         state = AccountState.to_dict(event)
-        self.log.info(f"[ACCOUNT] {event}")
+        event_id = state.get("event_id")
+        if event_id in self.seen_account_event_ids:
+            return
+        self.seen_account_event_ids.add(event_id)
+        self.log.info(f"{YELLOW}[ACCOUNT]{RESET} {event}")
         info = state.get("info") or {}
         info_type = info.get("type", "")
         info_reason = info.get("reason", "") or info.get("m", "")
@@ -73,7 +83,7 @@ class DataRecorder(Actor):
     # 把 live 仓位事件落盘，方便和账户变化对照。
     def handle_position_event(self, event: PositionEvent) -> None:
         row = type(event).to_dict(event)
-        self.log.info(f"[POSITION] {event}")
+        self.log.info(f"{YELLOW}[POSITION]{RESET} {event}")
         row["ts_event"] = pd.to_datetime(event.ts_event, unit="ns", utc=True)
         row["event_type"] = type(event).__name__
         row["adjustment_type"] = row.get("adjustment_type", "")
