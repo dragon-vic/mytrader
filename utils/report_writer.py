@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from dataclasses import asdict
 from datetime import datetime
@@ -28,6 +29,10 @@ from utils.config_loader import ROOT
 from utils.report_labels import to_chinese_columns
 
 
+LOCAL_TZ = ZoneInfo("Asia/Shanghai")
+LOG_UTC_PREFIX = re.compile(r"^(?P<ts>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)(?P<rest>\s.*)$")
+
+
 # 返回当前 set 在 backtest/live 下的报告目录。
 def run_reports_dir(settings: dict[str, Any], run_type: str) -> Path:
     return ROOT / settings["project"]["reports_dir"] / run_type / settings["project"]["config_name"]
@@ -50,7 +55,7 @@ def live_raw_log_path(settings: dict[str, Any]) -> Path:
 
 # 返回最终清洗日志路径，避免同一分钟重复运行时覆盖旧日志。
 def final_live_log_path(settings: dict[str, Any]) -> Path:
-    end_time = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d-%H%M")
+    end_time = datetime.now(LOCAL_TZ).strftime("%Y%m%d-%H%M")
     base = live_logs_dir() / f"{settings['project']['config_name']}-{settings['mode']}-{end_time}.log"
     path = base
     index = 2
@@ -208,6 +213,14 @@ class TraderReportWriter:
                 rows.append({column: row.get(column) for column in REPORT_COLUMNS["position_events"]})
         if rows:
             self.write_csv(pd.DataFrame(rows), "position_events.csv")
+
+    # 把 NT 原始日志行首 UTC 时间改成北京时间，保存后的 live 日志更方便直接阅读。
+    def localize_live_log_line(self, line: str) -> str:
+        match = LOG_UTC_PREFIX.match(line)
+        if match is None:
+            return line
+        timestamp = pd.Timestamp(match.group("ts")).tz_convert(LOCAL_TZ)
+        return f"{timestamp.isoformat()}{match.group('rest')}"
 
     # 生成更容易看的 positions.csv 和中文 summary.md。
     def write_clean_reports(self, positions: pd.DataFrame) -> None:
@@ -384,7 +397,8 @@ class TraderReportWriter:
             if stop_marker in line:
                 end = index
                 break
-        target.write_text("\n".join(lines[start:end]) + "\n", encoding="utf-8")
+        localized_lines = [self.localize_live_log_line(line) for line in lines[start:end]]
+        target.write_text("\n".join(localized_lines) + "\n", encoding="utf-8")
         source.unlink()
 
 
