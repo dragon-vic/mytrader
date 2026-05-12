@@ -22,6 +22,14 @@ For this project, environment, Conda, system directories, global config, and net
 
 ## Project-Specific Rules
 
+- Environment facts are part of the workflow. If a local permission, shell, runtime, or tooling issue forces a different method, add the durable workaround here so future turns do not rediscover it.
+- In this Windows workspace, `rg.exe` can fail with "Access denied". When that happens, use PowerShell-native discovery instead, for example `Get-ChildItem -Recurse -File -ErrorAction SilentlyContinue` and `Select-String`, scoped to the needed file types or directories.
+- Recursive PowerShell scans can hit access-denied paths such as `.pytest_cache`. Use `-ErrorAction SilentlyContinue` or narrow the search scope instead of treating that as repository corruption.
+- When aligning a strategy design, surface implementation details and tradeoff points for user confirmation before coding.
+- Keep names short: variables should usually be at most two words, functions at most three words, and classes at most two words plus a suffix such as `Actor`, `Str`, or the framework-required type name.
+- Extract helper functions only for logic reused multiple times or genuinely clarifying a dense block. Prefer shallow call depth and direct local code for one-off logic.
+- Do not add broad fallback adapters for multiple user input formats unless explicitly requested. Prefer one short, documented config format over accepting many equivalent spellings.
+- For Binance U futures account events, use the exact topic `events.account.BINANCE-USDT_FUTURES-master` when account data is needed. Do not treat it as a funding-only signal; order activity can also publish account events.
 - Do not create duplicate folder names that confuse IDE indexing. The repository root is `nt_quant`; the Python package must not also be named `nt_quant`.
 - At the current early stage, avoid a package folder. Keep user-facing entry scripts in the repository root and put strategy files directly under the repository root `strategies/` directory.
 - Do not use an argparse task dispatcher for this project. Current entry scripts are `fetch_data.py`, `backtest.py`, and `live.py`.

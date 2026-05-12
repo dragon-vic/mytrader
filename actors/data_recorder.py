@@ -38,7 +38,7 @@ class DataRecorder(Actor):
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.msgbus.subscribe(EVENT_ORDER_TOPIC, self.handle_order_event)
         self.msgbus.subscribe(EVENT_POSITION_TOPIC, self.handle_position_event)
-        self.msgbus.subscribe(EVENT_ACCOUNT_TOPIC, self.handle_account_event)
+        self.msgbus.subscribe("events.account.BINANCE-USDT_FUTURES-master", self.handle_account_event)
         self.msgbus.subscribe("events.account.*", self.handle_funding)
 
         self.log.info("DataRecorder started")

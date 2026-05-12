@@ -61,7 +61,8 @@ class BinanceConfigBuilder:
             account_type=getattr(BinanceAccountType, self.settings["live"]["account_type"]),
             environment=getattr(BinanceEnvironment, self.settings["live"]["environment"]),
             proxy_url=proxy_url(self.settings),
-            instrument_provider=self.instrument_provider(),
+            instrument_provider=BinanceInstrumentProviderConfig(
+                load_all=True),
             routing=RoutingConfig(default=True, venues=self.venues),
         )
 
@@ -75,6 +76,7 @@ class BinanceConfigBuilder:
             environment=getattr(BinanceEnvironment, self.settings["live"]["environment"]),
             proxy_url=proxy_url(self.settings),
             futures_margin_types=self.futures_margin_types(),
-            instrument_provider=self.instrument_provider(),
+            instrument_provider=BinanceInstrumentProviderConfig(
+                load_all=True),
             routing=RoutingConfig(default=True, venues=self.venues),
         )

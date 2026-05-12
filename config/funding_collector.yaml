@@ -1,0 +1,52 @@
+# 常改：heartbeat tick，只用于触发策略时间点。
+market:
+  symbol: TRUMP/USDT
+  timeframe: 1s
+  limit: 1000
+  batches: 1
+
+strategy:
+  name: funding_collector
+  trade_notional: "5.5"
+  params:
+    mode: watch                 # watch 只估算；trade 真实下单
+    min_rate: "0.0050"          # abs(rate) >= 50bps 才进入候选
+    trade_scope: all            # USDT 永续下单范围；all 或 base symbol，如 BTC,ETH
+    collect_before: 5           # price: t-5 到 t+3；rate: t-5 到 t-1
+    rate_end_before: 1
+    entry_before: 1             # t-1 到 t 内第一条 heartbeat tick 触发
+    close_after: 3              # trade 平仓和 watch 记账都在 t+3 后触发
+    stop_close: true
+
+# 常改：live 运行参数。
+live:
+  account_type: USDT_FUTURES
+  log_level_file: INFO
+  margin_type: ISOLATED
+
+# 常改：回测账户参数；本策略主要用于 live 观察。
+backtest:
+  starting_balance: "100000 USDT"
+  account_type: MARGIN
+  oms_type: NETTING
+  log_level: INFO
+  log_bypass: true
+
+# 低频：heartbeat instrument 的精度。live 下 node 会加载全部合约。
+instrument:
+  kind: perpetual
+  settlement_currency: USDT
+  is_inverse: false
+  price_precision: 5
+  size_precision: 1
+  price_increment: "0.00010"
+  size_increment: "0.1"
+  multiplier: "1"
+  min_quantity: "0.1"
+  max_quantity: "1000000"
+  min_notional: "5"
+  max_price: "1000000"
+  margin_init: "1"
+  margin_maint: "1"
+  maker_fee: "0.0002"
+  taker_fee: "0.0005"
