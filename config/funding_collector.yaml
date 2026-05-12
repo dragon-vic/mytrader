@@ -2,8 +2,6 @@
 market:
   symbol: TRUMP/USDT
   timeframe: 1s
-  limit: 1000
-  batches: 1
 
 strategy:
   name: funding_collector
@@ -12,10 +10,10 @@ strategy:
     mode: watch                 # watch 只估算；trade 真实下单
     min_rate: "0.0050"          # abs(rate) >= 50bps 才进入候选
     trade_scope: all            # USDT 永续下单范围；all 或 base symbol，如 BTC,ETH
-    collect_before: 5           # price: t-5 到 t+3；rate: t-5 到 t-1
-    rate_end_before: 1
-    entry_before: 1             # t-1 到 t 内第一条 heartbeat tick 触发
-    close_after: 3              # trade 平仓和 watch 记账都在 t+3 后触发
+    entry_sec: 2                # t-2 拉一次全量 rate/mark 快照
+    entry_before: 1             # t-1 到 t 内，快照完成才触发下单/冻结
+    exit_sec: 2                 # t+2 拉一次全量 mark 快照并平仓/记账
+    api_timeout: 0.8            # 快照超时，避免阻塞下单和平仓
     stop_close: true
 
 # 常改：live 运行参数。
@@ -31,22 +29,22 @@ backtest:
   oms_type: NETTING
   log_level: INFO
   log_bypass: true
-
-# 低频：heartbeat instrument 的精度。live 下 node 会加载全部合约。
-instrument:
-  kind: perpetual
-  settlement_currency: USDT
-  is_inverse: false
-  price_precision: 5
-  size_precision: 1
-  price_increment: "0.00010"
-  size_increment: "0.1"
-  multiplier: "1"
-  min_quantity: "0.1"
-  max_quantity: "1000000"
-  min_notional: "5"
-  max_price: "1000000"
-  margin_init: "1"
-  margin_maint: "1"
-  maker_fee: "0.0002"
-  taker_fee: "0.0005"
+  data:
+    limit: 1000
+    batches: 1
+  instrument:
+    settlement_currency: USDT
+    is_inverse: false
+    price_precision: 5
+    size_precision: 1
+    price_increment: "0.00010"
+    size_increment: "0.1"
+    multiplier: "1"
+    min_quantity: "0.1"
+    max_quantity: "1000000"
+    min_notional: "5"
+    max_price: "1000000"
+    margin_init: "1"
+    margin_maint: "1"
+    maker_fee: "0.0002"
+    taker_fee: "0.0005"

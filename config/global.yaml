@@ -28,21 +28,28 @@ live:
       api_key_env: BINANCE_FUTURES_API_KEY
       api_secret_env: BINANCE_FUTURES_API_SECRET
 
-# 低频：当前 set 的永续合约 instrument 精度和限制。
+# 低频：live 只需要市场类型来推导 NT symbol。
 instrument:
   kind: perpetual                    # perpetual 表示 U 本位永续合约
-  settlement_currency: USDT          # 结算币
-  is_inverse: false                  # false 表示 U 本位正向合约
-  price_precision: 2                 # 价格小数位
-  size_precision: 3                  # 数量小数位
-  price_increment: "0.01"            # 最小价格跳动
-  size_increment: "0.001"            # 最小数量跳动
-  multiplier: "1"                    # 合约乘数
-  min_quantity: "0.001"              # 最小下单数量
-  max_quantity: "10000"              # 最大下单数量
-  min_notional: "5"                  # 最小名义金额
-  max_price: "10000000"              # 允许的最大价格
-  margin_init: "1"                   # 回测用初始保证金比例
-  margin_maint: "1"                  # 回测用维持保证金比例
-  maker_fee: "0.0002"                # maker 手续费率
-  taker_fee: "0.0005"                # taker 手续费率
+
+# 全局：回测/拉数据默认参数。live 缺少这些字段不应受影响。
+backtest:
+  data:
+    limit: 1000
+    batches: 3
+  instrument:
+    settlement_currency: USDT        # 结算币
+    is_inverse: false                # false 表示 U 本位正向合约
+    price_precision: 2               # 价格小数位
+    size_precision: 3                # 数量小数位
+    price_increment: "0.01"          # 最小价格跳动
+    size_increment: "0.001"          # 最小数量跳动
+    multiplier: "1"                  # 合约乘数
+    min_quantity: "0.001"            # 最小下单数量
+    max_quantity: "10000"            # 最大下单数量
+    min_notional: "5"                # 最小名义金额
+    max_price: "10000000"            # 允许的最大价格
+    margin_init: "1"                 # 回测用初始保证金比例
+    margin_maint: "1"                # 回测用维持保证金比例
+    maker_fee: "0.0002"              # maker 手续费率
+    taker_fee: "0.0005"              # taker 手续费率

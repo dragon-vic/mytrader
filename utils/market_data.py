@@ -30,9 +30,9 @@ def kline_interval(timeframe: str) -> BinanceKlineInterval:
 
 # 管理当前 set 的行情拉取、CSV 路径和 NT bar 转换。
 class MarketDataStore:
-    def __init__(self, settings: dict[str, Any]) -> None:
+    def __init__(self, settings: dict[str, Any], run_type: str = "backtest") -> None:
         self.settings = settings
-        self.factory = InstrumentFactory(settings)
+        self.factory = InstrumentFactory(settings, run_type)
         self.markets = self.factory.markets
 
     # 生成指定市场的原始 OHLCV 文件路径。

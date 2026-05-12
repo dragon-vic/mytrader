@@ -26,7 +26,6 @@ class BinanceConfigBuilder:
     def __init__(self, settings: dict[str, Any]) -> None:
         self.settings = settings
         self.factory = InstrumentFactory(settings)
-        self.instruments = self.factory.instruments()
         self.venues = frozenset(market["venue"] for market in self.factory.markets)
 
     # 构建 NT cache 配置，当前只收紧 bar/tick 内存容量。
@@ -42,7 +41,7 @@ class BinanceConfigBuilder:
     def instrument_provider(self) -> BinanceInstrumentProviderConfig:
         return BinanceInstrumentProviderConfig(
             load_all=False,
-            load_ids=frozenset(instrument.id for instrument in self.instruments),
+            load_ids=frozenset(instrument.id for instrument in self.factory.instruments()),
         )
 
     # 从当前 set 的 live.margin_type 构建 Binance 合约全仓/逐仓设置。

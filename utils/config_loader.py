@@ -42,17 +42,18 @@ def snake_to_pascal(name: str) -> str:
 
 # 补齐一个市场的交易所、币种和 Binance/NT symbol。
 def normalize_market(market: dict[str, Any], settings: dict[str, Any]) -> dict[str, Any]:
-    instrument_kind = settings["instrument"]["kind"]
+    instrument_kind = settings.get("instrument", {}).get("kind", "perpetual")
     exchange = settings["exchange"]
     base, quote = market["symbol"].split("/")
     raw_symbol = market.get("raw_symbol") or f"{base}{quote}"
     instrument_symbol = market.get("instrument_symbol") or (
         raw_symbol if instrument_kind == "spot" else f"{raw_symbol}-PERP"
     )
+    data_cfg = settings.get("backtest", {}).get("data", {})
     return {
         "timeframe": "1m",
-        "limit": 1000,
-        "batches": 3,
+        "limit": data_cfg.get("limit", 1000),
+        "batches": data_cfg.get("batches", 3),
         "since": None,
         "exchange": exchange["name"],
         "venue": exchange["venue"],
@@ -87,9 +88,14 @@ def normalize_settings(settings: dict[str, Any]) -> None:
         settings["market"] = normalize_market({**market_defaults, **settings["market"]}, settings)
 
     first_market = market_configs(settings)[0]
-    settings["instrument"].setdefault("base_currency", first_market["base_currency"])
-    settings["instrument"].setdefault("quote_currency", first_market["quote_currency"])
-    settings["instrument"].setdefault("settlement_currency", first_market["settlement_currency"])
+    if "instrument" in settings:
+        settings["instrument"].setdefault("base_currency", first_market["base_currency"])
+        settings["instrument"].setdefault("quote_currency", first_market["quote_currency"])
+        settings["instrument"].setdefault("settlement_currency", first_market["settlement_currency"])
+    if "instrument" in settings.get("backtest", {}):
+        settings["backtest"]["instrument"].setdefault("base_currency", first_market["base_currency"])
+        settings["backtest"]["instrument"].setdefault("quote_currency", first_market["quote_currency"])
+        settings["backtest"]["instrument"].setdefault("settlement_currency", first_market["settlement_currency"])
     if "external" in settings:
         settings["external"].setdefault("source", settings["strategy"]["name"])
     normalize_strategy(settings)

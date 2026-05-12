@@ -51,6 +51,8 @@ For this project, environment, Conda, system directories, global config, and net
 - Reports are stored as `reports/{run_type}/{config_name}`. Backtest writes final reports after the run; live writes fills immediately from `OrderFilled` events and writes final order/position snapshots after the run.
 - Strategies must not import report-writing utilities. Live report writing belongs beside the node/trader setup and should subscribe to `events.order.{strategy_id}` through `Trader`.
 - In set files under `config/`, put frequently changed strategy, market, backtest, and live run parameters near the top; keep stable instrument and project plumbing near the bottom.
+- In YAML set files, parameters used only for backtesting belong under `backtest`, not top-level strategy/live/instrument sections.
+- Live config loading must not require backtest-only fields. Keep live path dependent on symbols, venues, credentials, and runtime settings; put backtest data limits and synthetic instrument precision/fee/margin values under `backtest`.
 - Entry `main(config_name=None)` functions should let CLI config names override function arguments; function arguments are only the fallback for IDE runs without CLI args.
 - Do not add defensive guards or fallback checks that duplicate NautilusTrader's normal event guarantees. Keep strategy callbacks close to NT examples unless there is a specific observed failure.
 - Do not catch exceptions to hide or convert errors during normal development. Let errors surface, then fix the underlying cause.

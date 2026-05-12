@@ -35,10 +35,14 @@ def optional_money(value: Any, currency: Currency) -> Money | None:
 
 # 根据 set 构建 NT instrument 和 bar type。
 class InstrumentFactory:
-    def __init__(self, settings: dict[str, Any]) -> None:
+    def __init__(self, settings: dict[str, Any], run_type: str = "live") -> None:
         self.settings = settings
         self.markets = market_configs(settings)
-        self.cfg = settings["instrument"]
+        if run_type == "backtest":
+            self.cfg = dict(settings.get("backtest", {}).get("instrument", {}))
+            self.cfg.update(settings.get("instrument", {}))
+        else:
+            self.cfg = dict(settings.get("instrument", {}))
 
     # 返回 Binance 原生 symbol，文件名和 NT symbol 可以不同。
     def raw_symbol(self, market: dict[str, Any]) -> str:

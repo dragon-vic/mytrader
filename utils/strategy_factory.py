@@ -15,12 +15,12 @@ def build_strategy(settings: dict[str, Any], run_type: str = "backtest"):
     strategy = settings["strategy"]
     module = importlib.import_module(strategy["module"])
     config_cls = getattr(module, strategy["config_class"])
-    instruments = InstrumentFactory(settings)
+    instruments = InstrumentFactory(settings, run_type)
     params = strategy_params(settings, config_cls, run_type, instruments)
 
     if "markets" in settings:
         config = config_cls(
-            instrument_ids=[instrument.id for instrument in instruments.instruments()],
+            instrument_ids=[instruments.instrument_id(market) for market in instruments.markets],
             bar_types=instruments.bar_types(),
             trade_notional=Decimal(str(strategy["trade_notional"])),
             **params,
@@ -29,14 +29,14 @@ def build_strategy(settings: dict[str, Any], run_type: str = "backtest"):
         market = instruments.markets[0]
         if "trade_notional" in getattr(config_cls, "__annotations__", {}):
             config = config_cls(
-                instrument_id=instruments.instrument(market).id,
+                instrument_id=instruments.instrument_id(market),
                 bar_type=instruments.bar_type(market),
                 trade_notional=Decimal(str(strategy["trade_notional"])),
                 **params,
             )
         else:
             config = config_cls(
-                instrument_id=instruments.instrument(market).id,
+                instrument_id=instruments.instrument_id(market),
                 bar_type=instruments.bar_type(market),
                 trade_size=Decimal(str(strategy["trade_size"])),
                 **params,
@@ -54,7 +54,10 @@ def strategy_params(
     params = dict(settings["strategy"].get("params", {}))
     fields = getattr(config_cls, "__annotations__", {})
     if params.get("external_order_claims") is True:
-        params["external_order_claims"] = [item.id for item in instruments.instruments()]
+        params["external_order_claims"] = [
+            instruments.instrument_id(market)
+            for market in instruments.markets
+        ]
     if "event_log_path" in fields and params.get("event_log_path", "auto") == "auto":
         params["event_log_path"] = str(run_reports_dir(settings, run_type) / "strategy_events.csv")
     if "proxy_url" in fields and "proxy_url" not in params:

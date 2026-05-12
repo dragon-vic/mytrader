@@ -2,8 +2,6 @@
 market:
   symbol: ORCA/USDT                 # 当前 funding 实盘测试币种，ORCA 是 1h funding 间隔
   timeframe: 1m                     # bar 回测备用；live tick 模式不靠 bar 触发
-  limit: 1000                       # 每批拉取 K 线数量
-  batches: 3                        # 回测备用数据量
 
 # 常改：策略和资金费参数。
 strategy:
@@ -42,22 +40,26 @@ backtest:
   oms_type: NETTING                 # 净持仓模式
   log_level: INFO                   # NT 日志级别
   log_bypass: true                  # 批量迭代时先关闭完整 NT logo 日志
+  data:
+    limit: 1000                     # 每批拉取 K 线数量
+    batches: 3                      # 回测备用数据量
+  instrument:
+    settlement_currency: USDT       # 结算币
+    is_inverse: false               # false 表示 U 本位正向合约
+    price_precision: 7              # Binance ORCAUSDT pricePrecision
+    size_precision: 1               # Binance ORCAUSDT quantityPrecision
+    price_increment: "0.0010000"    # 最小价格跳动
+    size_increment: "0.1"           # 最小数量跳动
+    multiplier: "1"                 # 合约乘数
+    min_quantity: "0.1"             # 最小下单数量
+    max_quantity: "200000"          # 测试网 ORCAUSDT 最大数量
+    min_notional: "5"               # 最小名义金额
+    max_price: "2000"               # 允许最大价格
+    margin_init: "1"                # 回测用初始保证金比例
+    margin_maint: "1"               # 回测用维持保证金比例
+    maker_fee: "0.0002"             # maker 手续费率
+    taker_fee: "0.0005"             # taker 手续费率
 
-# 低频：ORCAUSDT 永续合约精度和限制。
+# 低频：live 只需要市场类型来推导 NT symbol。
 instrument:
   kind: perpetual                   # U 本位永续合约
-  settlement_currency: USDT         # 结算币
-  is_inverse: false                 # false 表示 U 本位正向合约
-  price_precision: 7                # Binance ORCAUSDT pricePrecision
-  size_precision: 1                 # Binance ORCAUSDT quantityPrecision
-  price_increment: "0.0010000"      # 最小价格跳动
-  size_increment: "0.1"             # 最小数量跳动
-  multiplier: "1"                   # 合约乘数
-  min_quantity: "0.1"               # 最小下单数量
-  max_quantity: "200000"            # 测试网 ORCAUSDT 最大数量
-  min_notional: "5"                 # 最小名义金额
-  max_price: "2000"                 # 允许最大价格
-  margin_init: "1"                  # 回测用初始保证金比例
-  margin_maint: "1"                 # 回测用维持保证金比例
-  maker_fee: "0.0002"               # maker 手续费率
-  taker_fee: "0.0005"               # taker 手续费率

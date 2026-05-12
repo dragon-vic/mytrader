@@ -1,19 +1,19 @@
 from __future__ import annotations
 
 import csv
+from time import perf_counter
 from datetime import UTC
 from datetime import datetime
 from decimal import Decimal
 from decimal import ROUND_CEILING
 from pathlib import Path
 
+import requests
 from nautilus_trader.config import StrategyConfig
 from nautilus_trader.model.data import BarType
-from nautilus_trader.model.data import FundingRateUpdate
 from nautilus_trader.model.data import TradeTick
 from nautilus_trader.model.enums import OrderSide
 from nautilus_trader.model.enums import TimeInForce
-from nautilus_trader.model.identifiers import ClientId
 from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.model.instruments import Instrument
 from nautilus_trader.trading.strategy import Strategy
@@ -26,43 +26,47 @@ class FundingCollectorConfig(StrategyConfig, frozen=True):
     mode: str = "watch"
     min_rate: Decimal = Decimal("0.0050")
     trade_scope: str = "all"
-    collect_before: float = 5.0
-    rate_end_before: float = 1.0
+    entry_sec: float = 2.0
     entry_before: float = 1.0
-    close_after: float = 3.0
+    exit_sec: float = 2.0
     stop_close: bool = True
     event_log_path: str = "auto"
+    api_url: str = "https://fapi.binance.com"
+    api_timeout: float = 0.8
+    proxy_url: str = ""
 
 
 class FundingCollector(Strategy):
     def __init__(self, config: FundingCollectorConfig) -> None:
         super().__init__(config)
-        self.cid = ClientId("BINANCE")
         self.mode = config.mode.lower()
         self.notional = Decimal(str(config.trade_notional))
         self.min_rate = Decimal(str(config.min_rate))
         self.fund_ns = 0
-        self.sent = False
-        self.closed = False
-        self.logged = False
+        self.entry_done = False
+        self.exit_done = False
+        self.sent_done = False
+        self.close_done = False
+        self.log_done = False
         self.ins: dict[InstrumentId, Instrument] = {}
         self.trade_ids: set[InstrumentId] | None = None
         self.ins_map: dict[InstrumentId, dict[str, Decimal]] = {}
         self.open_ids: set[InstrumentId] = set()
         self.log_path = Path(config.event_log_path)
+        self.proxies = {"http": config.proxy_url, "https": config.proxy_url} if config.proxy_url else None
 
-    # 启动时订阅所有永续的资金费和标记价，只用一个 tick 做触发器。
+    # 启动时只订阅 heartbeat tick，资金费和价格用 REST 全量快照。
     def on_start(self) -> None:
         if self.mode not in {"watch", "trade"}:
             raise RuntimeError(f"Invalid mode: {self.mode}")
-        if self.config.collect_before <= self.config.rate_end_before:
-            raise RuntimeError("collect_before must be greater than rate_end_before")
-        if self.config.rate_end_before < self.config.entry_before:
-            raise RuntimeError("rate_end_before must be greater than or equal to entry_before")
+        if self.config.entry_sec <= self.config.entry_before:
+            raise RuntimeError("entry_sec must be greater than entry_before")
         if self.config.entry_before <= 0:
             raise RuntimeError("entry_before must be positive")
-        if self.config.close_after <= 0:
-            raise RuntimeError("close_after must be positive")
+        if self.config.exit_sec <= 0:
+            raise RuntimeError("exit_sec must be positive")
+        if self.config.api_timeout <= 0:
+            raise RuntimeError("api_timeout must be positive")
 
         self._load_ins()
         self._load_scope()
@@ -70,10 +74,6 @@ class FundingCollector(Strategy):
             self._init_log()
 
         self._next_time()
-        for ins_id in self.ins:
-            self.subscribe_funding_rates(ins_id, client_id=self.cid)
-            self.subscribe_mark_prices(ins_id, client_id=self.cid)
-
         self.subscribe_trade_ticks(self.config.instrument_id)
 
         self.log.info(
@@ -81,77 +81,33 @@ class FundingCollector(Strategy):
             f"mode={self.mode}, heartbeat={self.config.instrument_id}, "
             f"instruments={len(self.ins)}, notional={self.notional}, "
             f"min_rate={self.min_rate}, trade_scope={self.config.trade_scope}, "
-            f"collect_before={self.config.collect_before}s, "
-            f"close_after={self.config.close_after}s"
+            f"entry_sec={self.config.entry_sec}s, exit_sec={self.config.exit_sec}s"
         )
 
-    # 只在 t-5 到 t-1 收集达标 rate。
-    def on_funding_rate(self, data: FundingRateUpdate) -> None:
-        now_ns = self.clock.timestamp_ns()
-        start_ns = self.fund_ns - int(self.config.collect_before * 1_000_000_000)
-        end_ns = self.fund_ns - int(self.config.rate_end_before * 1_000_000_000)
-        if now_ns < start_ns or now_ns >= end_ns:
-            return
-        if data.next_funding_ns != self.fund_ns:
-            return
-
-        rate = Decimal(str(data.rate))
-        if abs(rate) < self.min_rate:
-            self.ins_map.pop(data.instrument_id, None)
-            return
-
-        row = self.ins_map.setdefault(data.instrument_id, {})
-        row["rate"] = rate
-
-    # watch 收到 t 后第一口价，trade 只保留 t 前价格用于下单数量。
-    def on_mark_price(self, data) -> None:
-        now_ns = self.clock.timestamp_ns()
-        if self.mode == "watch":
-            if now_ns < self._open_ns() or now_ns > self._close_ns():
-                return
-        elif now_ns < self._open_ns() or now_ns >= self.fund_ns:
-            return
-        elif self.sent:
-            return
-
-        ins_id = getattr(data, "instrument_id", None)
-        if ins_id not in self.ins_map:
-            return
-
-        px = (
-            getattr(data, "value", None)
-            or getattr(data, "price", None)
-            or getattr(data, "mark", None)
-            or getattr(data, "mark_price", None)
-        )
-        if px is None:
-            self.log.warning(f"FundingCollector mark ignored: {data}")
-            return
-
-        row = self.ins_map[ins_id]
-        price = Decimal(str(px))
-        if now_ns < self.fund_ns:
-            row["pre"] = price
-        elif "post" not in row:
-            row["post"] = price
-
-    # heartbeat tick 负责最后一秒下单和 t+3 平仓/记账。
+    # heartbeat tick 负责 t-2/t+2 快照、最后一秒下单和平仓/记账。
     def on_trade_tick(self, tick: TradeTick) -> None:
         now_ns = self.clock.timestamp_ns()
-        if now_ns >= self._close_ns():
-            if self.mode == "trade" and not self.closed:
+        entry_ns = self.fund_ns - int(self.config.entry_sec * 1_000_000_000)
+        order_ns = self.fund_ns - int(self.config.entry_before * 1_000_000_000)
+        exit_ns = self.fund_ns + int(self.config.exit_sec * 1_000_000_000)
+
+        if now_ns >= exit_ns:
+            if not self.exit_done:
+                self._load_snap("post")
+                self.exit_done = True
+            if self.mode == "trade" and not self.close_done:
                 close_cnt = 0
                 for ins_id in list(self.open_ids):
                     self.close_all_positions(ins_id)
                     close_cnt += 1
-                self.closed = True
+                self.close_done = True
                 self.log.info(
                     "FundingCollector close summary: "
                     f"funding={self._iso(self.fund_ns)}, close_count={close_cnt}, "
                     f"candidates={len(self.ins_map)}"
                 )
                 self._reset_state()
-            elif self.mode == "watch" and not self.logged:
+            elif self.mode == "watch" and not self.log_done:
                 row_cnt, fund_sum, pnl_sum, net_sum = self._write_watch()
                 self.log.info(
                     "FundingCollector watch summary: "
@@ -162,11 +118,39 @@ class FundingCollector(Strategy):
                 self._reset_state()
             return
 
-        if self.sent:
-            return
-        if now_ns < self.fund_ns - int(self.config.entry_before * 1_000_000_000):
-            return
         if now_ns >= self.fund_ns:
+            if not self.sent_done:
+                self.sent_done = True
+                self.log.info(
+                    "FundingCollector entry skipped: "
+                    f"funding={self._iso(self.fund_ns)}, reason=entry_window_missed"
+                )
+            return
+
+        if entry_ns <= now_ns < order_ns and not self.entry_done and not self.sent_done:
+            snap_ok = self._load_snap("pre")
+            if not snap_ok:
+                return
+            if self.clock.timestamp_ns() < order_ns:
+                self.entry_done = True
+            else:
+                self.sent_done = True
+                self.log.info(
+                    "FundingCollector entry skipped: "
+                    f"funding={self._iso(self.fund_ns)}, reason=snapshot_late"
+                )
+            return
+
+        if self.sent_done:
+            return
+        if now_ns < order_ns:
+            return
+        if not self.entry_done:
+            self.sent_done = True
+            self.log.info(
+                "FundingCollector entry skipped: "
+                f"funding={self._iso(self.fund_ns)}, reason=snapshot_not_ready"
+            )
             return
 
         if self.mode == "trade":
@@ -205,13 +189,11 @@ class FundingCollector(Strategy):
                 f"priced={px_cnt}"
             )
 
-        self.sent = True
+        self.sent_done = True
 
     def on_stop(self) -> None:
         self.unsubscribe_trade_ticks(self.config.instrument_id)
         for ins_id in self.ins:
-            self.unsubscribe_funding_rates(ins_id, client_id=self.cid)
-            self.unsubscribe_mark_prices(ins_id, client_id=self.cid)
             self.cancel_all_orders(ins_id)
 
         if self.config.stop_close and self.mode == "trade":
@@ -223,9 +205,11 @@ class FundingCollector(Strategy):
     def on_reset(self) -> None:
         self.ins_map.clear()
         self.open_ids.clear()
-        self.sent = False
-        self.closed = False
-        self.logged = False
+        self.entry_done = False
+        self.exit_done = False
+        self.sent_done = False
+        self.close_done = False
+        self.log_done = False
 
     # 从 cache 读取 node 已加载的 USDT 本位永续。
     def _load_ins(self) -> None:
@@ -236,6 +220,64 @@ class FundingCollector(Strategy):
         }
         if not self.ins:
             raise RuntimeError("No USDT perpetual instruments found in cache")
+
+    # 拉全量 premiumIndex，并按阶段写 pre/post 价格。
+    def _load_snap(self, phase: str) -> bool:
+        start = perf_counter()
+        try:
+            response = requests.get(
+                f"{self.config.api_url}/fapi/v1/premiumIndex",
+                proxies=self.proxies,
+                timeout=float(self.config.api_timeout),
+            )
+            response.raise_for_status()
+            rows = response.json()
+            if not isinstance(rows, list):
+                raise TypeError("premiumIndex response is not a list")
+        except (requests.RequestException, ValueError, TypeError, KeyError) as exc:
+            elapsed_ms = (perf_counter() - start) * 1000
+            self.log.error(
+                "FundingCollector snapshot failed: "
+                f"phase={phase}, funding={self._iso(self.fund_ns)}, "
+                f"elapsed_ms={elapsed_ms:.2f}, error={exc}"
+            )
+            return False
+        passed = 0
+        priced = 0
+        skipped = 0
+
+        for item in rows:
+            try:
+                ins_id = InstrumentId.from_str(f"{item['symbol']}-PERP.BINANCE")
+                if ins_id not in self.ins:
+                    continue
+                price = Decimal(str(item["markPrice"]))
+                if phase == "pre":
+                    if int(item["nextFundingTime"]) * 1_000_000 != self.fund_ns:
+                        continue
+                    rate = Decimal(str(item["lastFundingRate"]))
+                    if abs(rate) < self.min_rate:
+                        self.ins_map.pop(ins_id, None)
+                        continue
+                    row = self.ins_map.setdefault(ins_id, {})
+                    row["rate"] = rate
+                    row["pre"] = price
+                    passed += 1
+                elif ins_id in self.ins_map and "post" not in self.ins_map[ins_id]:
+                    self.ins_map[ins_id]["post"] = price
+                    priced += 1
+            except (KeyError, ValueError, TypeError):
+                skipped += 1
+
+        elapsed_ms = (perf_counter() - start) * 1000
+        self.log.info(
+            "FundingCollector snapshot: "
+            f"phase={phase}, funding={self._iso(self.fund_ns)}, "
+            f"elapsed_ms={elapsed_ms:.2f}, rows={len(rows)}, "
+            f"candidates={len(self.ins_map)}, passed={passed}, "
+            f"priced={priced}, skipped={skipped}"
+        )
+        return True
 
     # 解析 trade 模式允许下单的 base symbol 范围。
     def _load_scope(self) -> None:
@@ -256,6 +298,8 @@ class FundingCollector(Strategy):
             if key not in by_base:
                 raise RuntimeError(f"Unknown trade_scope instrument: {item}")
             ids.add(by_base[key])
+        if not ids:
+            raise RuntimeError("trade_scope must be all or a non-empty base symbol list")
         self.trade_ids = ids
 
     # 推进到下一个 UTC 4h 准点。
@@ -267,12 +311,6 @@ class FundingCollector(Strategy):
             "FundingCollector next time: "
             f"now={self._iso(now_ns)}, funding={self._iso(self.fund_ns)}"
         )
-
-    def _open_ns(self) -> int:
-        return self.fund_ns - int(self.config.collect_before * 1_000_000_000)
-
-    def _close_ns(self) -> int:
-        return self.fund_ns + int(self.config.close_after * 1_000_000_000)
 
     def _side(self, rate: Decimal) -> OrderSide:
         return OrderSide.SELL if rate > 0 else OrderSide.BUY
@@ -327,7 +365,7 @@ class FundingCollector(Strategy):
                         net_est,
                     ],
                 )
-        self.logged = True
+        self.log_done = True
         return row_cnt, fund_sum, pnl_sum, net_sum
 
     def _init_log(self) -> None:
@@ -351,9 +389,11 @@ class FundingCollector(Strategy):
     def _reset_state(self) -> None:
         self.ins_map.clear()
         self.open_ids.clear()
-        self.sent = False
-        self.closed = False
-        self.logged = False
+        self.entry_done = False
+        self.exit_done = False
+        self.sent_done = False
+        self.close_done = False
+        self.log_done = False
         self._next_time()
 
     def _iso(self, ts_ns: int) -> str:

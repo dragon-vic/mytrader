@@ -12,8 +12,6 @@ strategy:
 market:
   symbol: BNB/USDT
   timeframe: 1h
-  limit: 1000
-  batches: 8
 
 # 常改：live 账户类型。
 live:
@@ -26,22 +24,26 @@ backtest:
   oms_type: NETTING
   log_level: INFO
   log_bypass: true
+  data:
+    limit: 1000
+    batches: 8
+  instrument:
+    settlement_currency: USDT
+    is_inverse: false
+    price_precision: 2
+    size_precision: 2
+    price_increment: "0.01"
+    size_increment: "0.01"
+    multiplier: "1"
+    min_quantity: "0.01"
+    max_quantity: "10000000"
+    min_notional: "5"
+    max_price: "10000000"
+    margin_init: "1"
+    margin_maint: "1"
+    maker_fee: "0.0002"
+    taker_fee: "0.0005"
 
-# 低频：BNB U 本位永续合约精度。
+# 低频：live 只需要市场类型来推导 NT symbol。
 instrument:
   kind: perpetual
-  settlement_currency: USDT
-  is_inverse: false
-  price_precision: 2
-  size_precision: 2
-  price_increment: "0.01"
-  size_increment: "0.01"
-  multiplier: "1"
-  min_quantity: "0.01"
-  max_quantity: "10000000"
-  min_notional: "5"
-  max_price: "10000000"
-  margin_init: "1"
-  margin_maint: "1"
-  maker_fee: "0.0002"
-  taker_fee: "0.0005"
