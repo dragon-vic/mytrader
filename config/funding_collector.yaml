@@ -8,7 +8,7 @@ strategy:
   trade_notional: "5.5"
   params:
     mode: watch                 # watch 只估算；trade 真实下单
-    min_rate: "0.0050"          # abs(rate) >= 50bps 才进入候选
+    min_rate: "0.0010"          # abs(rate) >= 50bps 才进入候选
     trade_scope: all            # USDT 永续下单范围；all 或 base symbol，如 BTC,ETH
     entry_sec: 2                # t-2 拉一次全量 rate/mark 快照
     entry_before: 1             # t-1 到 t 内，快照完成才触发下单/冻结
