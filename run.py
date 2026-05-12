@@ -27,10 +27,6 @@ def read_key() -> str:
         key = msvcrt.getch()
         if key == b"\r":
             return "enter"
-        if key == b"\x1b":
-            return "back"
-        if key in (b"\x03", b"\x04"):
-            return "back"
         if key in (b"\x00", b"\xe0"):
             direction = msvcrt.getch()
             if direction == b"H":
@@ -49,26 +45,24 @@ def read_key() -> str:
     old = termios.tcgetattr(fd)
     try:
         tty.setraw(fd)
-        key = sys.stdin.read(1)
-        if key in ("\r", "\n"):
+        key = os.read(fd, 1)
+        if key in (b"\r", b"\n"):
             return "enter"
-        if key in ("q", "Q"):
+        if key in (b"q", b"Q"):
             return "back"
-        if key in ("\x03", "\x04"):
-            return "back"
-        if key == "\x1b":
-            ready, _, _ = select.select([sys.stdin], [], [], 0.05)
+        if key == b"\x1b":
+            ready, _, _ = select.select([fd], [], [], 0.2)
             if not ready:
-                return "back"
-            seq = sys.stdin.read(1)
-            ready, _, _ = select.select([sys.stdin], [], [], 0.05)
+                return ""
+            seq = os.read(fd, 1)
+            ready, _, _ = select.select([fd], [], [], 0.05)
             if ready:
-                seq += sys.stdin.read(1)
-            if seq == "[A":
+                seq += os.read(fd, 1)
+            if seq == b"[A":
                 return "up"
-            if seq == "[B":
+            if seq == b"[B":
                 return "down"
-            return "back"
+            return ""
         return ""
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
@@ -86,7 +80,7 @@ def render_menu(title: str, options: list[str], selected: int) -> None:
         print(f"{prefix}{option}")
 
     print()
-    print("↑/↓ 选择，Enter 确认，Esc/q 返回")
+    print("↑/↓ 选择，Enter 确认，q 返回")
 
 
 def choose(title: str, options: list[str]) -> str | None:
