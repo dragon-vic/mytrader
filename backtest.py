@@ -15,6 +15,8 @@ from utils.report_writer import prepare_report_dir
 from utils.report_writer import print_backtest_summary
 from utils.report_writer import write_backtest_result
 from utils.report_writer import write_trader_reports
+from utils.runtime_ids import claim_run
+from utils.runtime_ids import release_run
 from utils.strategy_factory import build_strategy
 
 
@@ -57,8 +59,15 @@ def write_reports(engine: BacktestEngine, result, settings: dict) -> None:
 # 运行回测，由 run.py 负责传入配置名。
 def main(config_name: str) -> None:
     settings = load_settings(config_name)
-    prepare_report_dir(settings, "backtest")
-    engine = build_backtest_engine(settings)
-    engine.run()
-    write_reports(engine, engine.get_result(), settings)
-    engine.dispose()
+    settings["mode"] = "backtest"
+    settings = claim_run(settings)
+    engine = None
+    try:
+        prepare_report_dir(settings, "backtest")
+        engine = build_backtest_engine(settings)
+        engine.run()
+        write_reports(engine, engine.get_result(), settings)
+    finally:
+        if engine is not None:
+            engine.dispose()
+        release_run(settings)

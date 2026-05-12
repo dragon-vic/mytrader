@@ -24,6 +24,8 @@ from utils.report_writer import live_logs_dir
 from utils.report_writer import live_raw_log_name
 from utils.report_writer import prepare_report_dir
 from utils.report_writer import TraderReportWriter
+from utils.runtime_ids import claim_run
+from utils.runtime_ids import release_run
 from utils.strategy_factory import build_strategy
 
 
@@ -124,11 +126,15 @@ def run_live_node(node: TradingNode) -> None:
 # 运行 live/testnet，由 run.py 负责传入配置名和模式。
 def main(config_name: str, mode: str | None = None) -> None:
     settings = resolve_live_mode(load_settings(config_name), mode)
-    node, report_writer = build_live_node(settings)
+    settings = claim_run(settings)
+    node = None
 
     try:
+        node, report_writer = build_live_node(settings)
         run_live_node(node)
         report_writer.write_final_reports(node.trader)
         report_writer.write_clean_live_log(settings)
     finally:
-        node.dispose()
+        if node is not None:
+            node.dispose()
+        release_run(settings)

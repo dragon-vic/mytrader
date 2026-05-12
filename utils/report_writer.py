@@ -33,9 +33,12 @@ LOCAL_TZ = ZoneInfo("Asia/Shanghai")
 LOG_UTC_PREFIX = re.compile(r"^(?P<ts>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)(?P<rest>\s.*)$")
 
 
-# 返回当前 set 在 backtest/live 下的报告目录。
+# 返回当前运行的报告目录。
 def run_reports_dir(settings: dict[str, Any], run_type: str) -> Path:
-    return ROOT / settings["project"]["reports_dir"] / run_type / settings["project"]["config_name"]
+    run_name = settings.get("runtime", {}).get("run_name")
+    if run_name:
+        return ROOT / settings["project"]["reports_dir"] / run_name
+    return ROOT / settings["project"]["reports_dir"] / f"{settings['project']['config_name']}-{run_type}"
 
 
 # 返回 live 日志目录。
@@ -45,6 +48,9 @@ def live_logs_dir() -> Path:
 
 # 返回本次运行的 NT 原始日志文件名，不带后缀。
 def live_raw_log_name(settings: dict[str, Any]) -> str:
+    run_name = settings.get("runtime", {}).get("run_name")
+    if run_name:
+        return f"{run_name}-running"
     return f"{settings['project']['config_name']}-{settings['mode']}-running"
 
 
@@ -55,14 +61,11 @@ def live_raw_log_path(settings: dict[str, Any]) -> Path:
 
 # 返回最终清洗日志路径，避免同一分钟重复运行时覆盖旧日志。
 def final_live_log_path(settings: dict[str, Any]) -> Path:
+    run_name = settings.get("runtime", {}).get("run_name")
+    if run_name:
+        return live_logs_dir() / f"{run_name}.log"
     end_time = datetime.now(LOCAL_TZ).strftime("%Y%m%d-%H%M")
-    base = live_logs_dir() / f"{settings['project']['config_name']}-{settings['mode']}-{end_time}.log"
-    path = base
-    index = 2
-    while path.exists():
-        path = base.with_name(f"{base.stem}_{index}{base.suffix}")
-        index += 1
-    return path
+    return live_logs_dir() / f"{settings['project']['config_name']}-{settings['mode']}-{end_time}.log"
 
 
 # 每次运行前清空当前 set 的报告目录，避免旧文件混进新结果。
