@@ -79,7 +79,7 @@ def build_live_node(settings: dict) -> tuple[TradingNode, TraderReportWriter]:
             log_component_levels={
                 "Portfolio": "WARNING",
                 "ExecClient-BINANCE": "WARNING",
-                settings["strategy"]["class"]: "WARNING",
+                settings["strategy"]["class"]: "INFO",
                 "DataRecorder": "INFO",
             },
             clear_log_file=True,

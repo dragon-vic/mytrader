@@ -29,6 +29,8 @@ def read_key() -> str:
             return "enter"
         if key == b"\x1b":
             return "back"
+        if key in (b"\x03", b"\x04"):
+            return "back"
         if key in (b"\x00", b"\xe0"):
             direction = msvcrt.getch()
             if direction == b"H":
@@ -52,11 +54,16 @@ def read_key() -> str:
             return "enter"
         if key in ("q", "Q"):
             return "back"
+        if key in ("\x03", "\x04"):
+            return "back"
         if key == "\x1b":
             ready, _, _ = select.select([sys.stdin], [], [], 0.05)
             if not ready:
                 return "back"
-            seq = sys.stdin.read(2)
+            seq = sys.stdin.read(1)
+            ready, _, _ = select.select([sys.stdin], [], [], 0.05)
+            if ready:
+                seq += sys.stdin.read(1)
             if seq == "[A":
                 return "up"
             if seq == "[B":
