@@ -82,8 +82,9 @@ class Funding(Strategy):
 
         self._schedule_next()
 
+        mode_name = "观察" if self.mode == "watch" else "交易"
         self.log.info(
-            f"资金费率监控启动，模式{self._mode_cn()}，交易对{len(self.ins)}个，"
+            f"资金费率监控启动，模式{mode_name}，交易对{len(self.ins)}个，"
             f"阈值{self._bps(self.min_rate)}bps，单币名义{self._money(self.notional)}USDT"
         )
 
@@ -128,11 +129,17 @@ class Funding(Strategy):
             self.log.info("跳过本轮，候选未准备好")
             return
         if self.mode == "trade":
-            selected = self._select_trade()
-            if selected is None:
+            rows = []
+            for ins_id, row in self.ins_map.items():
+                if self.trade_ids is not None and ins_id not in self.trade_ids:
+                    continue
+                if ins_id not in self.ins or "rate" not in row or "pre" not in row:
+                    continue
+                rows.append((ins_id, row))
+            if not rows:
                 self.log.info(f"交易模式，候选{len(self.ins_map)}个，无可下单交易对")
             else:
-                ins_id, row = selected
+                ins_id, row = max(rows, key=lambda item: abs(item[1]["rate"]))
                 ins = self.ins[ins_id]
                 side = self._side(row["rate"])
                 row["side"] = side
@@ -194,7 +201,11 @@ class Funding(Strategy):
             self._schedule_next()
 
     def on_stop(self) -> None:
-        self._cancel_timers()
+        names = set(self.clock.timer_names)
+        for kind in (self.PRE_TIMER, self.FREEZE_TIMER, self.RATE_TIMER, self.POST_TIMER):
+            name = self._timer_name(kind)
+            if name in names:
+                self.clock.cancel_timer(name)
         for ins_id in self.ins:
             self.cancel_all_orders(ins_id)
 
@@ -238,7 +249,8 @@ class Funding(Strategy):
                 raise TypeError("premiumIndex response is not a list")
         except (requests.RequestException, ValueError, TypeError, KeyError) as exc:
             elapsed_ms = (perf_counter() - start) * 1000
-            self.log.error(f"{self._phase_name(phase)}失败，错误 {exc}，耗时{self._ms(elapsed_ms)}ms")
+            name = {"pre": "拉取资金费率", "rate": "准点复核"}.get(phase, "结算价格")
+            self.log.error(f"{name}失败，错误 {exc}，耗时{self._ms(elapsed_ms)}ms")
             return None
         passed = 0
         priced = 0
@@ -353,32 +365,6 @@ class Funding(Strategy):
     def _timer_name(self, kind: str) -> str:
         return f"{kind}:{self.fund_ns}"
 
-    def _cancel_timers(self) -> None:
-        names = set(self.clock.timer_names)
-        for kind in (self.PRE_TIMER, self.FREEZE_TIMER, self.RATE_TIMER, self.POST_TIMER):
-            name = self._timer_name(kind)
-            if name in names:
-                self.clock.cancel_timer(name)
-
-    def _select_trade(self) -> tuple[InstrumentId, dict[str, Decimal | OrderSide]] | None:
-        rows = []
-        for ins_id, row in self.ins_map.items():
-            if self.trade_ids is not None and ins_id not in self.trade_ids:
-                continue
-            if ins_id not in self.ins or "rate" not in row or "pre" not in row:
-                continue
-            rows.append((ins_id, row))
-        if not rows:
-            return None
-        return max(rows, key=lambda item: abs(item[1]["rate"]))
-
-    def _phase_name(self, phase: str) -> str:
-        if phase == "pre":
-            return "拉取资金费率"
-        if phase == "rate":
-            return "准点复核"
-        return "结算价格"
-
     def _rate_list(self, limit: int) -> str:
         rows = [
             (ins_id, row)
@@ -442,9 +428,6 @@ class Funding(Strategy):
 
     def _side_cn(self, side: OrderSide) -> str:
         return "买入" if side == OrderSide.BUY else "卖出"
-
-    def _mode_cn(self) -> str:
-        return "观察" if self.mode == "watch" else "交易"
 
     def _bps(self, value: Decimal) -> str:
         return f"{value * Decimal('10000'):.2f}"
