@@ -19,7 +19,7 @@ from nautilus_trader.model.instruments import Instrument
 from nautilus_trader.trading.strategy import Strategy
 
 
-class FundingCollectorConfig(StrategyConfig, frozen=True):
+class FundingConfig(StrategyConfig, frozen=True):
     instrument_id: InstrumentId
     bar_type: BarType
     trade_notional: Decimal = Decimal("5.5")
@@ -37,13 +37,13 @@ class FundingCollectorConfig(StrategyConfig, frozen=True):
     taker_fee: Decimal = Decimal("0.0005")
 
 
-class FundingCollector(Strategy):
+class Funding(Strategy):
     PRE_TIMER = "funding_pre"
     FREEZE_TIMER = "funding_freeze"
     RATE_TIMER = "funding_rate"
     POST_TIMER = "funding_post"
 
-    def __init__(self, config: FundingCollectorConfig) -> None:
+    def __init__(self, config: FundingConfig) -> None:
         super().__init__(config)
         self.mode = config.mode.lower()
         self.notional = Decimal(str(config.trade_notional))
@@ -128,17 +128,12 @@ class FundingCollector(Strategy):
             self.log.info("跳过本轮，候选未准备好")
             return
         if self.mode == "trade":
-            px_cnt = 0
-            sub_cnt = 0
-            for ins_id, row in list(self.ins_map.items()):
-                if self.trade_ids is not None and ins_id not in self.trade_ids:
-                    continue
-                if "rate" not in row or "pre" not in row:
-                    continue
-                px_cnt += 1
-                ins = self.ins.get(ins_id)
-                if ins is None:
-                    continue
+            selected = self._select_trade()
+            if selected is None:
+                self.log.info(f"交易模式，候选{len(self.ins_map)}个，无可下单交易对")
+            else:
+                ins_id, row = selected
+                ins = self.ins[ins_id]
                 side = self._side(row["rate"])
                 row["side"] = side
                 qty = self._qty(ins, row["pre"])
@@ -150,10 +145,11 @@ class FundingCollector(Strategy):
                 )
                 self.submit_order(order)
                 self.open_ids.add(ins_id)
-                sub_cnt += 1
-            self.log.info(
-                f"交易模式，提交{sub_cnt}个订单，单币名义{self._money(self.notional)}USDT"
-            )
+                self.log.info(
+                    f"交易模式，候选{len(self.ins_map)}个，选择{self._base(ins_id)}，"
+                    f"费率{self._bps(row['rate'])}bps，方向{self._side_cn(side)}，"
+                    f"名义{self._money(self.notional)}USDT"
+                )
         else:
             for row in self.ins_map.values():
                 if "rate" in row:
@@ -363,6 +359,18 @@ class FundingCollector(Strategy):
             name = self._timer_name(kind)
             if name in names:
                 self.clock.cancel_timer(name)
+
+    def _select_trade(self) -> tuple[InstrumentId, dict[str, Decimal | OrderSide]] | None:
+        rows = []
+        for ins_id, row in self.ins_map.items():
+            if self.trade_ids is not None and ins_id not in self.trade_ids:
+                continue
+            if ins_id not in self.ins or "rate" not in row or "pre" not in row:
+                continue
+            rows.append((ins_id, row))
+        if not rows:
+            return None
+        return max(rows, key=lambda item: abs(item[1]["rate"]))
 
     def _phase_name(self, phase: str) -> str:
         if phase == "pre":

@@ -1,13 +1,13 @@
-# 稳定字段：用于构建 NT instrument_id；FundingCollector 由 clock 定时器触发。
+# 稳定字段：用于构建 NT instrument_id；Funding 由 clock 定时器触发。
 market:
   symbol: TRUMP/USDT
   timeframe: 1s
 
 strategy:
-  name: funding_collector
+  name: funding
   trade_notional: "5.5"
   params:
-    mode: watch                 # watch 只估算；trade 真实下单
+    mode: trade                 # watch 只估算；trade 真实下单
     min_rate: "0.0010"          # abs(rate) >= 10bps 才进入候选
     trade_scope: all            # USDT 永续下单范围；all 或 base symbol，如 BTC,ETH
     entry_sec: 2                # t-2 拉一次全量 rate/mark 快照

@@ -120,7 +120,7 @@ run_background() {
   local config_name="$1"
   local mode="$2"
   local running_log="logs/${config_name}-${mode}-running.log"
-  local session_name="nt-${config_name}-${mode}"
+  local session_name="$config_name"
   local tmux_command
   local pid
 

@@ -67,6 +67,12 @@ def build_live_node(settings: dict) -> tuple[TradingNode, TraderReportWriter]:
     output_dir = prepare_report_dir(settings, "live")
     log_dir = live_logs_dir()
     log_dir.mkdir(parents=True, exist_ok=True)
+    data_clients = {BINANCE_CLIENT_NAME: binance.data_config()}
+    if settings["live"].get("external_signal") is True:
+        data_clients[EXTERNAL_SIGNAL_CLIENT_NAME] = ExternalSignalDataClientConfig(
+            host=settings["external_signal"]["host"],
+            port=int(settings["external_signal"]["port"]),
+        )
     trade_config = TradingNodeConfig(
         trader_id=settings.get("runtime", {}).get("trader_id", DEFAULT_TRADER_ID),
         cache=binance.cache_config(),
@@ -84,19 +90,14 @@ def build_live_node(settings: dict) -> tuple[TradingNode, TraderReportWriter]:
             },
             clear_log_file=True,
         ),
-        data_clients={
-            BINANCE_CLIENT_NAME: binance.data_config(),
-            EXTERNAL_SIGNAL_CLIENT_NAME: ExternalSignalDataClientConfig(
-                host=settings["external_signal"]["host"],
-                port=int(settings["external_signal"]["port"]),
-            ),
-        },
+        data_clients=data_clients,
         exec_clients={BINANCE_CLIENT_NAME: binance.exec_config()},
     )
 
     node = TradingNode(config=trade_config)
     node.add_data_client_factory(BINANCE_CLIENT_NAME, BinanceLiveDataClientFactory)
-    node.add_data_client_factory(EXTERNAL_SIGNAL_CLIENT_NAME, ExternalSignalLiveDataClientFactory)
+    if settings["live"].get("external_signal") is True:
+        node.add_data_client_factory(EXTERNAL_SIGNAL_CLIENT_NAME, ExternalSignalLiveDataClientFactory)
     node.add_exec_client_factory(BINANCE_CLIENT_NAME, BinanceLiveExecClientFactory)
 
     strategy = build_strategy(settings, "live")
