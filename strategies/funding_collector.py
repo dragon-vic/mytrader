@@ -9,9 +9,9 @@ from decimal import ROUND_CEILING
 from pathlib import Path
 
 import requests
+from nautilus_trader.common.events import TimeEvent
 from nautilus_trader.config import StrategyConfig
 from nautilus_trader.model.data import BarType
-from nautilus_trader.model.data import TradeTick
 from nautilus_trader.model.enums import OrderSide
 from nautilus_trader.model.enums import TimeInForce
 from nautilus_trader.model.identifiers import InstrumentId
@@ -37,6 +37,10 @@ class FundingCollectorConfig(StrategyConfig, frozen=True):
 
 
 class FundingCollector(Strategy):
+    PRE_TIMER = "funding_pre"
+    FREEZE_TIMER = "funding_freeze"
+    POST_TIMER = "funding_post"
+
     def __init__(self, config: FundingCollectorConfig) -> None:
         super().__init__(config)
         self.mode = config.mode.lower()
@@ -55,7 +59,7 @@ class FundingCollector(Strategy):
         self.log_path = Path(config.event_log_path)
         self.proxies = {"http": config.proxy_url, "https": config.proxy_url} if config.proxy_url else None
 
-    # 启动时只订阅 heartbeat tick，资金费和价格用 REST 全量快照。
+    # 启动时注册 NT 定时器，资金费和价格用 REST 全量快照。
     def on_start(self) -> None:
         if self.mode not in {"watch", "trade"}:
             raise RuntimeError(f"Invalid mode: {self.mode}")
@@ -73,77 +77,46 @@ class FundingCollector(Strategy):
         if self.mode == "watch":
             self._init_log()
 
-        self._next_time()
-        self.subscribe_trade_ticks(self.config.instrument_id)
+        self._schedule_next()
 
         self.log.info(
             "FundingCollector started: "
-            f"mode={self.mode}, heartbeat={self.config.instrument_id}, "
+            f"mode={self.mode}, trigger=clock, "
             f"instruments={len(self.ins)}, notional={self.notional}, "
             f"min_rate={self.min_rate}, trade_scope={self.config.trade_scope}, "
             f"entry_sec={self.config.entry_sec}s, exit_sec={self.config.exit_sec}s"
         )
 
-    # heartbeat tick 负责 t-2/t+2 快照、最后一秒下单和平仓/记账。
-    def on_trade_tick(self, tick: TradeTick) -> None:
-        now_ns = self.clock.timestamp_ns()
-        entry_ns = self.fund_ns - int(self.config.entry_sec * 1_000_000_000)
+    # clock alert 负责 t-2/t-1/t+2 三个确定动作。
+    def _on_time(self, event: TimeEvent) -> None:
+        name = event.name.split(":", 1)[0]
+        if name == self.PRE_TIMER:
+            self._pre_funding()
+        elif name == self.FREEZE_TIMER:
+            self._freeze_funding()
+        elif name == self.POST_TIMER:
+            self._post_funding()
+
+    # t-2 拉 rate 和 pre mark。
+    def _pre_funding(self) -> None:
+        if self.sent_done or self.entry_done:
+            return
+        snap_ok = self._load_snap("pre")
+        if not snap_ok:
+            return
         order_ns = self.fund_ns - int(self.config.entry_before * 1_000_000_000)
-        exit_ns = self.fund_ns + int(self.config.exit_sec * 1_000_000_000)
+        if self.clock.timestamp_ns() < order_ns:
+            self.entry_done = True
+        else:
+            self.sent_done = True
+            self.log.info(
+                "FundingCollector entry skipped: "
+                f"funding={self._iso(self.fund_ns)}, reason=snapshot_late"
+            )
 
-        if now_ns >= exit_ns:
-            if not self.exit_done:
-                self._load_snap("post")
-                self.exit_done = True
-            if self.mode == "trade" and not self.close_done:
-                close_cnt = 0
-                for ins_id in list(self.open_ids):
-                    self.close_all_positions(ins_id)
-                    close_cnt += 1
-                self.close_done = True
-                self.log.info(
-                    "FundingCollector close summary: "
-                    f"funding={self._iso(self.fund_ns)}, close_count={close_cnt}, "
-                    f"candidates={len(self.ins_map)}"
-                )
-                self._reset_state()
-            elif self.mode == "watch" and not self.log_done:
-                row_cnt, fund_sum, pnl_sum, net_sum = self._write_watch()
-                self.log.info(
-                    "FundingCollector watch summary: "
-                    f"funding={self._iso(self.fund_ns)}, rows={row_cnt}, "
-                    f"candidates={len(self.ins_map)}, funding_gain={fund_sum}, "
-                    f"px_pnl={pnl_sum}, net_est={net_sum}"
-                )
-                self._reset_state()
-            return
-
-        if now_ns >= self.fund_ns:
-            if not self.sent_done:
-                self.sent_done = True
-                self.log.info(
-                    "FundingCollector entry skipped: "
-                    f"funding={self._iso(self.fund_ns)}, reason=entry_window_missed"
-                )
-            return
-
-        if entry_ns <= now_ns < order_ns and not self.entry_done and not self.sent_done:
-            snap_ok = self._load_snap("pre")
-            if not snap_ok:
-                return
-            if self.clock.timestamp_ns() < order_ns:
-                self.entry_done = True
-            else:
-                self.sent_done = True
-                self.log.info(
-                    "FundingCollector entry skipped: "
-                    f"funding={self._iso(self.fund_ns)}, reason=snapshot_late"
-                )
-            return
-
+    # t-1 冻结观察列表或提交订单。
+    def _freeze_funding(self) -> None:
         if self.sent_done:
-            return
-        if now_ns < order_ns:
             return
         if not self.entry_done:
             self.sent_done = True
@@ -152,7 +125,6 @@ class FundingCollector(Strategy):
                 f"funding={self._iso(self.fund_ns)}, reason=snapshot_not_ready"
             )
             return
-
         if self.mode == "trade":
             px_cnt = 0
             sub_cnt = 0
@@ -191,8 +163,37 @@ class FundingCollector(Strategy):
 
         self.sent_done = True
 
+    # t+2 拉 post mark，并完成平仓或 watch 记账。
+    def _post_funding(self) -> None:
+        if not self.exit_done:
+            self._load_snap("post")
+            self.exit_done = True
+        if self.mode == "trade" and not self.close_done:
+            close_cnt = 0
+            for ins_id in list(self.open_ids):
+                self.close_all_positions(ins_id)
+                close_cnt += 1
+            self.close_done = True
+            self.log.info(
+                "FundingCollector close summary: "
+                f"funding={self._iso(self.fund_ns)}, close_count={close_cnt}, "
+                f"candidates={len(self.ins_map)}"
+            )
+            self._reset_state()
+            self._schedule_next()
+        elif self.mode == "watch" and not self.log_done:
+            row_cnt, fund_sum, pnl_sum, net_sum = self._write_watch()
+            self.log.info(
+                "FundingCollector watch summary: "
+                f"funding={self._iso(self.fund_ns)}, rows={row_cnt}, "
+                f"candidates={len(self.ins_map)}, funding_gain={fund_sum}, "
+                f"px_pnl={pnl_sum}, net_est={net_sum}"
+            )
+            self._reset_state()
+            self._schedule_next()
+
     def on_stop(self) -> None:
-        self.unsubscribe_trade_ticks(self.config.instrument_id)
+        self._cancel_timers()
         for ins_id in self.ins:
             self.cancel_all_orders(ins_id)
 
@@ -307,10 +308,56 @@ class FundingCollector(Strategy):
         now_ns = self.clock.timestamp_ns()
         four_ns = 4 * 60 * 60 * 1_000_000_000
         self.fund_ns = ((now_ns // four_ns) + 1) * four_ns
-        self.log.info(
-            "FundingCollector next time: "
-            f"now={self._iso(now_ns)}, funding={self._iso(self.fund_ns)}"
+
+    # 为下一次 funding 注册一次性 clock alert。
+    def _schedule_next(self) -> None:
+        self._next_time()
+        now_ns = self.clock.timestamp_ns()
+        pre_ns = self.fund_ns - int(self.config.entry_sec * 1_000_000_000)
+        freeze_ns = self.fund_ns - int(self.config.entry_before * 1_000_000_000)
+        post_ns = self.fund_ns + int(self.config.exit_sec * 1_000_000_000)
+        if now_ns >= pre_ns:
+            four_ns = 4 * 60 * 60 * 1_000_000_000
+            self.fund_ns += four_ns
+            pre_ns += four_ns
+            freeze_ns += four_ns
+            post_ns += four_ns
+            self.log.info(
+                "FundingCollector next funding adjusted: "
+                f"funding={self._iso(self.fund_ns)}"
+            )
+        self.clock.set_time_alert_ns(
+            self._timer_name(self.PRE_TIMER),
+            pre_ns,
+            callback=self._on_time,
+            allow_past=False,
         )
+        self.clock.set_time_alert_ns(
+            self._timer_name(self.FREEZE_TIMER),
+            freeze_ns,
+            callback=self._on_time,
+            allow_past=False,
+        )
+        self.clock.set_time_alert_ns(
+            self._timer_name(self.POST_TIMER),
+            post_ns,
+            callback=self._on_time,
+            allow_past=False,
+        )
+        self.log.info(
+            "FundingCollector timers scheduled: "
+            f"funding={self._iso(self.fund_ns)}"
+        )
+
+    def _timer_name(self, kind: str) -> str:
+        return f"{kind}:{self.fund_ns}"
+
+    def _cancel_timers(self) -> None:
+        names = set(self.clock.timer_names)
+        for kind in (self.PRE_TIMER, self.FREEZE_TIMER, self.POST_TIMER):
+            name = self._timer_name(kind)
+            if name in names:
+                self.clock.cancel_timer(name)
 
     def _side(self, rate: Decimal) -> OrderSide:
         return OrderSide.SELL if rate > 0 else OrderSide.BUY
@@ -394,7 +441,6 @@ class FundingCollector(Strategy):
         self.sent_done = False
         self.close_done = False
         self.log_done = False
-        self._next_time()
 
     def _iso(self, ts_ns: int) -> str:
         return datetime.fromtimestamp(ts_ns / 1_000_000_000, tz=UTC).isoformat()
