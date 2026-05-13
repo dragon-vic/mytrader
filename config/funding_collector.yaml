@@ -14,6 +14,7 @@ strategy:
     entry_before: 1             # t-1 定时触发下单/冻结
     exit_sec: 2                 # t+2 拉一次全量 mark 快照并平仓/记账
     api_timeout: 0.8            # 快照超时，避免阻塞下单和平仓
+    taker_fee: "0.0005"         # 单边市价手续费；日志总收益按两次市价扣除
     stop_close: true
 
 # 常改：live 运行参数。
