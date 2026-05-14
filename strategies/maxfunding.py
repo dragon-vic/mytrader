@@ -21,9 +21,9 @@ class MaxfundingConfig(StrategyConfig, frozen=True):
     instrument_ids: list[InstrumentId]
     bar_types: list[BarType]
     trade_notional: Decimal
-    events_path: str
     min_rate_bps: Decimal
     whitelist_symbols: list[str]
+    events_path: str = ""
     exclude_symbols: list[str] = []
     event_log_path: str = "auto"
 
@@ -114,6 +114,8 @@ class Maxfunding(Strategy):
         self.last_px.clear()
 
     def _load_events(self) -> None:
+        if not self.config.events_path:
+            raise RuntimeError("maxfunding 当前只支持回测，请在 backtest.events_path 配置历史 funding 事件文件。")
         path = Path(self.config.events_path)
         df = pd.read_parquet(path) if path.suffix == ".parquet" else pd.read_csv(path)
         allowed = set(self.config.instrument_ids)

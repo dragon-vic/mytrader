@@ -25,9 +25,9 @@ from nautilus_trader.trading.strategy import Strategy
 class FundingConfig(StrategyConfig, frozen=True):
     instrument_id: InstrumentId
     bar_type: BarType
+    whitelist_symbols: list[str]
     trade_notional: Decimal = Decimal("5.5")
-    min_rate: Decimal = Decimal("0.0050")
-    trade_scope: str = "all"
+    min_rate_bps: Decimal = Decimal("60")
     entry_sec: float = 2.0
     entry_before: float = 1.0
     exit_sec: float = 2.0
@@ -47,13 +47,15 @@ class Funding(Strategy):
     def __init__(self, config: FundingConfig) -> None:
         super().__init__(config)
         self.notional = Decimal(str(config.trade_notional))
-        self.min_rate = Decimal(str(config.min_rate))
+        self.min_rate = Decimal(str(config.min_rate_bps)) / Decimal("10000")
+        self.whitelist = {self._base_key(symbol) for symbol in config.whitelist_symbols}
         self.fund_ns = 0
         self.entry_done = False
         self.sent_done = False
         self.close_done = False
         self.ins: dict[InstrumentId, Instrument] = {}
-        self.trade_ids: set[InstrumentId] | None = None
+        self.whitelist_ids: set[InstrumentId] = set()
+        self.api_symbols: dict[InstrumentId, str] = {}
         self.ins_map: dict[InstrumentId, dict[str, Decimal | OrderSide]] = {}
         self.open_ids: set[InstrumentId] = set()
         self.order_map: dict[ClientOrderId, InstrumentId] = {}
@@ -61,7 +63,7 @@ class Funding(Strategy):
         self.log_path = Path(config.event_log_path)
         self.proxies = {"http": config.proxy_url, "https": config.proxy_url} if config.proxy_url else None
 
-    # 启动时注册 NT 定时器，资金费和价格用 REST 全量快照。
+    # 启动时注册 NT 定时器，资金费和价格用 REST 白名单快照。
     def on_start(self) -> None:
         if self.config.entry_sec <= self.config.entry_before:
             raise RuntimeError("entry_sec must be greater than entry_before")
@@ -73,13 +75,14 @@ class Funding(Strategy):
             raise RuntimeError("api_timeout must be positive")
 
         self._load_ins()
-        self._load_scope()
+        self._load_whitelist()
         self._init_log()
 
         self._schedule_next()
 
         self.log.info(
             f"资金费率交易启动，交易对{len(self.ins)}个，"
+            f"白名单{len(self.whitelist_ids)}个，"
             f"阈值{self._bps(self.min_rate)}bps，单币名义{self._money(self.notional)}USDT"
         )
 
@@ -101,6 +104,19 @@ class Funding(Strategy):
             return
         stats = self._load_snap("pre")
         if stats is None:
+            return
+        if not self.ins_map:
+            self.log.info(
+                "拉取资金费率成功，"
+                f"白名单{stats['rows']}个，阈值{self._bps(self.min_rate)}bps，"
+                f"无超过阈值候选，耗时{self._ms(stats['elapsed_ms'])}ms"
+            )
+            order_ns = self.fund_ns - int(self.config.entry_before * 1_000_000_000)
+            if self.clock.timestamp_ns() < order_ns:
+                self.entry_done = True
+            else:
+                self.sent_done = True
+                self.log.info("跳过本轮，资金费率拉取太晚")
             return
         self.log.info(
             "拉取资金费率成功，"
@@ -125,8 +141,6 @@ class Funding(Strategy):
             return
         rows = []
         for ins_id, row in self.ins_map.items():
-            if self.trade_ids is not None and ins_id not in self.trade_ids:
-                continue
             if ins_id not in self.ins or "rate" not in row or "pre" not in row:
                 continue
             rows.append((ins_id, row))
@@ -226,39 +240,32 @@ class Funding(Strategy):
         if not self.ins:
             raise RuntimeError("No USDT perpetual instruments found in cache")
 
-    # 拉全量 premiumIndex，并按阶段写入场或结算资金费率。
+    # 拉白名单 premiumIndex，并按阶段写入场或结算资金费率。
     def _load_snap(self, phase: str) -> dict[str, Decimal | float | int] | None:
         start = perf_counter()
-        try:
-            response = requests.get(
-                f"{self.config.api_url}/fapi/v1/premiumIndex",
-                proxies=self.proxies,
-                timeout=float(self.config.api_timeout),
-            )
-            response.raise_for_status()
-            rows = response.json()
-            if not isinstance(rows, list):
-                raise TypeError("premiumIndex response is not a list")
-        except (requests.RequestException, ValueError, TypeError, KeyError) as exc:
-            elapsed_ms = (perf_counter() - start) * 1000
-            name = {"pre": "拉取资金费率", "rate": "准点复核"}.get(phase, "资金费快照")
-            self.log.error(f"{name}失败，错误 {exc}，耗时{self._ms(elapsed_ms)}ms")
-            return None
         passed = 0
         priced = 0
         skipped = 0
+        errors = 0
 
-        for item in rows:
+        for ins_id, symbol in self.api_symbols.items():
             try:
-                ins_id = InstrumentId.from_str(f"{item['symbol']}-PERP.BINANCE")
-                if ins_id not in self.ins:
-                    continue
+                response = requests.get(
+                    f"{self.config.api_url}/fapi/v1/premiumIndex",
+                    params={"symbol": symbol},
+                    proxies=self.proxies,
+                    timeout=float(self.config.api_timeout),
+                )
+                response.raise_for_status()
+                item = response.json()
+                if not isinstance(item, dict):
+                    raise TypeError("premiumIndex response is not an object")
                 price = Decimal(str(item["markPrice"]))
                 if phase == "pre":
                     if int(item["nextFundingTime"]) * 1_000_000 != self.fund_ns:
                         continue
                     rate = Decimal(str(item["lastFundingRate"]))
-                    if abs(rate) < self.min_rate:
+                    if abs(rate) <= self.min_rate:
                         self.ins_map.pop(ins_id, None)
                         continue
                     row = self.ins_map.setdefault(ins_id, {})
@@ -269,41 +276,44 @@ class Funding(Strategy):
                     self.ins_map[ins_id]["settle_rate"] = Decimal(str(item["lastFundingRate"]))
                     self.ins_map[ins_id]["rate_px"] = price
                     priced += 1
+            except requests.RequestException:
+                errors += 1
             except (KeyError, ValueError, TypeError):
                 skipped += 1
 
         elapsed_ms = (perf_counter() - start) * 1000
         return {
-            "rows": len(rows),
+            "rows": len(self.api_symbols),
             "elapsed_ms": elapsed_ms,
             "candidates": len(self.ins_map),
             "passed": passed,
             "priced": priced,
             "skipped": skipped,
+            "errors": errors,
         }
 
-    # 解析 trade 模式允许下单的 base symbol 范围。
-    def _load_scope(self) -> None:
-        raw = self.config.trade_scope.strip()
-        if raw.lower() == "all":
-            self.trade_ids = None
-            return
-
+    # 把白名单 base symbol 映射到当前 node 已加载的 instrument。
+    def _load_whitelist(self) -> None:
         by_base = {
             str(ins_id).split(".")[0].replace("USDT-PERP", "").upper(): ins_id
             for ins_id in self.ins
         }
         ids = set()
-        for item in raw.split(","):
-            key = item.strip().upper()
-            if not key:
-                continue
-            if key not in by_base:
-                raise RuntimeError(f"Unknown trade_scope instrument: {item}")
-            ids.add(by_base[key])
+        missing = []
+        for symbol in self.whitelist:
+            if symbol in by_base:
+                ids.add(by_base[symbol])
+            else:
+                missing.append(symbol)
         if not ids:
-            raise RuntimeError("trade_scope must be all or a non-empty base symbol list")
-        self.trade_ids = ids
+            raise RuntimeError("whitelist_symbols has no loaded USDT perpetual instruments")
+        if missing:
+            self.log.warning(f"白名单交易对未加载，已跳过 {','.join(sorted(missing))}")
+        self.whitelist_ids = ids
+        self.api_symbols = {
+            ins_id: str(ins_id).split(".")[0].replace("-PERP", "")
+            for ins_id in sorted(ids, key=str)
+        }
 
     # 推进到下一个 UTC 4h 准点。
     def _next_time(self) -> None:
@@ -371,6 +381,9 @@ class Funding(Strategy):
 
     def _base(self, ins_id: InstrumentId) -> str:
         return str(ins_id).split(".")[0].replace("USDT-PERP", "")
+
+    def _base_key(self, symbol: str) -> str:
+        return symbol.upper().replace("-PERP.BINANCE", "").replace("USDT", "").replace("/", "")
 
     def _side_cn(self, side: OrderSide) -> str:
         return "买入" if side == OrderSide.BUY else "卖出"

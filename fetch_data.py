@@ -10,7 +10,7 @@ from utils.market_data import MarketDataStore
 # 命令行参数优先；没有命令行参数时才用 main(...) 传入的 set。
 def main(config_name: str | None = None) -> None:
     selected = (sys.argv[1] if len(sys.argv) > 1 else None) or config_name
-    settings = load_settings(selected)
+    settings = load_settings(selected, mode="backtest")
     ensure_dirs(settings)
     store = MarketDataStore(settings)
 

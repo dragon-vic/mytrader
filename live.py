@@ -128,7 +128,7 @@ def run_live_node(node: TradingNode) -> None:
 
 # 运行 live/testnet，由 run.py 负责传入配置名和模式。
 def main(config_name: str, mode: str | None = None) -> None:
-    settings = resolve_live_mode(load_settings(config_name), mode)
+    settings = resolve_live_mode(load_settings(config_name, mode=mode), mode)
     settings = claim_run(settings)
     node = None
 

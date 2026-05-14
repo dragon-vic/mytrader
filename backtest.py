@@ -69,7 +69,7 @@ def write_reports(engine: BacktestEngine, result, settings: dict) -> None:
 
 # 运行回测，由 run.py 负责传入配置名。
 def main(config_name: str) -> None:
-    settings = load_settings(config_name)
+    settings = load_settings(config_name, mode="backtest")
     settings["mode"] = "backtest"
     settings = claim_run(settings)
     engine = None

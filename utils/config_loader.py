@@ -12,13 +12,15 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 # 加载一个具名 set，让每个策略保留自己的市场和参数。
-def load_settings(config_name: str | None = None) -> dict[str, Any]:
+def load_settings(config_name: str | None = None, mode: str | None = None) -> dict[str, Any]:
     name = config_name or DEFAULT_CONFIG_NAME
     with (ROOT / "config" / "global.yaml").open("r", encoding="utf-8") as f:
         global_settings = yaml.safe_load(f)
     with (ROOT / "config" / f"{name}.yaml").open("r", encoding="utf-8") as f:
         strategy_settings = yaml.safe_load(f)
     settings = deep_merge(global_settings, strategy_settings)
+    if mode in ("testnet", "live"):
+        settings.pop("backtest", None)
     normalize_settings(settings)
     settings["project"]["config_name"] = name
     return settings
@@ -49,11 +51,8 @@ def normalize_market(market: dict[str, Any], settings: dict[str, Any]) -> dict[s
     instrument_symbol = market.get("instrument_symbol") or (
         raw_symbol if instrument_kind == "spot" else f"{raw_symbol}-PERP"
     )
-    data_cfg = settings.get("backtest", {}).get("data", {})
-    return {
+    normalized = {
         "timeframe": "1m",
-        "limit": data_cfg.get("limit", 1000),
-        "batches": data_cfg.get("batches", 3),
         "since": None,
         "exchange": exchange["name"],
         "venue": exchange["venue"],
@@ -64,6 +63,11 @@ def normalize_market(market: dict[str, Any], settings: dict[str, Any]) -> dict[s
         "instrument_symbol": instrument_symbol,
         **market,
     }
+    if "backtest" in settings:
+        data_cfg = settings["backtest"].get("data", {})
+        normalized.setdefault("limit", data_cfg.get("limit", 1000))
+        normalized.setdefault("batches", data_cfg.get("batches", 3))
+    return normalized
 
 
 # 补齐策略模块名、类名和配置类名。

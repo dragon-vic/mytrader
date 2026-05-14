@@ -7,9 +7,9 @@ strategy:
   name: funding
   trade_notional: "5.5"
   params:
-    min_rate: "0.0010"          # abs(rate) >= 10bps 才进入候选
-    trade_scope: all            # USDT 永续下单范围；all 或 base symbol，如 BTC,ETH
-    entry_sec: 2                # t-2 拉一次全量 rate/mark 快照
+    min_rate_bps: "60"          # abs(rate) > 60bps 才进入候选
+    whitelist_symbols: [AXS, BARD, CFG, COS, DRIFT, ENSO, KITE, LYN, RIVER, STEEM]
+    entry_sec: 2                # t-2 拉一次白名单 rate/mark 快照
     entry_before: 1             # t-1 定时触发下单/冻结
     exit_sec: 2                 # t+2 平仓并写本轮交易记录
     api_timeout: 0.8            # 快照超时，避免阻塞下单和平仓
