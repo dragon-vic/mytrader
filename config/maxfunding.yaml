@@ -8,7 +8,7 @@ markets: [1000000BOB/USDT, AXS/USDT, BARD/USDT, CFG/USDT, COS/USDT,
 
 strategy:
   name: maxfunding
-  trade_notional: "5.5"
+  trade_notional: "8"
   params:
     min_rate_bps: "60"          # abs(rate) > 60bps 才进入候选
     # 上面的 20 个 markets 是 watch list；实际下单只在 trade list 里选最大 abs(rate)。
