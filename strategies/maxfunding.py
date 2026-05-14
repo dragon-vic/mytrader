@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import platform
 from time import perf_counter
 from datetime import UTC
 from datetime import datetime
@@ -14,6 +15,7 @@ from nautilus_trader.config import StrategyConfig
 from nautilus_trader.model.data import BarType
 from nautilus_trader.model.enums import OrderSide
 from nautilus_trader.model.enums import TimeInForce
+from nautilus_trader.model.events import AccountState
 from nautilus_trader.model.events import OrderFilled
 from nautilus_trader.model.events import OrderRejected
 from nautilus_trader.model.identifiers import ClientOrderId
@@ -21,24 +23,28 @@ from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.model.instruments import Instrument
 from nautilus_trader.trading.strategy import Strategy
 
+from utils.arguments import EVENT_ACCOUNT_TOPIC
+
 
 class MaxfundingConfig(StrategyConfig, frozen=True):
     instrument_ids: list[InstrumentId]
     bar_types: list[BarType]
-    trade_symbols: list[str]
-    trade_notional: Decimal = Decimal("5.5")
-    min_rate_bps: Decimal = Decimal("60")
-    pre_sec: float = 3.0
-    entry_sec: float = 2.0
-    pre_deadline: float = 1.0
-    entry_before: float = 1.0
-    exit_sec: float = 2.0
-    post_sec: float = 3.0
-    stop_close: bool = True
+    trade_symbols: list[str] | str
+    trade_notional: Decimal
+    min_rate_bps: Decimal
+    pre_sec: float
+    entry_sec: float
+    pre_deadline: float
+    entry_before: float
+    exit_sec: float
+    exit_step_sec: float
+    min_exit_sec: float
+    post_sec: float
+    stop_close: bool
+    api_url: str
+    api_timeout: float
+    proxy_url: str
     event_log_path: str = "auto"
-    api_url: str = "https://fapi.binance.com"
-    api_timeout: float = 0.8
-    proxy_url: str = ""
 
 
 class Maxfunding(Strategy):
@@ -54,7 +60,8 @@ class Maxfunding(Strategy):
         super().__init__(config)
         self.notional = Decimal(str(config.trade_notional))
         self.min_rate = Decimal(str(config.min_rate_bps)) / Decimal("10000")
-        self.trade = {
+        self.exit_sec = float(config.exit_sec)
+        self.trade = None if config.trade_symbols == "all" else {
             symbol.upper().replace("-PERP.BINANCE", "").replace("USDT", "").replace("/", "")
             for symbol in config.trade_symbols
         }
@@ -70,8 +77,11 @@ class Maxfunding(Strategy):
         self.open_ids: set[InstrumentId] = set()
         self.order_map: dict[ClientOrderId, InstrumentId] = {}
         self.chosen_id: InstrumentId | None = None
+        self.had_order = False
+        self.funding_seen = False
         self.log_path = Path(config.event_log_path)
-        self.proxies = {"http": config.proxy_url, "https": config.proxy_url} if config.proxy_url else None
+        use_proxy = platform.system() == "Windows" and config.proxy_url
+        self.proxies = {"http": config.proxy_url, "https": config.proxy_url} if use_proxy else None
 
     # 启动时注册 NT 定时器，资金费和价格用 REST 观察列表快照。
     def on_start(self) -> None:
@@ -85,6 +95,12 @@ class Maxfunding(Strategy):
             raise RuntimeError("entry_before must be positive")
         if self.config.exit_sec <= 0:
             raise RuntimeError("exit_sec must be positive")
+        if self.config.exit_step_sec <= 0:
+            raise RuntimeError("exit_step_sec must be positive")
+        if self.config.min_exit_sec <= 0:
+            raise RuntimeError("min_exit_sec must be positive")
+        if self.config.exit_sec < self.config.min_exit_sec:
+            raise RuntimeError("exit_sec must be greater than or equal to min_exit_sec")
         if self.config.post_sec <= self.config.exit_sec:
             raise RuntimeError("post_sec must be greater than exit_sec")
         if self.config.api_timeout <= 0:
@@ -93,6 +109,7 @@ class Maxfunding(Strategy):
         self._load_ins()
         self._load_lists()
         self._init_log()
+        self.msgbus.subscribe(EVENT_ACCOUNT_TOPIC, self._on_account)
 
         self._schedule_next()
 
@@ -166,6 +183,10 @@ class Maxfunding(Strategy):
     def _freeze_funding(self) -> None:
         if self.sent_done:
             return
+        if self.open_ids:
+            self.sent_done = True
+            self.log.warning(f"跳过本轮，上一轮持仓未平，交易对{','.join(map(self._base, self.open_ids))}")
+            return
         if not self.entry_done:
             self.sent_done = True
             self.log.info("跳过本轮，候选未准备好")
@@ -192,6 +213,8 @@ class Maxfunding(Strategy):
             self.order_map[order.client_order_id] = ins_id
             self.chosen_id = ins_id
             self.submit_order(order)
+            self.had_order = True
+            self.funding_seen = False
             self.log.info(
                 f"交易模式，候选{len(self.ins_map)}个，选择{self._base(ins_id)}，"
                 f"费率{self._bps(row['rate'])}bps，方向{self._side_cn(side)}，"
@@ -222,7 +245,6 @@ class Maxfunding(Strategy):
                 f"交易模式，平仓{close_cnt}个，候选{len(self.ins_map)}个"
             )
             self._write_trade(close_cnt)
-            self._reset_state()
 
     # t+3 再拉一次全量实际资金费率，用于观察分析。
     def _post_funding(self) -> None:
@@ -243,7 +265,18 @@ class Maxfunding(Strategy):
                 f"trade list前三 {self._top_rates(rows, trade_symbols)}，"
                 f"耗时{self._ms(elapsed_ms)}ms"
             )
+        self._adjust_exit()
+        self._reset_closed_state()
         self._schedule_next()
+
+    # 收到 Binance funding 账户事件后标记本轮资金费已到账。
+    def _on_account(self, event: AccountState) -> None:
+        if not self.had_order:
+            return
+        if not (self.fund_ns <= event.ts_event <= self.fund_ns + 5_000_000_000):
+            return
+        self.funding_seen = True
+        self.log.info("收到资金费账户事件")
 
     # 成交后才记录待平仓 instrument。
     def on_order_filled(self, event: OrderFilled) -> None:
@@ -258,6 +291,7 @@ class Maxfunding(Strategy):
             self.log.warning(f"订单被拒，交易对{self._base(ins_id)}，原因{event.reason}")
 
     def on_stop(self) -> None:
+        self.msgbus.unsubscribe(EVENT_ACCOUNT_TOPIC, self._on_account)
         names = set(self.clock.timer_names)
         for kind in self.TIMERS:
             name = f"{kind}:{self.fund_ns}"
@@ -359,12 +393,19 @@ class Maxfunding(Strategy):
             str(ins_id).split(".")[0].replace("USDT-PERP", "").upper(): ins_id
             for ins_id in self.ins
         }
+        if self.trade is None:
+            self.trade_ids = set(self.ins)
+            self.watch_symbols = {
+                ins_id: str(ins_id).split(".")[0].replace("-PERP", "")
+                for ins_id in sorted(self.ins, key=str)
+            }
+            return
         ids = {by_base[symbol] for symbol in self.trade if symbol in by_base}
         missing = sorted(self.trade - set(by_base))
         if not ids:
-            raise RuntimeError("trade_symbols has no loaded USDT perpetual instruments")
+            raise RuntimeError("trade_symbols is empty")
         if missing:
-            self.log.warning(f"trade list交易对未加载，已跳过 {','.join(missing)}")
+            raise RuntimeError(f"trade_symbols not loaded: {','.join(missing)}")
         self.trade_ids = ids
         self.watch_symbols = {
             ins_id: str(ins_id).split(".")[0].replace("-PERP", "")
@@ -380,8 +421,9 @@ class Maxfunding(Strategy):
         pre_ns = self.fund_ns - int(self.config.entry_sec * 1_000_000_000)
         freeze_ns = self.fund_ns - int(self.config.entry_before * 1_000_000_000)
         rate_ns = self.fund_ns
-        close_ns = self.fund_ns + int(self.config.exit_sec * 1_000_000_000)
-        post_ns = self.fund_ns + int(self.config.post_sec * 1_000_000_000)
+        close_ns = self.fund_ns + int(self.exit_sec * 1_000_000_000)
+        post_sec = max(float(self.config.post_sec), self.exit_sec + 1.0)
+        post_ns = self.fund_ns + int(post_sec * 1_000_000_000)
         if now_ns >= pre_ns:
             four_ns = 4 * 60 * 60 * 1_000_000_000
             self.fund_ns += four_ns
@@ -559,9 +601,39 @@ class Maxfunding(Strategy):
         self.open_ids.clear()
         self.order_map.clear()
         self.chosen_id = None
+        self.had_order = False
+        self.funding_seen = False
         self.entry_done = False
         self.sent_done = False
         self.close_done = False
+
+    def _reset_closed_state(self) -> None:
+        self.obs_map.clear()
+        self.ins_map.clear()
+        self.order_map.clear()
+        self.open_ids = {ins_id for ins_id in self.open_ids if not self.portfolio.is_flat(ins_id)}
+        self.chosen_id = next(iter(self.open_ids), None)
+        self.entry_done = False
+        self.sent_done = False
+        self.close_done = False
+        if self.open_ids:
+            self.log.warning(f"平仓后仍有持仓跟踪，交易对{','.join(map(self._base, self.open_ids))}")
+
+    def _adjust_exit(self) -> None:
+        if not self.had_order:
+            return
+        old_sec = self.exit_sec
+        step = float(self.config.exit_step_sec)
+        if self.funding_seen:
+            self.exit_sec = max(float(self.config.min_exit_sec), self.exit_sec - step)
+        else:
+            self.exit_sec += step
+        self.log.info(
+            f"平仓时间调整，资金费到账{'是' if self.funding_seen else '否'}，"
+            f"下轮t+{self._ms(self.exit_sec)}s，原t+{self._ms(old_sec)}s"
+        )
+        self.had_order = False
+        self.funding_seen = False
 
     def _iso(self, ts_ns: int) -> str:
         return datetime.fromtimestamp(ts_ns / 1_000_000_000, tz=UTC).isoformat()

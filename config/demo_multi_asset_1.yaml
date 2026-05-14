@@ -1,8 +1,8 @@
 # 常改：策略和参数。
 strategy:
   name: demo_multi_asset             # 综合样例策略
-  trade_notional: "100"              # 每个品种每次下单名义金额
   params:
+    trade_notional: "100"            # 每个品种每次下单名义金额
     fast_ema_period: 10              # 快 EMA
     slow_ema_period: 30              # 慢 EMA
     request_bars: true               # live 预热

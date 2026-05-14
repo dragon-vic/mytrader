@@ -8,13 +8,13 @@ markets: [1000000BOB/USDT, AXS/USDT, BARD/USDT, CFG/USDT, COS/USDT,
 
 strategy:
   name: backtestfunding
-  trade_notional: "10"
   params:
+    trade_notional: "10"
     min_rate_bps: "60"
     whitelist_symbols: [AXS, BARD, CFG, COS, DRIFT, ENSO, KITE, LYN, RIVER, STEEM]
+    events_path: data/funding/bt_3m/funding_events_over30_3m_selected20_for_backtest.parquet
 
 backtest:
-  events_path: data/funding/bt_3m/funding_events_over30_3m_selected20_for_backtest.parquet
   tick_catalog: data/ticks/funding_bt/catalog_selected20
   starting_balance: "100000 USDT"
   account_type: MARGIN

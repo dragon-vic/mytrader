@@ -292,9 +292,8 @@ class TraderReportWriter:
         ).fillna(0.0)
         merged = self.merge_actual_funding_income(merged)
         merged["funding_income"] = merged["actual_funding_income"]
-        missing_actual = merged["funding_income"].isna() | (merged["funding_income"] == 0.0)
-        merged.loc[missing_actual, "funding_income"] = merged.loc[missing_actual, "estimated_funding_income"]
         merged["net_with_funding"] = merged["realized_pnl"] + merged["funding_income"]
+        merged["net_with_estimated_funding"] = merged["realized_pnl"] + merged["estimated_funding_income"]
         return merged
 
     # 把交易所真实 funding fee 到账合并到交易表。
@@ -469,7 +468,7 @@ def build_backtest_overview_table(payload: dict[str, Any], settings: dict[str, A
 
 # 用 NT 回测结果组装总体概览行。
 def backtest_overview_rows(payload: dict[str, Any], settings: dict[str, Any]) -> list[tuple[str, str]]:
-    markets = settings.get("markets") or [settings["market"]]
+    markets = settings["markets"]
     symbols = ", ".join(market["instrument_symbol"] for market in markets)
     timeframes = ", ".join(sorted({market["timeframe"] for market in markets}))
     stats_pnls = payload.get("stats_pnls", {})
@@ -514,7 +513,7 @@ def build_live_overview_table(settings: dict[str, Any], output_dir: Path) -> Tab
 
 # 用 live/testnet 已落盘报告组装总体概览行。
 def live_overview_rows(settings: dict[str, Any], output_dir: Path) -> list[tuple[str, str]]:
-    markets = settings.get("markets") or [settings["market"]]
+    markets = settings["markets"]
     symbols = ", ".join(market["instrument_symbol"] for market in markets)
     orders = read_report_csv(output_dir, "orders.csv")
     positions = read_report_csv(output_dir, POSITIONS_FILE)

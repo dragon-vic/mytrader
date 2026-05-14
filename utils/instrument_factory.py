@@ -54,8 +54,8 @@ class InstrumentFactory:
 
     # 构建现货 CurrencyPair instrument。
     def currency_pair(self, market: dict[str, Any]) -> CurrencyPair:
-        base = Currency.from_str(market.get("base_currency", self.cfg["base_currency"]))
-        quote = Currency.from_str(market.get("quote_currency", self.cfg["quote_currency"]))
+        base = Currency.from_str(market["base_currency"])
+        quote = Currency.from_str(market["quote_currency"])
         return CurrencyPair(
             instrument_id=self.instrument_id(market),
             raw_symbol=Symbol(self.raw_symbol(market)),
@@ -70,10 +70,10 @@ class InstrumentFactory:
             min_quantity=Quantity.from_str(str(self.cfg["min_quantity"])),
             max_notional=optional_money(self.cfg.get("max_notional"), quote),
             min_notional=optional_money(self.cfg.get("min_notional"), quote),
-            max_price=Price.from_str(str(self.cfg.get("max_price", "10000000"))),
+            max_price=Price.from_str(str(self.cfg["max_price"])),
             min_price=Price.from_str(str(self.cfg["price_increment"])),
-            margin_init=Decimal(str(self.cfg.get("margin_init", "0"))),
-            margin_maint=Decimal(str(self.cfg.get("margin_maint", "0"))),
+            margin_init=Decimal(str(self.cfg["margin_init"])),
+            margin_maint=Decimal(str(self.cfg["margin_maint"])),
             maker_fee=Decimal(str(self.cfg["maker_fee"])),
             taker_fee=Decimal(str(self.cfg["taker_fee"])),
             ts_event=0,
@@ -82,41 +82,39 @@ class InstrumentFactory:
 
     # 构建 U 本位永续合约 CryptoPerpetual instrument。
     def crypto_perpetual(self, market: dict[str, Any]) -> CryptoPerpetual:
-        base = Currency.from_str(market.get("base_currency", self.cfg["base_currency"]))
-        quote = Currency.from_str(market.get("quote_currency", self.cfg["quote_currency"]))
-        settlement = Currency.from_str(
-            market.get("settlement_currency", self.cfg["settlement_currency"]),
-        )
+        base = Currency.from_str(market["base_currency"])
+        quote = Currency.from_str(market["quote_currency"])
+        settlement = Currency.from_str(market["settlement_currency"])
         return CryptoPerpetual(
             instrument_id=self.instrument_id(market),
             raw_symbol=Symbol(self.raw_symbol(market)),
             base_currency=base,
             quote_currency=quote,
             settlement_currency=settlement,
-            is_inverse=bool(self.cfg.get("is_inverse", False)),
+            is_inverse=bool(self.cfg["is_inverse"]),
             price_precision=int(self.cfg["price_precision"]),
             size_precision=int(self.cfg["size_precision"]),
             price_increment=Price.from_str(str(self.cfg["price_increment"])),
             size_increment=Quantity.from_str(str(self.cfg["size_increment"])),
             ts_event=0,
             ts_init=0,
-            multiplier=Quantity.from_str(str(self.cfg.get("multiplier", "1"))),
+            multiplier=Quantity.from_str(str(self.cfg["multiplier"])),
             lot_size=Quantity.from_str(str(self.cfg["size_increment"])),
             max_quantity=Quantity.from_str(str(self.cfg["max_quantity"])),
             min_quantity=Quantity.from_str(str(self.cfg["min_quantity"])),
             max_notional=optional_money(self.cfg.get("max_notional"), quote),
             min_notional=optional_money(self.cfg.get("min_notional"), quote),
-            max_price=Price.from_str(str(self.cfg.get("max_price", "10000000"))),
+            max_price=Price.from_str(str(self.cfg["max_price"])),
             min_price=Price.from_str(str(self.cfg["price_increment"])),
-            margin_init=Decimal(str(self.cfg.get("margin_init", "1"))),
-            margin_maint=Decimal(str(self.cfg.get("margin_maint", "1"))),
+            margin_init=Decimal(str(self.cfg["margin_init"])),
+            margin_maint=Decimal(str(self.cfg["margin_maint"])),
             maker_fee=Decimal(str(self.cfg["maker_fee"])),
             taker_fee=Decimal(str(self.cfg["taker_fee"])),
         )
 
     # 根据 instrument.kind 选择现货或永续合约。
     def instrument(self, market: dict[str, Any]) -> Instrument:
-        kind = self.cfg.get("kind", "spot")
+        kind = self.cfg["kind"]
         if kind == "spot":
             return self.currency_pair(market)
         if kind == "perpetual":

@@ -44,7 +44,9 @@ def snake_to_pascal(name: str) -> str:
 
 # 补齐一个市场的交易所、币种和 Binance/NT symbol。
 def normalize_market(market: dict[str, Any], settings: dict[str, Any]) -> dict[str, Any]:
-    instrument_kind = settings.get("instrument", {}).get("kind", "perpetual")
+    instrument_kind = settings["instrument"]["kind"]
+    if "timeframe" not in market:
+        raise KeyError("markets[].timeframe is required")
     exchange = settings["exchange"]
     base, quote = market["symbol"].split("/")
     raw_symbol = market.get("raw_symbol") or f"{base}{quote}"
@@ -52,8 +54,6 @@ def normalize_market(market: dict[str, Any], settings: dict[str, Any]) -> dict[s
         raw_symbol if instrument_kind == "spot" else f"{raw_symbol}-PERP"
     )
     normalized = {
-        "timeframe": "1m",
-        "since": None,
         "exchange": exchange["name"],
         "venue": exchange["venue"],
         "base_currency": base,
@@ -63,10 +63,6 @@ def normalize_market(market: dict[str, Any], settings: dict[str, Any]) -> dict[s
         "instrument_symbol": instrument_symbol,
         **market,
     }
-    if "backtest" in settings:
-        data_cfg = settings["backtest"].get("data", {})
-        normalized.setdefault("limit", data_cfg.get("limit", 1000))
-        normalized.setdefault("batches", data_cfg.get("batches", 3))
     return normalized
 
 
@@ -83,16 +79,15 @@ def normalize_strategy(settings: dict[str, Any]) -> None:
 # 补齐从 symbol 可推导的市场字段。
 def normalize_settings(settings: dict[str, Any]) -> None:
     market_defaults = settings.get("market_defaults") or {}
-    if "markets" in settings:
-        settings["markets"] = [
-            normalize_market(
-                {**market_defaults, **({"symbol": market} if isinstance(market, str) else market)},
-                settings,
-            )
-            for market in settings["markets"]
-        ]
-    else:
-        settings["market"] = normalize_market({**market_defaults, **settings["market"]}, settings)
+    if "markets" not in settings:
+        raise KeyError("markets is required")
+    settings["markets"] = [
+        normalize_market(
+            {**market_defaults, **({"symbol": market} if isinstance(market, str) else market)},
+            settings,
+        )
+        for market in settings["markets"]
+    ]
 
     first_market = market_configs(settings)[0]
     if "instrument" in settings:
@@ -123,13 +118,13 @@ def reports_dir(settings: dict[str, Any]) -> Path:
     return ROOT / settings["project"]["reports_dir"]
 
 
-# 返回当前 set 的市场列表；旧 set 只有 market，新 set 可以有 markets。
+# 返回当前 set 的市场列表。
 def market_configs(settings: dict[str, Any]) -> list[dict[str, Any]]:
-    return settings.get("markets") or [settings["market"]]
+    return settings["markets"]
 
 
 # 读取当前 set 的代理地址。
 def proxy_url(settings: dict[str, Any]) -> str | None:
-    if platform.system() == "Linux":
+    if platform.system() != "Windows":
         return None
     return settings["exchange"].get("proxy_url")
