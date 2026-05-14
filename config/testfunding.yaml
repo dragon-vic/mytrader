@@ -1,0 +1,39 @@
+market_defaults:
+  timeframe: 1s
+
+markets:
+  - symbol: 1000000BOB/USDT
+  - symbol: AXS/USDT
+  - symbol: BARD/USDT
+  - symbol: CFG/USDT
+  - symbol: COS/USDT
+  - symbol: DRIFT/USDT
+  - symbol: ENJ/USDT
+  - symbol: ENSO/USDT
+  - symbol: GUA/USDT
+  - symbol: KITE/USDT
+  - symbol: LYN/USDT
+  - symbol: NOM/USDT
+  - symbol: ORCA/USDT
+  - symbol: POWER/USDT
+  - symbol: RAVE/USDT
+  - symbol: RIVER/USDT
+  - symbol: SAHARA/USDT
+  - symbol: SIREN/USDT
+  - symbol: SOON/USDT
+  - symbol: STEEM/USDT
+
+strategy:
+  name: testfunding
+  trade_notional: "5.5"
+  params:
+    events_path: data/funding/bt_3m/funding_events_over30_3m_selected20_for_backtest.parquet
+    min_rate: 30
+
+backtest:
+  tick_catalog: data/ticks/funding_bt/catalog_selected20
+  starting_balance: "100000 USDT"
+  account_type: MARGIN
+  oms_type: NETTING
+  log_level: WARNING
+  log_bypass: true

@@ -7,7 +7,9 @@ from nautilus_trader.model.enums import AccountType
 from nautilus_trader.model.enums import OmsType
 from nautilus_trader.model.identifiers import Venue
 from nautilus_trader.model.objects import Money
+from nautilus_trader.persistence.catalog import ParquetDataCatalog
 
+from utils.config_loader import ROOT
 from utils.binance_clients import BinanceConfigBuilder
 from utils.config_loader import load_settings
 from utils.market_data import MarketDataStore
@@ -41,10 +43,19 @@ def build_backtest_engine(settings: dict) -> BacktestEngine:
         base_currency=None,
         starting_balances=[Money.from_str(settings["backtest"]["starting_balance"])],
     )
-    for instrument in store.factory.instruments():
-        engine.add_instrument(instrument)
-    for market in store.markets:
-        engine.add_data(store.load_bars(market))
+    if "tick_catalog" in settings["backtest"]:
+        catalog_path = ROOT / settings["backtest"]["tick_catalog"]
+        catalog = ParquetDataCatalog(str(catalog_path))
+        ids = [str(store.factory.instrument_id(market)) for market in store.markets]
+        for instrument in catalog.instruments(instrument_ids=ids):
+            engine.add_instrument(instrument)
+        for instrument_id in ids:
+            engine.add_data(catalog.trade_ticks(instrument_ids=[instrument_id]))
+    else:
+        for instrument in store.factory.instruments():
+            engine.add_instrument(instrument)
+        for market in store.markets:
+            engine.add_data(store.load_bars(market))
     engine.add_strategy(build_strategy(settings, "backtest"))
     return engine
 

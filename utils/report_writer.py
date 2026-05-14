@@ -273,10 +273,15 @@ class TraderReportWriter:
 
         opens["open_time"] = pd.to_datetime(opens["bar_time"], utc=True)
         trades["open_time_dt"] = pd.to_datetime(trades["open_time"], utc=True)
+        merge_cols = ["open_time"]
+        left_cols = ["open_time_dt"]
+        if "instrument_id" in opens.columns:
+            merge_cols.append("instrument_id")
+            left_cols.append("instrument_id")
         merged = trades.merge(
             opens[
                 [
-                    "open_time",
+                    *merge_cols,
                     "funding_time",
                     "funding_rate",
                     "estimated_funding_income",
@@ -286,8 +291,8 @@ class TraderReportWriter:
                     "reason",
                 ]
             ],
-            left_on="open_time_dt",
-            right_on="open_time",
+            left_on=left_cols,
+            right_on=merge_cols,
             how="left",
             suffixes=("", "_funding"),
         )

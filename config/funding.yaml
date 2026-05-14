@@ -7,21 +7,20 @@ strategy:
   name: funding
   trade_notional: "5.5"
   params:
-    mode: trade                 # watch 只估算；trade 真实下单
     min_rate: "0.0010"          # abs(rate) >= 10bps 才进入候选
     trade_scope: all            # USDT 永续下单范围；all 或 base symbol，如 BTC,ETH
     entry_sec: 2                # t-2 拉一次全量 rate/mark 快照
     entry_before: 1             # t-1 定时触发下单/冻结
-    exit_sec: 2                 # t+2 拉一次全量 mark 快照并平仓/记账
+    exit_sec: 2                 # t+2 平仓并写本轮交易记录
     api_timeout: 0.8            # 快照超时，避免阻塞下单和平仓
-    taker_fee: "0.0005"         # 单边市价手续费；日志总收益按两次市价扣除
     stop_close: true
 
 # 常改：live 运行参数。
 live:
   account_type: USDT_FUTURES
   log_level_file: INFO
-  margin_type: ISOLATED
+  margin_type: CROSS
+  leverage: 1
 
 # 常改：回测账户参数；本策略主要用于 live 观察。
 backtest:

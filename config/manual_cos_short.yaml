@@ -1,0 +1,42 @@
+# 手动测试：COSUSDT 实盘 U 本位永续限价空单。
+market:
+  symbol: COS/USDT
+  timeframe: 1m
+
+strategy:
+  name: manual_limit_short
+  trade_notional: "5"
+  params:
+    price_offset_bps: 300          # 卖出限价 = 第一条 ask * 1.03，避免立即成交
+    stop_after_terminal: true      # 接受/拒单后停止 NT 节点；不撤已接受挂单
+
+# 实盘账户；不配置 leverage/margin_type，保持交易所当前默认设置。
+live:
+  account_type: USDT_FUTURES
+  log_level_file: INFO
+
+backtest:
+  starting_balance: "100000 USDT"
+  account_type: MARGIN
+  oms_type: NETTING
+  log_level: INFO
+  log_bypass: true
+  data:
+    limit: 1000
+    batches: 1
+  instrument:
+    settlement_currency: USDT
+    is_inverse: false
+    price_precision: 6
+    size_precision: 0
+    price_increment: "0.000001"
+    size_increment: "1"
+    multiplier: "1"
+    min_quantity: "1"
+    max_quantity: "600000000"
+    min_notional: "5"
+    max_price: "200"
+    margin_init: "1"
+    margin_maint: "1"
+    maker_fee: "0.0002"
+    taker_fee: "0.0005"

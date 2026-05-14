@@ -98,3 +98,7 @@ def release_run(settings: dict[str, Any]) -> None:
     except (OSError, ValueError, KeyError, json.JSONDecodeError):
         return
     lock.unlink(missing_ok=True)
+    try:
+        lock.parent.rmdir()
+    except OSError:
+        pass
