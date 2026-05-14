@@ -17,27 +17,26 @@ from nautilus_trader.model.instruments import Instrument
 from nautilus_trader.trading.strategy import Strategy
 
 
-class TestfundingConfig(StrategyConfig, frozen=True):
+class MaxfundingConfig(StrategyConfig, frozen=True):
     instrument_ids: list[InstrumentId]
     bar_types: list[BarType]
     trade_notional: Decimal
     events_path: str
-    min_rate_bps_by_symbol: dict[str, Decimal] = {}
+    min_rate_bps: Decimal
+    whitelist_symbols: list[str]
     exclude_symbols: list[str] = []
     event_log_path: str = "auto"
 
 
-class Testfunding(Strategy):
-    def __init__(self, config: TestfundingConfig) -> None:
+class Maxfunding(Strategy):
+    def __init__(self, config: MaxfundingConfig) -> None:
         super().__init__(config)
         self.events: dict[str, dict] = {}
         self.open_events: dict[InstrumentId, str] = {}
         self.last_px: dict[InstrumentId, Decimal] = {}
         self.log_path = Path(config.event_log_path)
-        self.min_rate_bps = {
-            self._base_symbol(symbol): Decimal(str(value))
-            for symbol, value in config.min_rate_bps_by_symbol.items()
-        }
+        self.min_rate_bps = Decimal(str(config.min_rate_bps))
+        self.whitelist = {self._base_symbol(symbol) for symbol in config.whitelist_symbols}
         self.exclude = {self._base_symbol(symbol) for symbol in config.exclude_symbols}
 
     # 启动时加载 funding 事件，并注册 t-1/t+1 定时器。
@@ -48,18 +47,18 @@ class Testfunding(Strategy):
             self.subscribe_trade_ticks(instrument_id)
         for event_id, row in self.events.items():
             self.clock.set_time_alert_ns(
-                f"testfunding_entry:{event_id}",
+                f"maxfunding_entry:{event_id}",
                 int(row["entry_time_ms"]) * 1_000_000,
                 callback=self._on_time,
                 allow_past=False,
             )
             self.clock.set_time_alert_ns(
-                f"testfunding_exit:{event_id}",
+                f"maxfunding_exit:{event_id}",
                 int(row["exit_time_ms"]) * 1_000_000,
                 callback=self._on_time,
                 allow_past=False,
             )
-        self.log.info(f"testfunding启动，事件{len(self.events)}个，交易对{len(self.config.instrument_ids)}个")
+        self.log.info(f"maxfunding启动，事件{len(self.events)}个，交易对{len(self.config.instrument_ids)}个")
 
     # trade tick 只用于估算市价单数量。
     def on_trade_tick(self, tick: TradeTick) -> None:
@@ -124,10 +123,10 @@ class Testfunding(Strategy):
             if instrument_id not in allowed:
                 continue
             base = self._base_symbol(row["symbol"])
-            if base in self.exclude or base not in self.min_rate_bps:
+            if base in self.exclude or base not in self.whitelist:
                 continue
             abs_rate_bps = Decimal(str(row["abs_rate_bps"]))
-            if abs_rate_bps <= self.min_rate_bps[base]:
+            if abs_rate_bps <= self.min_rate_bps:
                 continue
             node_ms = int(row["funding_time"]) // 14_400_000 * 14_400_000
             current = by_node.get(node_ms)

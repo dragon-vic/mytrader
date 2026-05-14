@@ -23,6 +23,7 @@ from utils.config_loader import load_settings
 from utils.report_writer import live_logs_dir
 from utils.report_writer import live_raw_log_name
 from utils.report_writer import prepare_report_dir
+from utils.report_writer import print_live_summary
 from utils.report_writer import TraderReportWriter
 from utils.runtime_ids import claim_run
 from utils.runtime_ids import release_run
@@ -135,6 +136,7 @@ def main(config_name: str, mode: str | None = None) -> None:
         node, report_writer = build_live_node(settings)
         run_live_node(node)
         report_writer.write_final_reports(node.trader)
+        print_live_summary(settings)
         report_writer.write_clean_live_log(settings)
     finally:
         if node is not None:

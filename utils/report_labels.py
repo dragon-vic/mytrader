@@ -41,7 +41,7 @@ COLUMN_LABELS = {
     "commissions": "手续费合计",
     "status": "订单状态",
     "ts_init": "初始化时间",
-    "ts_last": "最后更新时间",
+    "ts_last": "成交时间",
     "entry": "开仓方向",
     "peak_qty": "最大持仓数量",
     "avg_px_open": "开仓均价",

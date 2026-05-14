@@ -45,20 +45,17 @@ TIMEFRAME_UNITS = {"s": "SECOND", "m": "MINUTE", "h": "HOUR", "d": "DAY"}
 # 报告文件名。
 ORDERS_FILE = "orders.csv"
 POSITIONS_FILE = "positions.csv"
-RESULT_FILE = "result.csv"
 ACCOUNT_CHANGES_FILE = "account_changes.csv"
 POSITION_EVENTS_FILE = "position_events.csv"
-SUMMARY_FILE = "summary_aggregate.md"
+SUMMARY_FILE = "summary.md"
 
 REPORT_FILES = {
     "orders": ORDERS_FILE,
-    "accounts": RESULT_FILE,
 }
 
 LIVE_RESULT_FILES = (
     ORDERS_FILE,
     POSITIONS_FILE,
-    RESULT_FILE,
     ACCOUNT_CHANGES_FILE,
     POSITION_EVENTS_FILE,
     "orders_aggregate.csv",
@@ -82,7 +79,6 @@ OBSOLETE_REPORT_FILES = (
 # NT trader 原始报告保留列。
 REPORT_COLUMNS = {
     "orders": [
-        "ts_init",
         "ts_last",
         "instrument_id",
         "side",
@@ -174,37 +170,3 @@ POSITION_COLUMNS = [
     "position_id",
 ]
 
-# summary_aggregate.md 字段和中文标签。
-EMPTY_SUMMARY = {
-    "trades": 0,
-    "win_rate": 0.0,
-    "realized_pnl": 0.0,
-    "estimated_funding_income": 0.0,
-    "actual_funding_income": 0.0,
-    "net_with_funding": 0.0,
-    "avg_trade_net": 0.0,
-    "best_trade_net": 0.0,
-    "worst_trade_net": 0.0,
-    "gross_profit": 0.0,
-    "gross_loss": 0.0,
-    "profit_factor": "",
-    "total_commissions": 0.0,
-    "avg_duration_min": 0.0,
-}
-
-SUMMARY_LABELS = {
-    "trades": "交易次数",
-    "win_rate": "胜率",
-    "realized_pnl": "已实现盈亏",
-    "estimated_funding_income": "预估资金费收入",
-    "actual_funding_income": "实际资金费收入",
-    "net_with_funding": "含资金费净收益",
-    "avg_trade_net": "单笔平均净收益",
-    "best_trade_net": "最佳单笔净收益",
-    "worst_trade_net": "最差单笔净收益",
-    "gross_profit": "盈利交易合计",
-    "gross_loss": "亏损交易合计",
-    "profit_factor": "盈利因子",
-    "total_commissions": "总手续费",
-    "avg_duration_min": "平均持仓分钟",
-}

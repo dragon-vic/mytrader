@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from utils.config_loader import ROOT
 
@@ -55,9 +57,7 @@ def claim_run(settings: dict[str, Any]) -> dict[str, Any]:
             continue
         break
 
-    stem = f"{settings['project']['config_name']}-{settings['mode']}-{node_id}"
-    seq = next_seq(reports, stem)
-    run_name = f"{stem}-{seq}"
+    run_name = f"{settings['strategy']['name']}-{datetime.now(ZoneInfo('Asia/Shanghai')).strftime('%m%d%H%M%S')}"
     payload = {
         "pid": os.getpid(),
         "config": settings["project"]["config_name"],
@@ -71,7 +71,6 @@ def claim_run(settings: dict[str, Any]) -> dict[str, Any]:
     runtime = dict(settings.get("runtime", {}))
     runtime["node_id"] = node_id
     runtime["node_num"] = node_num
-    runtime["run_seq"] = seq
     runtime["run_name"] = run_name
     runtime["lock_path"] = str(lock)
     runtime["trader_id"] = f"TRADER-{node_id.upper()}"

@@ -53,6 +53,10 @@ def strategy_params(
 ) -> dict[str, Any]:
     params = dict(settings["strategy"].get("params", {}))
     fields = getattr(config_cls, "__annotations__", {})
+    if run_type == "backtest":
+        for key, value in settings.get("backtest", {}).items():
+            if key in fields and key not in params:
+                params[key] = value
     if params.get("external_order_claims") is True:
         params["external_order_claims"] = [
             instruments.instrument_id(market)

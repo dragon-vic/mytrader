@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 import shutil
 from dataclasses import asdict
@@ -13,7 +12,6 @@ import pandas as pd
 from rich.console import Console
 from rich.table import Table
 
-from utils.arguments import EMPTY_SUMMARY
 from utils.arguments import LIVE_LOG_START_MARKER
 from utils.arguments import LIVE_LOG_STOP_MARKER
 from utils.arguments import LIVE_RESULT_FILES
@@ -22,9 +20,7 @@ from utils.arguments import OBSOLETE_REPORT_FILES
 from utils.arguments import POSITIONS_FILE
 from utils.arguments import REPORT_COLUMNS
 from utils.arguments import REPORT_FILES
-from utils.arguments import RESULT_FILE
 from utils.arguments import SUMMARY_FILE
-from utils.arguments import SUMMARY_LABELS
 from utils.config_loader import ROOT
 from utils.report_labels import to_chinese_columns
 
@@ -104,8 +100,8 @@ class TraderReportWriter:
             if path.exists():
                 path.unlink()
 
-    # 保存 NT trader 在运行结束后生成的订单、持仓和账户结果。
-    def write_final_reports(self, trader, names=("orders", "positions", "accounts")) -> None:
+    # 保存 NT trader 在运行结束后生成的订单和持仓结果。
+    def write_final_reports(self, trader, names=("orders", "positions")) -> None:
         self.clear_files(
             (
                 "orders.csv",
@@ -149,7 +145,8 @@ class TraderReportWriter:
 
     # 写出给人看的 CSV 时，最后一步统一改中文列名。
     def write_csv(self, df: pd.DataFrame, filename: str) -> None:
-        drop_empty_columns(to_chinese_columns(df)).to_csv(
+        data = localize_time_columns(df)
+        drop_empty_columns(to_chinese_columns(data)).to_csv(
             self.output_dir / filename,
             index=False,
             encoding="utf-8-sig",
@@ -162,15 +159,9 @@ class TraderReportWriter:
             df = pd.read_csv(path)
             self.write_csv(df, filename)
 
-    # 订单表前两列时间改成北京时间。
+    # 订单表只保留成交时间，时间统一在 write_csv 出口转换。
     def format_orders(self, orders: pd.DataFrame) -> pd.DataFrame:
-        data = orders.copy()
-        for column in ("ts_init", "ts_last"):
-            if column in data.columns:
-                data[column] = pd.to_datetime(data[column], unit="ns", utc=True).dt.tz_convert(
-                    "Asia/Shanghai",
-                ).dt.strftime("%Y-%m-%d %H:%M:%S")
-        return data
+        return orders.copy()
 
     # 账户最终结果只保留有余额的币。
     def filter_nonzero_accounts(self, accounts: pd.DataFrame) -> pd.DataFrame:
@@ -230,8 +221,6 @@ class TraderReportWriter:
         trades = self.build_trades(positions)
         if not trades.empty:
             self.write_csv(trades, POSITIONS_FILE)
-        summary = self.build_summary(trades)
-        self.write_summary_markdown(summary)
 
     # 按 position 维度合成交易表，并合并 funding 相关字段。
     def build_trades(self, positions: pd.DataFrame) -> pd.DataFrame:
@@ -240,8 +229,8 @@ class TraderReportWriter:
 
         trades = pd.DataFrame(
             {
-                "open_time": positions["ts_opened"],
-                "close_time": positions["ts_closed"],
+                "open_time": pd.to_datetime(positions["ts_opened"], unit="ns", utc=True),
+                "close_time": pd.to_datetime(positions["ts_closed"], unit="ns", utc=True),
                 "instrument_id": positions["instrument_id"],
                 "side": positions["entry"],
                 "qty": positions["peak_qty"],
@@ -348,40 +337,6 @@ class TraderReportWriter:
             errors="ignore",
         )
 
-    # 计算核心指标，作为 summary.md 的数据源。
-    def build_summary(self, trades: pd.DataFrame) -> pd.DataFrame:
-        if trades.empty:
-            return pd.DataFrame([EMPTY_SUMMARY.copy()])
-
-        net_col = "net_with_funding" if "net_with_funding" in trades.columns else "realized_pnl"
-        gross_profit = trades.loc[trades[net_col] > 0, net_col].sum()
-        gross_loss = trades.loc[trades[net_col] < 0, net_col].sum()
-        summary = {
-            "trades": len(trades),
-            "win_rate": (trades[net_col] > 0).mean(),
-            "realized_pnl": trades["realized_pnl"].sum(),
-            "estimated_funding_income": trades.get("estimated_funding_income", pd.Series([0.0])).sum(),
-            "actual_funding_income": trades.get("actual_funding_income", pd.Series([0.0])).sum(),
-            "net_with_funding": trades[net_col].sum(),
-            "avg_trade_net": trades[net_col].mean(),
-            "best_trade_net": trades[net_col].max(),
-            "worst_trade_net": trades[net_col].min(),
-            "gross_profit": gross_profit,
-            "gross_loss": gross_loss,
-            "profit_factor": gross_profit / abs(gross_loss) if gross_loss < 0 else "",
-            "total_commissions": trades["commissions"].sum(),
-            "avg_duration_min": trades["duration_min"].mean(),
-        }
-        return pd.DataFrame([summary])
-
-    # 输出中文 markdown 摘要。
-    def write_summary_markdown(self, summary: pd.DataFrame) -> None:
-        row = summary.iloc[0].to_dict()
-        lines = ["# 交易运行摘要", ""]
-        for key, label in SUMMARY_LABELS.items():
-            lines.append(f"- {label}: {row.get(key, '')}")
-        (self.output_dir / SUMMARY_FILE).write_text("\n".join(lines) + "\n", encoding="utf-8-sig")
-
     # 保留 TradingNode RUNNING 到 STOPPING 之间的 live 日志。
     def write_clean_live_log(
         self,
@@ -415,24 +370,59 @@ def write_trader_reports(trader, settings: dict[str, Any], run_type: str) -> Non
     TraderReportWriter.from_settings(settings, run_type).write_final_reports(trader)
 
 
-# 保存回测结果 json。
+# 生成回测结果数据，报告只落人读的表格文件。
 def write_backtest_result(result, settings: dict[str, Any]) -> dict[str, Any]:
-    output_dir = run_reports_dir(settings, "backtest")
-    output_dir.mkdir(parents=True, exist_ok=True)
-    payload = asdict(result)
-    (output_dir / "backtest_result.json").write_text(
-        json.dumps(payload, indent=2, default=str),
-        encoding="utf-8",
-    )
-    return payload
+    return asdict(result)
 
 
 # 打印回测核心摘要。
 def print_backtest_summary(payload: dict[str, Any], settings: dict[str, Any]) -> None:
     output_dir = run_reports_dir(settings, "backtest")
     elapsed_days = float(payload.get("elapsed_time") or 0) / 86400
+    write_summary_markdown(
+        "回测摘要",
+        [
+            ("回测总览", ("指标", "数值"), backtest_overview_rows(payload, settings)),
+            ("交易统计", ("指标", "数值"), trade_stats_rows(output_dir, elapsed_days)),
+            (
+                "标的统计",
+                ("标的", "交易数", "胜率", "净收益", "平均收益", "最大盈利", "最大亏损", "手续费"),
+                instrument_stats_rows(output_dir),
+            ),
+            ("订单执行统计", ("指标", "数值"), order_stats_rows(output_dir)),
+        ],
+        output_dir,
+    )
     console = Console()
     console.print(build_backtest_overview_table(payload, settings))
+    print_common_tables(console, output_dir, elapsed_days)
+
+
+# 打印 live/testnet 结束摘要。
+def print_live_summary(settings: dict[str, Any]) -> None:
+    output_dir = run_reports_dir(settings, "live")
+    elapsed_days = report_elapsed_days(output_dir)
+    write_summary_markdown(
+        "运行摘要",
+        [
+            ("运行总览", ("指标", "数值"), live_overview_rows(settings, output_dir)),
+            ("交易统计", ("指标", "数值"), trade_stats_rows(output_dir, elapsed_days)),
+            (
+                "标的统计",
+                ("标的", "交易数", "胜率", "净收益", "平均收益", "最大盈利", "最大亏损", "手续费"),
+                instrument_stats_rows(output_dir),
+            ),
+            ("订单执行统计", ("指标", "数值"), order_stats_rows(output_dir)),
+        ],
+        output_dir,
+    )
+    console = Console()
+    console.print(build_live_overview_table(settings, output_dir))
+    print_common_tables(console, output_dir, elapsed_days)
+
+
+# 打印交易、标的和订单三张公共表。
+def print_common_tables(console: Console, output_dir: Path, elapsed_days: float) -> None:
     for table in (
         build_trade_stats_table(output_dir, elapsed_days),
         build_instrument_stats_table(output_dir),
@@ -442,12 +432,43 @@ def print_backtest_summary(payload: dict[str, Any], settings: dict[str, Any]) ->
             console.print(table)
 
 
+# 保存终端同款表格到 markdown 摘要。
+def write_summary_markdown(
+    title: str,
+    sections: list[tuple[str, tuple[str, ...], list[tuple[str, ...]]]],
+    output_dir: Path,
+) -> None:
+    lines = [f"# {title}", ""]
+    for section, headers, rows in sections:
+        if not rows:
+            continue
+        lines.extend([f"## {section}", "", markdown_table(headers, rows), ""])
+    (output_dir / SUMMARY_FILE).write_text("\n".join(lines), encoding="utf-8-sig")
+
+
+# 组装 markdown 表格。
+def markdown_table(headers: tuple[str, ...], rows: list[tuple[str, ...]]) -> str:
+    lines = [
+        "| " + " | ".join(headers) + " |",
+        "| " + " | ".join("---" for _ in headers) + " |",
+    ]
+    for row in rows:
+        lines.append("| " + " | ".join(str(value) for value in row) + " |")
+    return "\n".join(lines)
+
+
 # 用 NT 回测结果组装总体概览表。
 def build_backtest_overview_table(payload: dict[str, Any], settings: dict[str, Any]) -> Table:
     table = Table(title="回测总览")
     table.add_column("指标")
     table.add_column("数值", justify="right")
+    for label, value in backtest_overview_rows(payload, settings):
+        table.add_row(label, value)
+    return table
 
+
+# 用 NT 回测结果组装总体概览行。
+def backtest_overview_rows(payload: dict[str, Any], settings: dict[str, Any]) -> list[tuple[str, str]]:
     markets = settings.get("markets") or [settings["market"]]
     symbols = ", ".join(market["instrument_symbol"] for market in markets)
     timeframes = ", ".join(sorted({market["timeframe"] for market in markets}))
@@ -456,7 +477,7 @@ def build_backtest_overview_table(payload: dict[str, Any], settings: dict[str, A
     pnl_stats = stats_pnls.get(currency, {})
     return_stats = payload.get("stats_returns", {})
 
-    rows = [
+    return [
         ("配置名", settings["project"]["config_name"]),
         ("策略名", settings["strategy"]["name"]),
         ("标的", symbols),
@@ -479,16 +500,55 @@ def build_backtest_overview_table(payload: dict[str, Any], settings: dict[str, A
         ("订单数", format_int(payload.get("total_orders"))),
         ("持仓数", format_int(payload.get("total_positions"))),
     ]
+
+
+# 用 live/testnet 运行结果组装总体概览表。
+def build_live_overview_table(settings: dict[str, Any], output_dir: Path) -> Table:
+    table = Table(title="运行总览")
+    table.add_column("指标")
+    table.add_column("数值", justify="right")
+    for label, value in live_overview_rows(settings, output_dir):
+        table.add_row(label, value)
+    return table
+
+
+# 用 live/testnet 已落盘报告组装总体概览行。
+def live_overview_rows(settings: dict[str, Any], output_dir: Path) -> list[tuple[str, str]]:
+    markets = settings.get("markets") or [settings["market"]]
+    symbols = ", ".join(market["instrument_symbol"] for market in markets)
+    orders = read_report_csv(output_dir, "orders.csv")
+    positions = read_report_csv(output_dir, POSITIONS_FILE)
+    return [
+        ("配置名", settings["project"]["config_name"]),
+        ("策略名", settings["strategy"]["name"]),
+        ("运行模式", settings["mode"]),
+        ("报告目录", output_dir.name),
+        ("标的", symbols),
+        ("生成时间", datetime.now(LOCAL_TZ).strftime("%Y-%m-%d %H:%M:%S")),
+        ("订单数", format_int(len(orders))),
+        ("持仓数", format_int(len(positions))),
+    ]
+
+
+# 从持仓汇总表组装交易统计表。
+def build_trade_stats_table(output_dir: Path, elapsed_days: float) -> Table | None:
+    rows = trade_stats_rows(output_dir, elapsed_days)
+    if not rows:
+        return None
+
+    table = Table(title="交易统计")
+    table.add_column("指标")
+    table.add_column("数值", justify="right")
     for label, value in rows:
         table.add_row(label, value)
     return table
 
 
-# 从持仓汇总表组装交易统计表。
-def build_trade_stats_table(output_dir: Path, elapsed_days: float) -> Table | None:
+# 从持仓汇总表组装交易统计行。
+def trade_stats_rows(output_dir: Path, elapsed_days: float) -> list[tuple[str, str]]:
     positions = read_report_csv(output_dir, POSITIONS_FILE)
     if positions.empty:
-        return None
+        return []
 
     pnl = positions["已实现盈亏"].map(money_to_float)
     fees = positions["手续费合计"].map(commissions_to_float)
@@ -496,11 +556,7 @@ def build_trade_stats_table(output_dir: Path, elapsed_days: float) -> Table | No
     wins = pnl[pnl > 0]
     losses = pnl[pnl < 0]
     gross_profit = wins.sum()
-
-    table = Table(title="交易统计")
-    table.add_column("指标")
-    table.add_column("数值", justify="right")
-    rows = [
+    return [
         ("已完成交易数", format_int(len(positions))),
         ("多单数量", format_int((positions["方向"] == "BUY").sum())),
         ("空单数量", format_int((positions["方向"] == "SELL").sum())),
@@ -518,20 +574,13 @@ def build_trade_stats_table(output_dir: Path, elapsed_days: float) -> Table | No
         ("平均持仓分钟", format_number(duration_min.mean())),
         ("最长持仓分钟", format_number(duration_min.max())),
     ]
-    for label, value in rows:
-        table.add_row(label, value)
-    return table
 
 
 # 从持仓汇总表按标的聚合统计。
 def build_instrument_stats_table(output_dir: Path) -> Table | None:
-    positions = read_report_csv(output_dir, POSITIONS_FILE)
-    if positions.empty:
+    rows = instrument_stats_rows(output_dir)
+    if not rows:
         return None
-
-    data = positions.copy()
-    data["净收益"] = data["已实现盈亏"].map(money_to_float)
-    data["手续费"] = data["手续费合计"].map(commissions_to_float)
 
     table = Table(title="标的统计")
     for column, justify in (
@@ -546,9 +595,24 @@ def build_instrument_stats_table(output_dir: Path) -> Table | None:
     ):
         table.add_column(column, justify=justify)
 
+    for row in rows:
+        table.add_row(*row)
+    return table
+
+
+# 从持仓汇总表按标的聚合统计行。
+def instrument_stats_rows(output_dir: Path) -> list[tuple[str, ...]]:
+    positions = read_report_csv(output_dir, POSITIONS_FILE)
+    if positions.empty:
+        return []
+
+    data = positions.copy()
+    data["净收益"] = data["已实现盈亏"].map(money_to_float)
+    data["手续费"] = data["手续费合计"].map(commissions_to_float)
+    rows = []
     for instrument, group in data.groupby("标的"):
         pnl = group["净收益"]
-        table.add_row(
+        rows.append((
             str(instrument),
             format_int(len(group)),
             format_percent((pnl > 0).mean()),
@@ -557,27 +621,51 @@ def build_instrument_stats_table(output_dir: Path) -> Table | None:
             format_number(pnl.max()),
             format_number(pnl.min()),
             format_number(group["手续费"].sum()),
-        )
-    return table
+        ))
+    return rows
 
 
 # 从订单和成交表组装执行统计表。
 def build_order_stats_table(output_dir: Path) -> Table | None:
-    orders = read_report_csv(output_dir, "orders.csv")
-    if orders.empty:
+    rows = order_stats_rows(output_dir)
+    if not rows:
         return None
 
     table = Table(title="订单执行统计")
     table.add_column("指标")
     table.add_column("数值", justify="right")
-
-    filled_qty = pd.to_numeric(orders["已成交数量"], errors="coerce").fillna(0)
-    table.add_row("订单总数", format_int(len(orders)))
-    table.add_row("有成交订单数", format_int((filled_qty > 0).sum()))
-    table.add_row("已完成订单数", format_int((orders["订单状态"] == "FILLED").sum()))
-    table.add_row("已取消订单数", format_int((orders["订单状态"] == "CANCELED").sum()))
-    table.add_row("已拒绝订单数", format_int((orders["订单状态"] == "REJECTED").sum()))
+    for label, value in rows:
+        table.add_row(label, value)
     return table
+
+
+# 从订单和成交表组装执行统计行。
+def order_stats_rows(output_dir: Path) -> list[tuple[str, str]]:
+    orders = read_report_csv(output_dir, "orders.csv")
+    if orders.empty:
+        return []
+    filled_qty = pd.to_numeric(orders["已成交数量"], errors="coerce").fillna(0)
+    return [
+        ("订单总数", format_int(len(orders))),
+        ("有成交订单数", format_int((filled_qty > 0).sum())),
+        ("已完成订单数", format_int((orders["订单状态"] == "FILLED").sum())),
+        ("已取消订单数", format_int((orders["订单状态"] == "CANCELED").sum())),
+        ("已拒绝订单数", format_int((orders["订单状态"] == "REJECTED").sum())),
+    ]
+
+
+# 用持仓表估算运行覆盖天数。
+def report_elapsed_days(output_dir: Path) -> float:
+    positions = read_report_csv(output_dir, POSITIONS_FILE)
+    if positions.empty:
+        return 0.0
+    opened = pd.to_datetime(positions["开仓时间"], utc=True, errors="coerce")
+    closed = pd.to_datetime(positions["平仓时间"], utc=True, errors="coerce")
+    start = opened.min()
+    end = closed.max()
+    if pd.isna(start) or pd.isna(end) or end <= start:
+        return 0.0
+    return (end - start).total_seconds() / 86400
 
 
 # 读取报告 CSV，文件不存在表示本次没有生成这类报告。
@@ -586,6 +674,38 @@ def read_report_csv(output_dir: Path, filename: str) -> pd.DataFrame:
     if not path.exists():
         return pd.DataFrame()
     return pd.read_csv(path)
+
+
+# 报告里所有时间字段统一显示北京时间。
+def localize_time_columns(df: pd.DataFrame) -> pd.DataFrame:
+    data = df.copy()
+    for column in data.columns:
+        name = str(column).lower()
+        if not is_time_column(str(column)):
+            continue
+        if pd.api.types.is_numeric_dtype(data[column]) and name.startswith("ts_"):
+            values = pd.to_datetime(data[column], unit="ns", utc=True, errors="coerce")
+        else:
+            values = pd.to_datetime(data[column], utc=True, errors="coerce")
+        mask = values.notna()
+        if mask.any():
+            localized = data[column].astype("object")
+            localized.loc[mask] = values[mask].dt.tz_convert(LOCAL_TZ).dt.strftime("%Y-%m-%d %H:%M:%S")
+            data[column] = localized
+    return data
+
+
+# 判断列名是否是报告时间字段。
+def is_time_column(column: str) -> bool:
+    name = column.lower()
+    if name in {"time_in_force"}:
+        return False
+    return (
+        name.startswith("ts_")
+        or name.endswith("_time")
+        or name.endswith("时间")
+        or name in {"open_time", "close_time", "bar_time", "local_time", "income_time"}
+    )
 
 
 # 删除整列都没有有效值的列，避免 report 里出现全空字段。
@@ -605,7 +725,11 @@ def format_timestamp_ns(value) -> str:
 def format_number(value, suffix: str = "") -> str:
     if value is None or pd.isna(value):
         return ""
-    return f"{float(value):.2f}{suffix}"
+    number = round(float(value), 2)
+    if number == 0:
+        number = 0.0
+    text = f"{number:.2f}".rstrip("0").rstrip(".")
+    return f"{text}{suffix}"
 
 
 # 终端表格里的整数不显示小数位。
@@ -619,7 +743,7 @@ def format_int(value) -> str:
 def format_percent(value) -> str:
     if value is None or pd.isna(value):
         return ""
-    return f"{float(value) * 100:.2f}%"
+    return format_number(float(value) * 100, "%")
 
 
 # 从 Money 字符串里提取数字部分。

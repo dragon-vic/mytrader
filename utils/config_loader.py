@@ -81,7 +81,10 @@ def normalize_settings(settings: dict[str, Any]) -> None:
     market_defaults = settings.get("market_defaults") or {}
     if "markets" in settings:
         settings["markets"] = [
-            normalize_market({**market_defaults, **market}, settings)
+            normalize_market(
+                {**market_defaults, **({"symbol": market} if isinstance(market, str) else market)},
+                settings,
+            )
             for market in settings["markets"]
         ]
     else:
