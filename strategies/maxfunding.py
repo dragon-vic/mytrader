@@ -1,17 +1,22 @@
 from __future__ import annotations
 
 import csv
+from time import perf_counter
+from datetime import UTC
+from datetime import datetime
 from decimal import Decimal
 from decimal import ROUND_CEILING
 from pathlib import Path
 
-import pandas as pd
+import requests
 from nautilus_trader.common.events import TimeEvent
 from nautilus_trader.config import StrategyConfig
 from nautilus_trader.model.data import BarType
-from nautilus_trader.model.data import TradeTick
 from nautilus_trader.model.enums import OrderSide
 from nautilus_trader.model.enums import TimeInForce
+from nautilus_trader.model.events import OrderFilled
+from nautilus_trader.model.events import OrderRejected
+from nautilus_trader.model.identifiers import ClientOrderId
 from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.model.instruments import Instrument
 from nautilus_trader.trading.strategy import Strategy
@@ -20,196 +25,543 @@ from nautilus_trader.trading.strategy import Strategy
 class MaxfundingConfig(StrategyConfig, frozen=True):
     instrument_ids: list[InstrumentId]
     bar_types: list[BarType]
-    trade_notional: Decimal
-    min_rate_bps: Decimal
-    whitelist_symbols: list[str]
-    events_path: str = ""
-    exclude_symbols: list[str] = []
+    trade_symbols: list[str]
+    trade_notional: Decimal = Decimal("5.5")
+    min_rate_bps: Decimal = Decimal("60")
+    pre_sec: float = 3.0
+    entry_sec: float = 2.0
+    pre_deadline: float = 1.0
+    entry_before: float = 1.0
+    exit_sec: float = 2.0
+    post_sec: float = 3.0
+    stop_close: bool = True
     event_log_path: str = "auto"
+    api_url: str = "https://fapi.binance.com"
+    api_timeout: float = 0.8
+    proxy_url: str = ""
 
 
 class Maxfunding(Strategy):
+    WARMUP_TIMER = "maxfunding_warmup"
+    PRE_TIMER = "maxfunding_pre"
+    FREEZE_TIMER = "maxfunding_freeze"
+    RATE_TIMER = "maxfunding_rate"
+    CLOSE_TIMER = "maxfunding_close"
+    POST_TIMER = "maxfunding_post"
+    TIMERS = (WARMUP_TIMER, PRE_TIMER, FREEZE_TIMER, RATE_TIMER, CLOSE_TIMER, POST_TIMER)
+
     def __init__(self, config: MaxfundingConfig) -> None:
         super().__init__(config)
-        self.events: dict[str, dict] = {}
-        self.open_events: dict[InstrumentId, str] = {}
-        self.last_px: dict[InstrumentId, Decimal] = {}
+        self.notional = Decimal(str(config.trade_notional))
+        self.min_rate = Decimal(str(config.min_rate_bps)) / Decimal("10000")
+        self.trade = {
+            symbol.upper().replace("-PERP.BINANCE", "").replace("USDT", "").replace("/", "")
+            for symbol in config.trade_symbols
+        }
+        self.fund_ns = 0
+        self.entry_done = False
+        self.sent_done = False
+        self.close_done = False
+        self.ins: dict[InstrumentId, Instrument] = {}
+        self.trade_ids: set[InstrumentId] = set()
+        self.watch_symbols: dict[InstrumentId, str] = {}
+        self.obs_map: dict[InstrumentId, dict[str, Decimal | OrderSide]] = {}
+        self.ins_map: dict[InstrumentId, dict[str, Decimal | OrderSide]] = {}
+        self.open_ids: set[InstrumentId] = set()
+        self.order_map: dict[ClientOrderId, InstrumentId] = {}
+        self.chosen_id: InstrumentId | None = None
         self.log_path = Path(config.event_log_path)
-        self.min_rate_bps = Decimal(str(config.min_rate_bps))
-        self.whitelist = {self._base_symbol(symbol) for symbol in config.whitelist_symbols}
-        self.exclude = {self._base_symbol(symbol) for symbol in config.exclude_symbols}
+        self.proxies = {"http": config.proxy_url, "https": config.proxy_url} if config.proxy_url else None
 
-    # 启动时加载 funding 事件，并注册 t-1/t+1 定时器。
+    # 启动时注册 NT 定时器，资金费和价格用 REST 观察列表快照。
     def on_start(self) -> None:
-        self._load_events()
+        if self.config.entry_sec <= self.config.entry_before:
+            raise RuntimeError("entry_sec must be greater than entry_before")
+        if self.config.pre_sec <= self.config.entry_sec:
+            raise RuntimeError("pre_sec must be greater than entry_sec")
+        if self.config.pre_deadline <= 0:
+            raise RuntimeError("pre_deadline must be positive")
+        if self.config.entry_before <= 0:
+            raise RuntimeError("entry_before must be positive")
+        if self.config.exit_sec <= 0:
+            raise RuntimeError("exit_sec must be positive")
+        if self.config.post_sec <= self.config.exit_sec:
+            raise RuntimeError("post_sec must be greater than exit_sec")
+        if self.config.api_timeout <= 0:
+            raise RuntimeError("api_timeout must be positive")
+
+        self._load_ins()
+        self._load_lists()
         self._init_log()
-        for instrument_id in self.config.instrument_ids:
-            self.subscribe_trade_ticks(instrument_id)
-        for event_id, row in self.events.items():
-            self.clock.set_time_alert_ns(
-                f"maxfunding_entry:{event_id}",
-                int(row["entry_time_ms"]) * 1_000_000,
-                callback=self._on_time,
-                allow_past=False,
-            )
-            self.clock.set_time_alert_ns(
-                f"maxfunding_exit:{event_id}",
-                int(row["exit_time_ms"]) * 1_000_000,
-                callback=self._on_time,
-                allow_past=False,
-            )
-        self.log.info(f"maxfunding启动，事件{len(self.events)}个，交易对{len(self.config.instrument_ids)}个")
 
-    # trade tick 只用于估算市价单数量。
-    def on_trade_tick(self, tick: TradeTick) -> None:
-        self.last_px[tick.instrument_id] = Decimal(str(tick.price))
+        self._schedule_next()
 
-    # 定时开仓和平仓。
-    def _on_time(self, event: TimeEvent) -> None:
-        action, event_id = event.name.split(":", 1)
-        if action.endswith("entry"):
-            self._entry(event_id)
-        elif action.endswith("exit"):
-            self._exit(event_id)
-
-    def _entry(self, event_id: str) -> None:
-        row = self.events[event_id]
-        instrument_id = row["instrument_id"]
-        if not self.portfolio.is_flat(instrument_id):
-            self._write(row, "skip_not_flat", None)
-            return
-        price = self.last_px.get(instrument_id)
-        if price is None:
-            self._write(row, "skip_no_tick", None)
-            return
-        instrument = self.cache.instrument(instrument_id)
-        order = self.order_factory.market(
-            instrument_id=instrument_id,
-            order_side=row["order_side"],
-            quantity=self._qty(instrument, price),
-            time_in_force=TimeInForce.GTC,
+        self.log.info(
+            f"资金费率交易启动，watch list{len(self.ins)}个，"
+            f"trade list{len(self.trade_ids)}个，"
+            f"阈值{self._bps(self.min_rate)}bps，单币名义{self.notional:.2f}USDT"
         )
-        self.submit_order(order)
-        self.open_events[instrument_id] = event_id
-        self._write(row, "OPEN", price)
 
-    def _exit(self, event_id: str) -> None:
-        row = self.events[event_id]
-        instrument_id = row["instrument_id"]
-        if self.open_events.get(instrument_id) != event_id:
-            self._write(row, "skip_no_position", self.last_px.get(instrument_id))
+    # clock alert 负责 t-3/t-2/t-1/t/t+2/t+3 六个确定动作。
+    def _on_time(self, event: TimeEvent) -> None:
+        name = event.name.split(":", 1)[0]
+        if name == self.WARMUP_TIMER:
+            self._warmup_funding()
+        elif name == self.PRE_TIMER:
+            self._pre_funding()
+        elif name == self.FREEZE_TIMER:
+            self._freeze_funding()
+        elif name == self.RATE_TIMER:
+            self._rate_funding()
+        elif name == self.CLOSE_TIMER:
+            self._close_funding()
+        elif name == self.POST_TIMER:
+            self._post_funding()
+
+    # t-3 预拉候选，给 t-2 失败时兜底。
+    def _warmup_funding(self) -> None:
+        if self.sent_done:
             return
-        self.close_all_positions(instrument_id)
-        self.open_events.pop(instrument_id, None)
-        self._write(row, "CLOSE", self.last_px.get(instrument_id))
+        self.obs_map.clear()
+        self.ins_map.clear()
+        stats = self._load_snap("pre")
+        if stats is None:
+            return
+        self._log_pre_result(stats, "预拉资金费率成功")
+        if self.clock.timestamp_ns() < self.fund_ns - int(self.config.entry_before * 1_000_000_000):
+            self.entry_done = True
+
+    # t-2 刷新候选，完整拉完才覆盖 t-3 结果。
+    def _pre_funding(self) -> None:
+        if self.sent_done:
+            return
+        previous = dict(self.ins_map)
+        previous_obs = dict(self.obs_map)
+        previous_ready = self.entry_done
+        self.obs_map.clear()
+        self.ins_map.clear()
+        stats = self._load_snap("pre", deadline_sec=float(self.config.pre_deadline))
+        if stats is None:
+            self.ins_map = previous
+            self.obs_map = previous_obs
+            self.entry_done = previous_ready
+            return
+        if stats["deadline_hit"]:
+            self.ins_map = previous
+            self.obs_map = previous_obs
+            self.entry_done = previous_ready
+            self.log.info(
+                f"拉取资金费率超时，超过{self._ms(self.config.pre_deadline * 1000)}ms停止，"
+                f"保留预拉候选{len(self.ins_map)}个，耗时{self._ms(stats['elapsed_ms'])}ms"
+            )
+        else:
+            self._log_pre_result(stats, "拉取资金费率成功")
+            self.entry_done = True
+        order_ns = self.fund_ns - int(self.config.entry_before * 1_000_000_000)
+        if self.clock.timestamp_ns() >= order_ns:
+            self.sent_done = True
+            self.log.info("跳过本轮，资金费率拉取太晚")
+
+    # t-1 提交订单。
+    def _freeze_funding(self) -> None:
+        if self.sent_done:
+            return
+        if not self.entry_done:
+            self.sent_done = True
+            self.log.info("跳过本轮，候选未准备好")
+            return
+        rows = []
+        for ins_id, row in self.ins_map.items():
+            if ins_id not in self.ins or "rate" not in row or "pre" not in row:
+                continue
+            rows.append((ins_id, row))
+        if not rows:
+            self.log.info(f"交易模式，trade list候选{len(self.ins_map)}个，无可下单交易对")
+        else:
+            ins_id, row = max(rows, key=lambda item: abs(item[1]["rate"]))
+            ins = self.ins[ins_id]
+            side = self._side(row["rate"])
+            row["side"] = side
+            qty = self._qty(ins, row["pre"])
+            order = self.order_factory.market(
+                instrument_id=ins_id,
+                order_side=side,
+                quantity=qty,
+                time_in_force=TimeInForce.GTC,
+            )
+            self.order_map[order.client_order_id] = ins_id
+            self.chosen_id = ins_id
+            self.submit_order(order)
+            self.log.info(
+                f"交易模式，候选{len(self.ins_map)}个，选择{self._base(ins_id)}，"
+                f"费率{self._bps(row['rate'])}bps，方向{self._side_cn(side)}，"
+                f"名义{self.notional:.2f}USDT"
+            )
+
+        self.sent_done = True
+
+    # 准点复核候选的实际资金费率。
+    def _rate_funding(self) -> None:
+        stats = self._load_snap("rate")
+        if stats is None:
+            return
+        self.log.info(
+            f"准点复核成功，命中{stats['priced']}个，"
+            f"耗时{self._ms(stats['elapsed_ms'])}ms，前三 {self._rate_list(limit=3, key='settle_rate')}"
+        )
+
+    # t+2 平仓并写本轮交易记录。
+    def _close_funding(self) -> None:
+        if not self.close_done:
+            close_cnt = 0
+            for ins_id in list(self.open_ids):
+                self.close_all_positions(ins_id)
+                close_cnt += 1
+            self.close_done = True
+            self.log.info(
+                f"交易模式，平仓{close_cnt}个，候选{len(self.ins_map)}个"
+            )
+            self._write_trade(close_cnt)
+            self._reset_state()
+
+    # t+3 再拉一次全量实际资金费率，用于观察分析。
+    def _post_funding(self) -> None:
+        start = perf_counter()
+        rows, errors = self._fetch_rates()
+        elapsed_ms = (perf_counter() - start) * 1000
+        if errors:
+            self.log.info(f"实际资金费率分析失败，错误{errors}个，耗时{self._ms(elapsed_ms)}ms")
+        else:
+            trade_symbols = {
+                symbol
+                for ins_id, symbol in self.watch_symbols.items()
+                if ins_id in self.trade_ids
+            }
+            self.log.info(
+                f"实际资金费率分析，全量前三 {self._top_rates(rows)}，"
+                f"watch list前三 {self._top_rates(rows, set(self.watch_symbols.values()))}，"
+                f"trade list前三 {self._top_rates(rows, trade_symbols)}，"
+                f"耗时{self._ms(elapsed_ms)}ms"
+            )
+        self._schedule_next()
+
+    # 成交后才记录待平仓 instrument。
+    def on_order_filled(self, event: OrderFilled) -> None:
+        ins_id = self.order_map.pop(event.client_order_id, None)
+        if ins_id is not None:
+            self.open_ids.add(ins_id)
+
+    # 拒单后清理本地订单映射。
+    def on_order_rejected(self, event: OrderRejected) -> None:
+        ins_id = self.order_map.pop(event.client_order_id, None)
+        if ins_id is not None:
+            self.log.warning(f"订单被拒，交易对{self._base(ins_id)}，原因{event.reason}")
 
     def on_stop(self) -> None:
-        for instrument_id in self.config.instrument_ids:
-            self.cancel_all_orders(instrument_id)
-            self.close_all_positions(instrument_id)
-            self.unsubscribe_trade_ticks(instrument_id)
+        names = set(self.clock.timer_names)
+        for kind in self.TIMERS:
+            name = f"{kind}:{self.fund_ns}"
+            if name in names:
+                self.clock.cancel_timer(name)
+        for ins_id in self.ins:
+            self.cancel_all_orders(ins_id)
+
+        if self.config.stop_close:
+            for ins_id in self.open_ids:
+                self.close_all_positions(ins_id)
+
+        self.log.info("资金费率监控停止")
 
     def on_reset(self) -> None:
-        self.open_events.clear()
-        self.last_px.clear()
+        self._reset_state()
 
-    def _load_events(self) -> None:
-        if not self.config.events_path:
-            raise RuntimeError("maxfunding 当前只支持回测，请在 backtest.events_path 配置历史 funding 事件文件。")
-        path = Path(self.config.events_path)
-        df = pd.read_parquet(path) if path.suffix == ".parquet" else pd.read_csv(path)
-        allowed = set(self.config.instrument_ids)
-        by_node: dict[int, dict] = {}
-        for row in df.to_dict("records"):
-            instrument_id = InstrumentId.from_str(row["instrument_id"])
-            if instrument_id not in allowed:
+    # 从 cache 读取 node 已加载的 USDT 本位永续。
+    def _load_ins(self) -> None:
+        ids = set(self.config.instrument_ids)
+        self.ins = {
+            ins.id: ins
+            for ins in self.cache.instruments()
+            if ins is not None and ins.id in ids
+        }
+        missing = ids - set(self.ins)
+        if missing:
+            raise RuntimeError(f"Missing instruments in cache: {','.join(sorted(map(str, missing)))}")
+
+    # 拉 watch list 的 premiumIndex；只有 trade list 超过阈值才进入可交易候选。
+    def _load_snap(
+        self,
+        phase: str,
+        deadline_sec: float | None = None,
+    ) -> dict[str, Decimal | float | int | bool] | None:
+        start = perf_counter()
+        passed = 0
+        priced = 0
+        skipped = 0
+        errors = 0
+        deadline_hit = False
+
+        timeout = float(self.config.api_timeout)
+        if deadline_sec is not None:
+            timeout = min(timeout, max(deadline_sec - (perf_counter() - start), 0.001))
+        payload, errors = self._fetch_rates(timeout=timeout)
+        if errors and not payload:
+            return None
+
+        by_symbol = {str(item.get("symbol", "")): item for item in payload}
+        for ins_id, symbol in self.watch_symbols.items():
+            if deadline_sec is not None and perf_counter() - start >= deadline_sec:
+                deadline_hit = True
+                break
+            item = by_symbol.get(symbol)
+            if item is None:
+                skipped += 1
                 continue
-            base = self._base_symbol(row["symbol"])
-            if base in self.exclude or base not in self.whitelist:
+            try:
+                price = Decimal(str(item["markPrice"]))
+                if phase == "pre":
+                    if int(item["nextFundingTime"]) * 1_000_000 != self.fund_ns:
+                        continue
+                    rate = Decimal(str(item["lastFundingRate"]))
+                    row = self.obs_map.setdefault(ins_id, {})
+                    row["rate"] = rate
+                    row["pre"] = price
+                    if ins_id not in self.trade_ids or abs(rate) <= self.min_rate:
+                        self.ins_map.pop(ins_id, None)
+                        continue
+                    self.ins_map[ins_id] = dict(row)
+                    passed += 1
+                elif phase == "rate" and ins_id in self.ins_map:
+                    self.ins_map[ins_id]["settle_rate"] = Decimal(str(item["lastFundingRate"]))
+                    self.ins_map[ins_id]["rate_px"] = price
+                    priced += 1
+            except (KeyError, ValueError, TypeError):
+                skipped += 1
+
+        elapsed_sec = perf_counter() - start
+        if deadline_sec is not None and elapsed_sec >= deadline_sec:
+            deadline_hit = True
+        elapsed_ms = elapsed_sec * 1000
+        return {
+            "rows": len(self.watch_symbols),
+            "elapsed_ms": elapsed_ms,
+            "observed": len(self.obs_map),
+            "candidates": len(self.ins_map),
+            "passed": passed,
+            "priced": priced,
+            "skipped": skipped,
+            "errors": errors,
+            "deadline_hit": deadline_hit,
+        }
+
+    # 把 config 中的 watch list 和 trade list 映射到 instrument。
+    def _load_lists(self) -> None:
+        by_base = {
+            str(ins_id).split(".")[0].replace("USDT-PERP", "").upper(): ins_id
+            for ins_id in self.ins
+        }
+        ids = {by_base[symbol] for symbol in self.trade if symbol in by_base}
+        missing = sorted(self.trade - set(by_base))
+        if not ids:
+            raise RuntimeError("trade_symbols has no loaded USDT perpetual instruments")
+        if missing:
+            self.log.warning(f"trade list交易对未加载，已跳过 {','.join(missing)}")
+        self.trade_ids = ids
+        self.watch_symbols = {
+            ins_id: str(ins_id).split(".")[0].replace("-PERP", "")
+            for ins_id in sorted(self.ins, key=str)
+        }
+
+    # 为下一次 funding 注册一次性 clock alert。
+    def _schedule_next(self) -> None:
+        now_ns = self.clock.timestamp_ns()
+        four_ns = 4 * 60 * 60 * 1_000_000_000
+        self.fund_ns = ((now_ns // four_ns) + 1) * four_ns
+        warmup_ns = self.fund_ns - int(self.config.pre_sec * 1_000_000_000)
+        pre_ns = self.fund_ns - int(self.config.entry_sec * 1_000_000_000)
+        freeze_ns = self.fund_ns - int(self.config.entry_before * 1_000_000_000)
+        rate_ns = self.fund_ns
+        close_ns = self.fund_ns + int(self.config.exit_sec * 1_000_000_000)
+        post_ns = self.fund_ns + int(self.config.post_sec * 1_000_000_000)
+        if now_ns >= pre_ns:
+            four_ns = 4 * 60 * 60 * 1_000_000_000
+            self.fund_ns += four_ns
+            warmup_ns += four_ns
+            pre_ns += four_ns
+            freeze_ns += four_ns
+            rate_ns += four_ns
+            close_ns += four_ns
+            post_ns += four_ns
+        timers = [
+            (self.WARMUP_TIMER, warmup_ns),
+            (self.PRE_TIMER, pre_ns),
+            (self.FREEZE_TIMER, freeze_ns),
+            (self.RATE_TIMER, rate_ns),
+            (self.CLOSE_TIMER, close_ns),
+            (self.POST_TIMER, post_ns),
+        ]
+        for name, ts_ns in timers:
+            if name == self.WARMUP_TIMER and now_ns >= ts_ns:
                 continue
-            abs_rate_bps = Decimal(str(row["abs_rate_bps"]))
-            if abs_rate_bps <= self.min_rate_bps:
+            self.clock.set_time_alert_ns(
+                self._timer_name(name),
+                ts_ns,
+                callback=self._on_time,
+                allow_past=False,
+            )
+
+    def _timer_name(self, kind: str) -> str:
+        return f"{kind}:{self.fund_ns}"
+
+    def _log_pre_result(self, stats: dict, title: str) -> None:
+        if not self.ins_map:
+            self.log.info(
+                f"{title}，watch list{stats['rows']}个，trade list{len(self.trade_ids)}个，"
+                f"阈值{self._bps(self.min_rate)}bps，无超过阈值候选，"
+                f"前三 {self._rate_list(limit=3, rows=self.obs_map)}，耗时{self._ms(stats['elapsed_ms'])}ms"
+            )
+            return
+        self.log.info(
+            f"{title}，watch list{stats['rows']}个，trade list{len(self.trade_ids)}个，"
+            f"阈值{self._bps(self.min_rate)}bps，"
+            f"候选{len(self.ins_map)}个，耗时{self._ms(stats['elapsed_ms'])}ms，"
+            f"候选 {self._rate_list(limit=3)}"
+        )
+
+    def _fetch_rates(self, timeout: float | None = None) -> tuple[list[dict], int]:
+        try:
+            response = requests.get(
+                f"{self.config.api_url}/fapi/v1/premiumIndex",
+                proxies=self.proxies,
+                timeout=timeout or float(self.config.api_timeout),
+            )
+            response.raise_for_status()
+            data = response.json()
+        except (requests.RequestException, ValueError):
+            return [], 1
+        if isinstance(data, list):
+            return [item for item in data if isinstance(item, dict)], 0
+        if isinstance(data, dict):
+            return [data], 0
+        return [], 1
+
+    def _top_rates(self, rows: list[dict], symbols: set[str] | None = None) -> str:
+        rated = []
+        for item in rows:
+            symbol = str(item.get("symbol", ""))
+            if symbols is not None and symbol not in symbols:
                 continue
-            node_ms = int(row["funding_time"]) // 14_400_000 * 14_400_000
-            current = by_node.get(node_ms)
-            if current is None or abs_rate_bps > current["_abs_rate_bps"]:
-                by_node[node_ms] = {**row, "_abs_rate_bps": abs_rate_bps}
+            try:
+                rated.append((symbol, Decimal(str(item["lastFundingRate"]))))
+            except (KeyError, ValueError):
+                continue
+        rated.sort(key=lambda item: abs(item[1]), reverse=True)
+        parts = [
+            f"{symbol.replace('USDT', '')} {self._bps(rate)}bps {self._side_cn(self._side(rate))}"
+            for symbol, rate in rated[:3]
+        ]
+        return "，".join(parts) if parts else "无"
 
-        for row in by_node.values():
-            instrument_id = InstrumentId.from_str(row["instrument_id"])
-            rate = Decimal(str(row["rate"]))
-            side = OrderSide.SELL if row["side"] == "SELL" else OrderSide.BUY
-            event_id = f"{row['symbol']}:{int(row['funding_time'])}"
-            row.pop("_abs_rate_bps")
-            self.events[event_id] = {
-                **row,
-                "event_id": event_id,
-                "instrument_id": instrument_id,
-                "rate": rate,
-                "order_side": side,
-                "funding_gain": self.config.trade_notional * abs(rate),
-            }
+    def _rate_list(
+        self,
+        limit: int,
+        key: str = "rate",
+        rows: dict[InstrumentId, dict[str, Decimal | OrderSide]] | None = None,
+    ) -> str:
+        rows = [
+            (ins_id, row)
+            for ins_id, row in (rows or self.ins_map).items()
+            if key in row
+        ]
+        rows.sort(key=lambda item: abs(item[1][key]), reverse=True)
+        parts = []
+        for ins_id, row in rows[:limit]:
+            side = row.get("side") or self._side(row[key])
+            parts.append(f"{self._base(ins_id)} {self._bps(row[key])}bps {self._side_cn(side)}")
+        if not parts:
+            return "无"
+        return "，".join(parts)
 
-    def _base_symbol(self, symbol: str) -> str:
-        return symbol.upper().replace("-PERP.BINANCE", "").replace("USDT", "")
+    def _base(self, ins_id: InstrumentId) -> str:
+        return str(ins_id).split(".")[0].replace("USDT-PERP", "")
 
-    def _qty(self, instrument: Instrument, price: Decimal):
-        raw = self.config.trade_notional / price
-        step = Decimal(str(instrument.size_increment))
+    def _side_cn(self, side: OrderSide) -> str:
+        return "买入" if side == OrderSide.BUY else "卖出"
+
+    def _bps(self, value: Decimal) -> str:
+        return f"{value * Decimal('10000'):.2f}"
+
+    def _ms(self, value: Decimal | float | int) -> str:
+        return f"{float(value):.2f}"
+
+    def _side(self, rate: Decimal) -> OrderSide:
+        return OrderSide.SELL if rate > 0 else OrderSide.BUY
+
+    def _qty(self, ins: Instrument, price: Decimal):
+        raw_qty = self.notional / price
+        step = Decimal(str(ins.size_increment))
         if step > 0:
-            raw = (raw / step).to_integral_value(rounding=ROUND_CEILING) * step
-        return instrument.make_qty(raw)
+            steps = (raw_qty / step).to_integral_value(rounding=ROUND_CEILING)
+            raw_qty = steps * step
+        return ins.make_qty(raw_qty)
+
+    # 写本轮选中交易的资金费率记录。
+    def _write_trade(self, close_cnt: int) -> None:
+        ins_id = self.chosen_id
+        if ins_id is None:
+            return
+        row = self.ins_map.get(ins_id)
+        if row is None:
+            return
+        rate = row.get("rate")
+        settle_rate = row.get("settle_rate", "")
+        pre = row.get("pre", "")
+        side = row.get("side") or (self._side(rate) if isinstance(rate, Decimal) else "")
+        fund_gain = abs(rate) * self.notional if isinstance(rate, Decimal) else ""
+        settle_gain = abs(settle_rate) * self.notional if isinstance(settle_rate, Decimal) else ""
+        with self.log_path.open("a", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(
+                [
+                    self._iso(self.fund_ns),
+                    ins_id,
+                    rate,
+                    settle_rate,
+                    ("BUY" if side == OrderSide.BUY else "SELL") if isinstance(side, OrderSide) else "",
+                    pre,
+                    self.notional,
+                    fund_gain,
+                    settle_gain,
+                    close_cnt,
+                ],
+            )
 
     def _init_log(self) -> None:
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         with self.log_path.open("w", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(
                 [
-                    "event_id",
-                    "symbol",
-                    "instrument_id",
                     "funding_time",
-                    "action",
-                    "bar_time",
+                    "instrument",
+                    "entry_rate",
+                    "settle_rate",
                     "side",
-                    "funding_rate",
-                    "rate_bps",
+                    "pre_px",
                     "notional",
-                    "estimated_funding_income",
-                    "local_time",
-                    "delta_to_funding_ms",
-                    "adverse_entry_move",
-                    "reason",
-                    "ref_price",
+                    "entry_funding_gain",
+                    "settle_funding_gain",
+                    "close_count",
                 ],
             )
 
-    def _write(self, row: dict, action: str, price: Decimal | None) -> None:
-        bar_ms = int(row["entry_time_ms"] if action == "OPEN" else row["exit_time_ms"])
-        fund_ms = int(row["funding_time"])
-        funding_time = pd.to_datetime(fund_ms, unit="ms", utc=True).strftime("%Y-%m-%dT%H:%M:%S.%f%z")
-        bar_time = pd.to_datetime(bar_ms, unit="ms", utc=True).strftime("%Y-%m-%dT%H:%M:%S.%f%z")
-        local_time = pd.to_datetime(bar_ms, unit="ms", utc=True).tz_convert("Asia/Shanghai").strftime(
-            "%Y-%m-%dT%H:%M:%S.%f%z",
-        )
-        with self.log_path.open("a", newline="", encoding="utf-8") as f:
-            csv.writer(f).writerow(
-                [
-                    row["event_id"],
-                    row["symbol"],
-                    row["instrument_id"],
-                    funding_time,
-                    action,
-                    bar_time,
-                    row["side"],
-                    row["rate"],
-                    f"{Decimal(str(row['rate_bps'])):.4f}",
-                    self.config.trade_notional,
-                    row["funding_gain"],
-                    local_time,
-                    bar_ms - fund_ms,
-                    "",
-                    "",
-                    price or "",
-                ],
-            )
+    def _reset_state(self) -> None:
+        self.obs_map.clear()
+        self.ins_map.clear()
+        self.open_ids.clear()
+        self.order_map.clear()
+        self.chosen_id = None
+        self.entry_done = False
+        self.sent_done = False
+        self.close_done = False
+
+    def _iso(self, ts_ns: int) -> str:
+        return datetime.fromtimestamp(ts_ns / 1_000_000_000, tz=UTC).isoformat()

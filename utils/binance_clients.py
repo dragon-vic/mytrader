@@ -41,7 +41,10 @@ class BinanceConfigBuilder:
     def instrument_provider(self) -> BinanceInstrumentProviderConfig:
         return BinanceInstrumentProviderConfig(
             load_all=False,
-            load_ids=frozenset(instrument.id for instrument in self.factory.instruments()),
+            load_ids=frozenset(
+                self.factory.instrument_id(market)
+                for market in self.factory.markets
+            ),
         )
 
     # 从当前 set 的 live.margin_type 构建 Binance 合约全仓/逐仓设置。
@@ -60,8 +63,7 @@ class BinanceConfigBuilder:
             account_type=getattr(BinanceAccountType, self.settings["live"]["account_type"]),
             environment=getattr(BinanceEnvironment, self.settings["live"]["environment"]),
             proxy_url=proxy_url(self.settings),
-            instrument_provider=BinanceInstrumentProviderConfig(
-                load_all=True),
+            instrument_provider=self.instrument_provider(),
             routing=RoutingConfig(default=True, venues=self.venues),
         )
 
@@ -75,7 +77,6 @@ class BinanceConfigBuilder:
             environment=getattr(BinanceEnvironment, self.settings["live"]["environment"]),
             proxy_url=proxy_url(self.settings),
             futures_margin_types=self.futures_margin_types(),
-            instrument_provider=BinanceInstrumentProviderConfig(
-                load_all=True),
+            instrument_provider=self.instrument_provider(),
             routing=RoutingConfig(default=True, venues=self.venues),
         )

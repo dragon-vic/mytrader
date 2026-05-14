@@ -8,16 +8,50 @@ markets: [1000000BOB/USDT, AXS/USDT, BARD/USDT, CFG/USDT, COS/USDT,
 
 strategy:
   name: maxfunding
-  trade_notional: "10"
+  trade_notional: "5.5"
   params:
-    min_rate_bps: "60"
-    whitelist_symbols: [AXS, BARD, CFG, COS, DRIFT, ENSO, KITE, LYN, RIVER, STEEM]
+    min_rate_bps: "60"          # abs(rate) > 60bps 才进入候选
+    # 上面的 20 个 markets 是 watch list；实际下单只在 trade list 里选最大 abs(rate)。
+    trade_symbols: [AXS, BARD, CFG, COS, DRIFT, ENSO, KITE, LYN, RIVER, STEEM]
+    pre_sec: 3                  # t-3 预拉候选，t-2 覆盖
+    entry_sec: 2                # t-2 拉一次观察列表 rate/mark 快照
+    pre_deadline: 1             # t-2 最多拉 1 秒，超时保留 t-3 结果
+    entry_before: 1             # t-1 定时触发下单/冻结
+    exit_sec: 2                 # t+2 平仓并写本轮交易记录
+    post_sec: 3                 # t+3 拉全量实际 funding，用于分析
+    api_timeout: 0.8            # 快照超时，避免阻塞下单和平仓
+    stop_close: true
 
+# 常改：live 运行参数。
+live:
+  account_type: USDT_FUTURES
+  log_level_file: INFO
+  margin_type: CROSS
+  leverage: 1
+
+# 常改：回测账户参数；本策略主要用于 live 观察。
 backtest:
-  events_path: data/funding/bt_3m/funding_events_over30_3m_selected20_for_backtest.parquet
-  tick_catalog: data/ticks/funding_bt/catalog_selected20
   starting_balance: "100000 USDT"
   account_type: MARGIN
   oms_type: NETTING
-  log_level: WARNING
+  log_level: INFO
   log_bypass: true
+  data:
+    limit: 1000
+    batches: 1
+  instrument:
+    settlement_currency: USDT
+    is_inverse: false
+    price_precision: 5
+    size_precision: 1
+    price_increment: "0.00010"
+    size_increment: "0.1"
+    multiplier: "1"
+    min_quantity: "0.1"
+    max_quantity: "1000000"
+    min_notional: "5"
+    max_price: "1000000"
+    margin_init: "1"
+    margin_maint: "1"
+    maker_fee: "0.0002"
+    taker_fee: "0.0005"

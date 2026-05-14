@@ -1,0 +1,23 @@
+market_defaults:
+  timeframe: 1s
+
+markets: [1000000BOB/USDT, AXS/USDT, BARD/USDT, CFG/USDT, COS/USDT,
+          DRIFT/USDT, ENJ/USDT, ENSO/USDT, GUA/USDT, KITE/USDT,
+          LYN/USDT, NOM/USDT, ORCA/USDT, POWER/USDT, RAVE/USDT,
+          RIVER/USDT, SAHARA/USDT, SIREN/USDT, SOON/USDT, STEEM/USDT]
+
+strategy:
+  name: backtestfunding
+  trade_notional: "10"
+  params:
+    min_rate_bps: "60"
+    whitelist_symbols: [AXS, BARD, CFG, COS, DRIFT, ENSO, KITE, LYN, RIVER, STEEM]
+
+backtest:
+  events_path: data/funding/bt_3m/funding_events_over30_3m_selected20_for_backtest.parquet
+  tick_catalog: data/ticks/funding_bt/catalog_selected20
+  starting_balance: "100000 USDT"
+  account_type: MARGIN
+  oms_type: NETTING
+  log_level: WARNING
+  log_bypass: true
