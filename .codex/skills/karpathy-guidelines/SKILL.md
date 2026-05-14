@@ -25,6 +25,8 @@ For this project, environment, Conda, system directories, global config, and net
 - Environment facts are part of the workflow. If a local permission, shell, runtime, or tooling issue forces a different method, add the durable workaround here so future turns do not rediscover it.
 - In this Windows workspace, `rg.exe` can fail with "Access denied". When that happens, use PowerShell-native discovery instead, for example `Get-ChildItem -Recurse -File -ErrorAction SilentlyContinue` and `Select-String`, scoped to the needed file types or directories.
 - Recursive PowerShell scans can hit access-denied paths such as `.pytest_cache`. Use `-ErrorAction SilentlyContinue` or narrow the search scope instead of treating that as repository corruption.
+- Git can report dubious ownership in this sandbox. For read-only git inspection, use `git -c safe.directory=D:/project/nt_quant ...` rather than changing global git config.
+- Windows PowerShell 5 does not accept `Select-Object -Index 40..80` directly. Wrap ranges in parentheses, for example `Select-Object -Index (40..80)`, or use `Select-Object -Skip 40 -First 40`.
 - When aligning a strategy design, surface implementation details and tradeoff points for user confirmation before coding.
 - Keep names short: variables should usually be at most two words, functions at most three words, and classes at most two words plus a suffix such as `Actor`, `Str`, or the framework-required type name.
 - Extract helper functions only for logic reused multiple times or genuinely clarifying a dense block. Prefer shallow call depth and direct local code for one-off logic.
@@ -57,6 +59,8 @@ For this project, environment, Conda, system directories, global config, and net
 - Do not add defensive guards or fallback checks that duplicate NautilusTrader's normal event guarantees. Keep strategy callbacks close to NT examples unless there is a specific observed failure.
 - Do not catch exceptions to hide or convert errors during normal development. Let errors surface, then fix the underlying cause.
 - Do not return `None` as an error state that forces callers to branch. For required config, credentials, and dependencies, access them directly and let missing values raise.
+- Do not design parameter fallbacks or silent defaults. Required runtime/trading parameters must be explicit in YAML and fail if missing. If a shared default is truly needed, put it in `config/global.yaml` and let the strategy set YAML override it through normal YAML layering. Strategy-specific values such as `trade_notional` belong in `strategy.params` and should only be passed when the strategy config declares them.
+- This project uses the configured HTTP proxy on Windows only. On Linux, `proxy_url(settings)` should return `None` even if `config/global.yaml` contains a local Windows proxy address.
 - Confirm with the user before making functional behavior changes. Small formatting, comments, and documentation-like local cleanup can be done directly.
 - Do not change large framework or NautilusTrader lifecycle logic for a small local requirement such as report writing, formatting, or convenience output. Solve small requirements in the narrow module that owns them, and ask before touching core run/build/stop flows.
 - Before touching Conda, global config, system directories, or live-trading credentials, explain the action and wait for explicit confirmation.
