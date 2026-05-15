@@ -9,19 +9,22 @@ strategy:
     warmup_days: 1                   # 预热天数
     close_positions_on_stop: true    # 停止时平仓
 
-# 常改：多个交易对。
-markets:
-  - symbol: BTC/USDT
-    timeframe: 1m
-  - symbol: ETH/USDT
-    timeframe: 1m
-
 # 常改：live 运行参数。
 live:
+  markets:
+    - symbol: BTC/USDT
+      timeframe: 1m
+    - symbol: ETH/USDT
+      timeframe: 1m
   external_signal: true
 
 # 常改：回测资金和账户。
 backtest:
+  markets:
+    - symbol: BTC/USDT
+      timeframe: 1m
+    - symbol: ETH/USDT
+      timeframe: 1m
   starting_balance: "100000 USDT"
   account_type: MARGIN
   oms_type: NETTING

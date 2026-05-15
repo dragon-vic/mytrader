@@ -19,7 +19,7 @@ def load_settings(config_name: str | None = None, mode: str | None = None) -> di
     with (ROOT / "config" / f"{name}.yaml").open("r", encoding="utf-8") as f:
         strategy_settings = yaml.safe_load(f)
     settings = deep_merge(global_settings, strategy_settings)
-    apply_mode_markets(settings, mode)
+    select_mode_markets(settings, mode)
     if mode in ("testnet", "live"):
         settings.pop("backtest", None)
     normalize_settings(settings)
@@ -38,12 +38,10 @@ def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]
     return merged
 
 
-# live/backtest 可各自声明 markets；运行时提升到统一入口供后续模块使用。
-def apply_mode_markets(settings: dict[str, Any], mode: str | None) -> None:
+# 只从当前运行模式读取 markets，避免跨区块兜底。
+def select_mode_markets(settings: dict[str, Any], mode: str | None) -> None:
     section = "live" if mode in ("testnet", "live") else "backtest"
-    markets = settings.get(section, {}).get("markets")
-    if markets is not None:
-        settings["markets"] = markets
+    settings["markets"] = settings[section]["markets"]
 
 
 # 把 snake_case 名字转成策略类名。

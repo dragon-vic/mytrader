@@ -1,8 +1,3 @@
-markets: [1000000BOB/USDT, AXS/USDT, BARD/USDT, CFG/USDT, COS/USDT,
-          DRIFT/USDT, ENJ/USDT, ENSO/USDT, GUA/USDT, KITE/USDT,
-          LYN/USDT, NOM/USDT, ORCA/USDT, POWER/USDT, RAVE/USDT,
-          RIVER/USDT, SAHARA/USDT, SIREN/USDT, SOON/USDT, STEEM/USDT]
-
 strategy:
   name: backtestfunding
   params:
@@ -12,6 +7,10 @@ strategy:
     events_path: data/funding/bt_3m/funding_events_over30_3m_selected20_for_backtest.parquet
 
 backtest:
+  markets: [1000000BOB/USDT, AXS/USDT, BARD/USDT, CFG/USDT, COS/USDT,
+            DRIFT/USDT, ENJ/USDT, ENSO/USDT, GUA/USDT, KITE/USDT,
+            LYN/USDT, NOM/USDT, ORCA/USDT, POWER/USDT, RAVE/USDT,
+            RIVER/USDT, SAHARA/USDT, SIREN/USDT, SOON/USDT, STEEM/USDT]
   tick_catalog: data/ticks/funding_bt/catalog_selected20
   starting_balance: "100000 USDT"
   account_type: MARGIN

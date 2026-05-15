@@ -21,6 +21,7 @@ market_defaults:
 
 # 常改：live 运行参数。
 live:
+  markets: all                       # 未单独声明时 live 默认加载全市场
   account_type: USDT_FUTURES         # Binance U 本位合约账户
   log_level_file: INFO               # live 原始日志级别
   margin_type: CROSS                 # U 本位合约保证金模式
