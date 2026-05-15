@@ -35,7 +35,7 @@ class BinanceConfigBuilder:
 
     # 构建 NT cache 配置，当前只收紧 bar/tick 内存容量。
     def cache_config(self) -> CacheConfig:
-        capacity = int(self.settings.get("runtime", {}).get("cache_capacity", 1000))
+        capacity = int(self.settings["runtime"]["cache_capacity"])
         return CacheConfig(
             tick_capacity=capacity,
             bar_capacity=capacity,
@@ -56,8 +56,8 @@ class BinanceConfigBuilder:
 
     # 从当前 set 的 live.margin_type 构建 Binance 合约全仓/逐仓设置。
     def futures_margin_types(self) -> dict[BinanceSymbol, BinanceFuturesMarginType] | None:
-        margin_type = self.settings["live"].get("margin_type")
-        if not margin_type or markets_all(self.settings):
+        margin_type = self.settings["live"]["margin_type"]
+        if margin_type is None or markets_all(self.settings):
             return None
         return {
             BinanceSymbol(market["raw_symbol"]): getattr(BinanceFuturesMarginType, margin_type)

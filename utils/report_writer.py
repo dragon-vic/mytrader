@@ -135,7 +135,6 @@ class TraderReportWriter:
         self.write_position_events(trader)
         self.write_clean_reports(reports.get("positions", pd.DataFrame()))
         self.localize_runtime_csv("account_changes.csv")
-        self.localize_runtime_csv("strategy_events.csv")
         self.localize_runtime_csv("funding_fees.csv")
 
     # 从 NT cache 的全部账户生成最终账户快照。
@@ -227,7 +226,7 @@ class TraderReportWriter:
         if positions.empty:
             return pd.DataFrame()
 
-        trades = pd.DataFrame(
+        return pd.DataFrame(
             {
                 "open_time": pd.to_datetime(positions["ts_opened"], unit="ns", utc=True),
                 "close_time": pd.to_datetime(positions["ts_closed"], unit="ns", utc=True),
@@ -242,98 +241,6 @@ class TraderReportWriter:
                 "duration_min": pd.to_numeric(positions["duration_ns"], errors="coerce") / 60_000_000_000,
                 "position_id": positions["position_id"],
             },
-        )
-        return self.merge_funding_decisions(trades)
-
-    # 把 funding 策略事件里的资金费估算合并到交易表。
-    def merge_funding_decisions(self, trades: pd.DataFrame) -> pd.DataFrame:
-        decisions_path = self.output_dir / "strategy_events.csv"
-        if not decisions_path.exists():
-            trades["estimated_funding_income"] = 0.0
-            trades["net_with_funding"] = trades["realized_pnl"]
-            return trades
-
-        decisions = pd.read_csv(decisions_path)
-        opens = decisions[decisions["action"] == "OPEN"].copy()
-        if opens.empty:
-            trades["estimated_funding_income"] = 0.0
-            trades["net_with_funding"] = trades["realized_pnl"]
-            return trades
-
-        opens["open_time"] = pd.to_datetime(opens["bar_time"], utc=True)
-        trades["open_time_dt"] = pd.to_datetime(trades["open_time"], utc=True)
-        merge_cols = ["open_time"]
-        left_cols = ["open_time_dt"]
-        if "instrument_id" in opens.columns:
-            merge_cols.append("instrument_id")
-            left_cols.append("instrument_id")
-        merged = trades.merge(
-            opens[
-                [
-                    *merge_cols,
-                    "funding_time",
-                    "funding_rate",
-                    "estimated_funding_income",
-                    "local_time",
-                    "delta_to_funding_ms",
-                    "adverse_entry_move",
-                    "reason",
-                ]
-            ],
-            left_on=left_cols,
-            right_on=merge_cols,
-            how="left",
-            suffixes=("", "_funding"),
-        )
-        merged = merged.drop(columns=["open_time_dt", "open_time_funding"], errors="ignore")
-        merged["estimated_funding_income"] = pd.to_numeric(
-            merged["estimated_funding_income"],
-            errors="coerce",
-        ).fillna(0.0)
-        merged = self.merge_actual_funding_income(merged)
-        merged["funding_income"] = merged["actual_funding_income"]
-        merged["net_with_funding"] = merged["realized_pnl"] + merged["funding_income"]
-        merged["net_with_estimated_funding"] = merged["realized_pnl"] + merged["estimated_funding_income"]
-        return merged
-
-    # 把交易所真实 funding fee 到账合并到交易表。
-    def merge_actual_funding_income(self, trades: pd.DataFrame) -> pd.DataFrame:
-        fees_path = self.output_dir / "funding_fees.csv"
-        trades["actual_funding_income"] = 0.0
-        trades["funding_income_time"] = ""
-        trades["funding_income_delta_ms"] = ""
-        if not fees_path.exists():
-            return trades
-
-        fees = pd.read_csv(fees_path)
-        if fees.empty or "funding_time" not in fees.columns:
-            return trades
-        fees["funding_time_dt"] = pd.to_datetime(fees["funding_time"], utc=True)
-        fees["actual_funding_income"] = pd.to_numeric(fees["income"], errors="coerce").fillna(0.0)
-        trades["funding_time_dt"] = pd.to_datetime(trades["funding_time"], utc=True)
-        merged = trades.merge(
-            fees[
-                [
-                    "funding_time_dt",
-                    "actual_funding_income",
-                    "income_time",
-                    "delta_ms",
-                    "tran_id",
-                ]
-            ],
-            on="funding_time_dt",
-            how="left",
-            suffixes=("", "_actual"),
-        )
-        merged["actual_funding_income"] = merged["actual_funding_income_actual"].fillna(
-            merged["actual_funding_income"],
-        )
-        merged["funding_income_time"] = merged["income_time"].fillna("")
-        merged["funding_income_delta_ms"] = merged["delta_ms"].fillna("")
-        merged["funding_tran_id"] = merged["tran_id"].fillna("")
-        return merged.drop(
-            columns=["funding_time_dt", "actual_funding_income_actual", "income_time", "delta_ms", "tran_id"],
-            errors="ignore",
         )
 
     # 保留 TradingNode RUNNING 到 STOPPING 之间的 live 日志。

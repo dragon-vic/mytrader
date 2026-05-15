@@ -10,8 +10,6 @@ strategy:
     pre_deadline: 1             # t-2 最多拉 1 秒，超时保留 t-3 结果
     entry_before: 1             # t-1 定时触发下单/冻结
     exit_sec: 2                 # t+2 平仓并写本轮交易记录
-    exit_step_sec: 0.2          # 收到 funding 就提前 0.2 秒，没收到就推迟 0.2 秒
-    min_exit_sec: 0.2           # 平仓时间下限，避免贴近 funding 点
     post_sec: 3                 # t+3 拉全量实际 funding，用于分析
     api_url: https://fapi.binance.com
     api_timeout: 0.8            # 快照超时，避免阻塞下单和平仓
@@ -21,6 +19,7 @@ strategy:
 # 常改：live 运行参数。
 live:
   markets: all
+  strategy_log_level: WARNING
 
 # 常改：回测账户参数；本策略主要用于 live 观察。
 backtest:

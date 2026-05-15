@@ -11,7 +11,6 @@ RUN_MODES = ("backtest", "testnet", "live")
 
 # 项目默认入口参数。
 DEFAULT_CONFIG_NAME = "maxfunding"
-DEFAULT_TRADER_ID = "TRADER-001"
 DEFAULT_LIVE_LOG_FILE = "live_raw"
 LOGS_DIR = "logs"
 LIVE_LOG_START_MARKER = "TradingNode: RUNNING"

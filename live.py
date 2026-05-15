@@ -13,7 +13,6 @@ from nautilus_trader.live.node import TradingNode
 from actors.data_recorder import DataRecorder
 from actors.data_recorder import DataRecorderConfig
 from utils.arguments import BINANCE_CLIENT_NAME
-from utils.arguments import DEFAULT_TRADER_ID
 from utils.arguments import NODE_STOP_TOPIC
 from external.data_engine import EXTERNAL_SIGNAL_CLIENT_NAME
 from external.data_engine import ExternalSignalDataClientConfig
@@ -69,28 +68,25 @@ def build_live_node(settings: dict) -> tuple[TradingNode, TraderReportWriter]:
     log_dir = live_logs_dir()
     log_dir.mkdir(parents=True, exist_ok=True)
     data_clients = {BINANCE_CLIENT_NAME: binance.data_config()}
-    if settings["live"].get("external_signal") is True:
+    if settings["live"]["external_signal"] is True:
         data_clients[EXTERNAL_SIGNAL_CLIENT_NAME] = ExternalSignalDataClientConfig(
             host=settings["external_signal"]["host"],
             port=int(settings["external_signal"]["port"]),
         )
     trade_config = TradingNodeConfig(
-        trader_id=settings.get("runtime", {}).get("trader_id", DEFAULT_TRADER_ID),
+        trader_id=settings["runtime"]["trader_id"],
         cache=binance.cache_config(),
         logging=LoggingConfig(
-            log_level="INFO",
-            log_level_file=settings["live"].get("log_level_file", "INFO"),
+            log_level=settings["live"]["log_level"],
+            log_level_file=settings["live"]["log_level_file"],
             log_directory=str(log_dir),
             log_file_name=live_raw_log_name(settings),
-            log_colors=True,
+            log_colors=bool(settings["live"]["log_colors"]),
             log_component_levels={
-                "Portfolio": "WARNING",
-                "ExecClient-BINANCE": "WARNING",
-                "BinanceFuturesInstrumentProvider": "WARNING",
-                settings["strategy"]["class"]: "INFO",
-                "DataRecorder": "INFO",
+                **settings["live"]["log_component_levels"],
+                settings["strategy"]["class"]: settings["live"]["strategy_log_level"],
             },
-            clear_log_file=True,
+            clear_log_file=bool(settings["live"]["clear_log_file"]),
         ),
         data_clients=data_clients,
         exec_clients={BINANCE_CLIENT_NAME: binance.exec_config()},
@@ -98,7 +94,7 @@ def build_live_node(settings: dict) -> tuple[TradingNode, TraderReportWriter]:
 
     node = TradingNode(config=trade_config)
     node.add_data_client_factory(BINANCE_CLIENT_NAME, BinanceLiveDataClientFactory)
-    if settings["live"].get("external_signal") is True:
+    if settings["live"]["external_signal"] is True:
         node.add_data_client_factory(EXTERNAL_SIGNAL_CLIENT_NAME, ExternalSignalLiveDataClientFactory)
     node.add_exec_client_factory(BINANCE_CLIENT_NAME, BinanceLiveExecClientFactory)
 

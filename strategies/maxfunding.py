@@ -37,8 +37,6 @@ class MaxfundingConfig(StrategyConfig, frozen=True):
     pre_deadline: float
     entry_before: float
     exit_sec: float
-    exit_step_sec: float
-    min_exit_sec: float
     post_sec: float
     stop_close: bool
     api_url: str
@@ -71,14 +69,15 @@ class Maxfunding(Strategy):
         self.close_done = False
         self.ins: dict[InstrumentId, Instrument] = {}
         self.trade_ids: set[InstrumentId] = set()
-        self.watch_symbols: dict[InstrumentId, str] = {}
+        self.symbols: dict[InstrumentId, str] = {}
         self.obs_map: dict[InstrumentId, dict[str, Decimal | OrderSide]] = {}
         self.ins_map: dict[InstrumentId, dict[str, Decimal | OrderSide]] = {}
         self.open_ids: set[InstrumentId] = set()
         self.order_map: dict[ClientOrderId, InstrumentId] = {}
         self.chosen_id: InstrumentId | None = None
         self.had_order = False
-        self.funding_seen = False
+        self.post_account_count = 0
+        self.funding_logged = False
         self.log_path = Path(config.event_log_path)
         use_proxy = platform.system() == "Windows" and config.proxy_url
         self.proxies = {"http": config.proxy_url, "https": config.proxy_url} if use_proxy else None
@@ -95,12 +94,6 @@ class Maxfunding(Strategy):
             raise RuntimeError("entry_before must be positive")
         if self.config.exit_sec <= 0:
             raise RuntimeError("exit_sec must be positive")
-        if self.config.exit_step_sec <= 0:
-            raise RuntimeError("exit_step_sec must be positive")
-        if self.config.min_exit_sec <= 0:
-            raise RuntimeError("min_exit_sec must be positive")
-        if self.config.exit_sec < self.config.min_exit_sec:
-            raise RuntimeError("exit_sec must be greater than or equal to min_exit_sec")
         if self.config.post_sec <= self.config.exit_sec:
             raise RuntimeError("post_sec must be greater than exit_sec")
         if self.config.api_timeout <= 0:
@@ -114,8 +107,8 @@ class Maxfunding(Strategy):
         self._schedule_next()
 
         self.log.info(
-            f"资金费率交易启动，watch list{len(self.ins)}个，"
-            f"trade list{len(self.trade_ids)}个，"
+            f"资金费率交易启动，已加载{len(self.ins)}个，"
+            f"可交易{len(self.trade_ids)}个，"
             f"阈值{self._bps(self.min_rate)}bps，单币名义{self.notional:.2f}USDT"
         )
 
@@ -197,7 +190,7 @@ class Maxfunding(Strategy):
                 continue
             rows.append((ins_id, row))
         if not rows:
-            self.log.info(f"交易模式，trade list候选{len(self.ins_map)}个，无可下单交易对")
+            self.log.info(f"交易模式，候选{len(self.ins_map)}个，无可下单交易对")
         else:
             ins_id, row = max(rows, key=lambda item: abs(item[1]["rate"]))
             ins = self.ins[ins_id]
@@ -214,10 +207,11 @@ class Maxfunding(Strategy):
             self.chosen_id = ins_id
             self.submit_order(order)
             self.had_order = True
-            self.funding_seen = False
+            self.post_account_count = 0
+            self.funding_logged = False
             self.log.info(
                 f"交易模式，候选{len(self.ins_map)}个，选择{self._base(ins_id)}，"
-                f"费率{self._bps(row['rate'])}bps，方向{self._side_cn(side)}，"
+                f"费率{self._bps(row['rate'])}bps"
                 f"名义{self.notional:.2f}USDT"
             )
 
@@ -256,27 +250,27 @@ class Maxfunding(Strategy):
         else:
             trade_symbols = {
                 symbol
-                for ins_id, symbol in self.watch_symbols.items()
+                for ins_id, symbol in self.symbols.items()
                 if ins_id in self.trade_ids
             }
             self.log.info(
                 f"实际资金费率分析，全量前三 {self._top_rates(rows)}，"
-                f"watch list前三 {self._top_rates(rows, set(self.watch_symbols.values()))}，"
-                f"trade list前三 {self._top_rates(rows, trade_symbols)}，"
+                f"可交易前三 {self._top_rates(rows, trade_symbols)}，"
                 f"耗时{self._ms(elapsed_ms)}ms"
             )
-        self._adjust_exit()
         self._reset_closed_state()
         self._schedule_next()
 
-    # 收到 Binance funding 账户事件后标记本轮资金费已到账。
+    # t 后第二次账户事件视为本轮资金费已到账，只记录不参与决策。
     def _on_account(self, event: AccountState) -> None:
         if not self.had_order:
             return
-        if not (self.fund_ns <= event.ts_event <= self.fund_ns + 5_000_000_000):
+        if not (self.fund_ns <= event.ts_event <= self.fund_ns + 10_000_000_000):
             return
-        self.funding_seen = True
-        self.log.info("收到资金费账户事件")
+        self.post_account_count += 1
+        if self.post_account_count == 2 and not self.funding_logged:
+            self.funding_logged = True
+            self.log.info("收到资金费账户事件")
 
     # 成交后才记录待平仓 instrument。
     def on_order_filled(self, event: OrderFilled) -> None:
@@ -330,7 +324,7 @@ class Maxfunding(Strategy):
         if missing:
             raise RuntimeError(f"Missing instruments in cache: {','.join(sorted(map(str, missing)))}")
 
-    # 拉 watch list 的 premiumIndex；只有 trade list 超过阈值才进入可交易候选。
+    # 拉已加载 instrument 的 premiumIndex；只有可交易集合超过阈值才进入候选。
     def _load_snap(
         self,
         phase: str,
@@ -351,7 +345,7 @@ class Maxfunding(Strategy):
             return None
 
         by_symbol = {str(item.get("symbol", "")): item for item in payload}
-        for ins_id, symbol in self.watch_symbols.items():
+        for ins_id, symbol in self.symbols.items():
             if deadline_sec is not None and perf_counter() - start >= deadline_sec:
                 deadline_hit = True
                 break
@@ -385,7 +379,7 @@ class Maxfunding(Strategy):
             deadline_hit = True
         elapsed_ms = elapsed_sec * 1000
         return {
-            "rows": len(self.watch_symbols),
+            "rows": len(self.symbols),
             "elapsed_ms": elapsed_ms,
             "observed": len(self.obs_map),
             "candidates": len(self.ins_map),
@@ -396,18 +390,18 @@ class Maxfunding(Strategy):
             "deadline_hit": deadline_hit,
         }
 
-    # 把 config 中的 watch list 和 trade list 映射到 instrument。
+    # 把已加载 instrument 和可交易集合映射到 Binance symbol。
     def _load_lists(self) -> None:
         by_base = {
             str(ins_id).split(".")[0].replace("USDT-PERP", "").upper(): ins_id
             for ins_id in self.ins
         }
+        self.symbols = {
+            ins_id: str(ins_id).split(".")[0].replace("-PERP", "")
+            for ins_id in sorted(self.ins, key=str)
+        }
         if self.trade is None:
             self.trade_ids = set(self.ins)
-            self.watch_symbols = {
-                ins_id: str(ins_id).split(".")[0].replace("-PERP", "")
-                for ins_id in sorted(self.ins, key=str)
-            }
             return
         ids = {by_base[symbol] for symbol in self.trade if symbol in by_base}
         missing = sorted(self.trade - set(by_base))
@@ -416,10 +410,6 @@ class Maxfunding(Strategy):
         if missing:
             raise RuntimeError(f"trade_symbols not loaded: {','.join(missing)}")
         self.trade_ids = ids
-        self.watch_symbols = {
-            ins_id: str(ins_id).split(".")[0].replace("-PERP", "")
-            for ins_id in sorted(self.ins, key=str)
-        }
 
     # 为下一次 funding 注册一次性 clock alert。
     def _schedule_next(self) -> None:
@@ -466,13 +456,13 @@ class Maxfunding(Strategy):
     def _log_pre_result(self, stats: dict, title: str) -> None:
         if not self.ins_map:
             self.log.info(
-                f"{title}，watch list{stats['rows']}个，trade list{len(self.trade_ids)}个，"
+                f"{title}，已加载{stats['rows']}个，可交易{len(self.trade_ids)}个，"
                 f"阈值{self._bps(self.min_rate)}bps，无超过阈值候选，"
                 f"前三 {self._rate_list(limit=3, rows=self.obs_map)}，耗时{self._ms(stats['elapsed_ms'])}ms"
             )
             return
         self.log.info(
-            f"{title}，watch list{stats['rows']}个，trade list{len(self.trade_ids)}个，"
+            f"{title}，已加载{stats['rows']}个，可交易{len(self.trade_ids)}个，"
             f"阈值{self._bps(self.min_rate)}bps，"
             f"候选{len(self.ins_map)}个，耗时{self._ms(stats['elapsed_ms'])}ms，"
             f"候选 {self._rate_list(limit=3)}"
@@ -611,7 +601,8 @@ class Maxfunding(Strategy):
         self.order_map.clear()
         self.chosen_id = None
         self.had_order = False
-        self.funding_seen = False
+        self.post_account_count = 0
+        self.funding_logged = False
         self.entry_done = False
         self.sent_done = False
         self.close_done = False
@@ -622,27 +613,14 @@ class Maxfunding(Strategy):
         self.order_map.clear()
         self.open_ids = {ins_id for ins_id in self.open_ids if not self.portfolio.is_flat(ins_id)}
         self.chosen_id = next(iter(self.open_ids), None)
+        self.had_order = False
+        self.post_account_count = 0
+        self.funding_logged = False
         self.entry_done = False
         self.sent_done = False
         self.close_done = False
         if self.open_ids:
             self.log.warning(f"平仓后仍有持仓跟踪，交易对{','.join(map(self._base, self.open_ids))}")
-
-    def _adjust_exit(self) -> None:
-        if not self.had_order:
-            return
-        old_sec = self.exit_sec
-        step = float(self.config.exit_step_sec)
-        if self.funding_seen:
-            self.exit_sec = max(float(self.config.min_exit_sec), self.exit_sec - step)
-        else:
-            self.exit_sec += step
-        self.log.info(
-            f"平仓时间调整，资金费到账{'是' if self.funding_seen else '否'}，"
-            f"下轮t+{self._ms(self.exit_sec)}s，原t+{self._ms(old_sec)}s"
-        )
-        self.had_order = False
-        self.funding_seen = False
 
     def _iso(self, ts_ns: int) -> str:
         return datetime.fromtimestamp(ts_ns / 1_000_000_000, tz=UTC).isoformat()

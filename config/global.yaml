@@ -1,3 +1,64 @@
+# 全局：简写 markets 时共用的市场默认值。
+market_defaults:
+  timeframe: 1s                      # 未单独声明时默认周期；支持 1s/1m/1h/1d 这类写法
+
+# 常改：live 运行参数。
+live:
+  markets: all                       # live 加载市场；all 表示全市场，也可在策略 yaml 覆盖成列表
+  external_signal: false             # 是否加载外部信号 data client；true/false
+  account_type: USDT_FUTURES         # Binance 账户类型；当前 live 使用 USDT_FUTURES
+  log_level: INFO                    # 终端日志级别；常用 DEBUG/INFO/WARNING/ERROR
+  log_level_file: INFO               # 原始日志文件级别；常用 DEBUG/INFO/WARNING/ERROR
+  log_colors: true                   # 终端日志是否带颜色；true/false
+  clear_log_file: true               # 启动时是否清空同名运行中日志；true/false
+  strategy_log_level: INFO           # 当前策略组件日志级别；常用 DEBUG/INFO/WARNING/ERROR
+  log_component_levels:              # 共享组件日志级别
+    Portfolio: WARNING               # 组合组件日志级别
+    ExecClient-BINANCE: WARNING      # Binance 执行客户端日志级别
+    BinanceFuturesInstrumentProvider: WARNING # instrument 刷新日志级别
+    DataRecorder: INFO               # 通用 live 落盘 actor 日志级别
+  margin_type: CROSS                 # U 本位保证金模式；CROSS 或 ISOLATED
+  leverage: 1                        # 杠杆倍数；正整数，策略 yaml 可覆盖
+  modes:
+    testnet:
+      environment: TESTNET           # 运行环境；TESTNET 表示 Binance 测试网
+      api_key_env: BINANCE_FUTURES_TESTNET_API_KEY # 测试网 API key 环境变量名
+      api_secret_env: BINANCE_FUTURES_TESTNET_API_SECRET # 测试网 API secret 环境变量名
+    live:
+      environment: LIVE              # 运行环境；LIVE 表示 Binance 实盘
+      api_key_env: BINANCE_FUTURES_API_KEY # 实盘 API key 环境变量名
+      api_secret_env: BINANCE_FUTURES_API_SECRET # 实盘 API secret 环境变量名
+
+# 低频：live 只需要市场类型来推导 NT symbol。
+instrument:
+  kind: perpetual                    # instrument 类型；当前支持 spot/perpetual
+
+# 全局：node 运行时共享参数。
+runtime:
+  cache_capacity: 1000               # cache 中 tick/bar 保留条数；正整数
+
+# 全局：回测/拉数据默认参数。live 缺少这些字段不应受影响。
+backtest:
+  data:
+    limit: 1000                       # 每批拉取 kline 数量；受交易所接口限制
+    batches: 3                        # 连续向前补多少批历史 kline
+  instrument:
+    settlement_currency: USDT        # 结算币；U 本位合约通常为 USDT
+    is_inverse: false                # 是否反向合约；U 本位正向合约写 false
+    price_precision: 2               # 价格小数位；按回测 instrument 规格填写
+    size_precision: 3                # 数量小数位；按回测 instrument 规格填写
+    price_increment: "0.01"          # 最小价格跳动；字符串避免浮点误差
+    size_increment: "0.001"          # 最小数量跳动；字符串避免浮点误差
+    multiplier: "1"                  # 合约乘数；现有 U 本位永续通常为 1
+    min_quantity: "0.001"            # 最小下单数量
+    max_quantity: "10000"            # 最大下单数量
+    min_notional: "5"                # 最小名义金额
+    max_price: "10000000"            # 允许的最大价格
+    margin_init: "1"                 # 回测初始保证金比例
+    margin_maint: "1"                # 回测维持保证金比例
+    maker_fee: "0.0002"              # maker 手续费率
+    taker_fee: "0.0005"              # taker 手续费率
+
 # 全局：项目目录。
 project:
   name: nt_quant                     # 项目名
@@ -6,58 +67,11 @@ project:
 
 # 全局：交易所和代理，和具体策略无关。
 exchange:
-  name: binance                      # 交易所名称
-  venue: BINANCE                     # NT venue
-  proxy_url: http://127.0.0.1:7890   # HTTP/WS 统一代理
+  name: binance                      # 交易所名称；当前代码只接 Binance
+  venue: BINANCE                     # NT venue 标识；需与 adapter 使用的 venue 一致
+  proxy_url: http://127.0.0.1:7890   # Windows 下 HTTP/WS 代理；Linux 运行时会忽略
 
 # 全局：本地外部信号 data client。
 external_signal:
-  host: 127.0.0.1                    # 外部信号监听地址
-  port: 9001                         # 外部信号监听端口
-
-# 全局：简写 markets 时共用的市场默认值。
-market_defaults:
-  timeframe: 1s                      # 未单独声明时默认使用 1 秒周期
-
-# 常改：live 运行参数。
-live:
-  markets: all                       # 未单独声明时 live 默认加载全市场
-  account_type: USDT_FUTURES         # Binance U 本位合约账户
-  log_level_file: INFO               # live 原始日志级别
-  margin_type: CROSS                 # U 本位合约保证金模式
-  leverage: 1                        # 默认杠杆
-  modes:
-    testnet:
-      environment: TESTNET           # Binance 测试网
-      api_key_env: BINANCE_FUTURES_TESTNET_API_KEY
-      api_secret_env: BINANCE_FUTURES_TESTNET_API_SECRET
-    live:
-      environment: LIVE              # Binance 实盘
-      api_key_env: BINANCE_FUTURES_API_KEY
-      api_secret_env: BINANCE_FUTURES_API_SECRET
-
-# 低频：live 只需要市场类型来推导 NT symbol。
-instrument:
-  kind: perpetual                    # perpetual 表示 U 本位永续合约
-
-# 全局：回测/拉数据默认参数。live 缺少这些字段不应受影响。
-backtest:
-  data:
-    limit: 1000
-    batches: 3
-  instrument:
-    settlement_currency: USDT        # 结算币
-    is_inverse: false                # false 表示 U 本位正向合约
-    price_precision: 2               # 价格小数位
-    size_precision: 3                # 数量小数位
-    price_increment: "0.01"          # 最小价格跳动
-    size_increment: "0.001"          # 最小数量跳动
-    multiplier: "1"                  # 合约乘数
-    min_quantity: "0.001"            # 最小下单数量
-    max_quantity: "10000"            # 最大下单数量
-    min_notional: "5"                # 最小名义金额
-    max_price: "10000000"            # 允许的最大价格
-    margin_init: "1"                 # 回测用初始保证金比例
-    margin_maint: "1"                # 回测用维持保证金比例
-    maker_fee: "0.0002"              # maker 手续费率
-    taker_fee: "0.0005"              # taker 手续费率
+  host: 127.0.0.1                    # 外部信号监听地址；本机通常写 127.0.0.1
+  port: 9001                         # 外部信号监听端口；多 node 时运行期会按 node 序号偏移
