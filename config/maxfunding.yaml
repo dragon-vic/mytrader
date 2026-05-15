@@ -4,7 +4,7 @@ strategy:
     trade_notional: "8"
     min_rate_bps: "30"          # abs(rate) > 30bps 才进入候选
     # trade_symbols: [AXS, BARD, CFG, COS, DRIFT, ENSO, KITE, LYN, RIVER, STEEM]
-    trade_symbols: "all"
+    trade_symbols: all
     pre_sec: 3                  # t-3 预拉候选，t-2 覆盖
     entry_sec: 2                # t-2 拉一次观察列表 rate/mark 快照
     pre_deadline: 1             # t-2 最多拉 1 秒，超时保留 t-3 结果
