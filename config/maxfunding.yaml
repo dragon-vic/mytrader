@@ -15,7 +15,7 @@ strategy:
     trade_notional: "8"
     min_rate_bps: "30"          # abs(rate) > 30bps 才进入候选
     # 上面的 markets 是 watch list；实际下单只在 trade list 里选最大 abs(rate)，也可写 all。
-#    trade_symbols: [AXS, BARD, CFG, COS, DRIFT, ENSO, KITE, LYN, RIVER, STEEM]
+    # trade_symbols: [AXS, BARD, CFG, COS, DRIFT, ENSO, KITE, LYN, RIVER, STEEM]
     trade_symbols: "all"
     pre_sec: 3                  # t-3 预拉候选，t-2 覆盖
     entry_sec: 2                # t-2 拉一次观察列表 rate/mark 快照
