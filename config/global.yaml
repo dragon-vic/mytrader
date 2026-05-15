@@ -15,9 +15,16 @@ external_signal:
   host: 127.0.0.1                    # 外部信号监听地址
   port: 9001                         # 外部信号监听端口
 
+# 全局：简写 markets 时共用的市场默认值。
+market_defaults:
+  timeframe: 1s                      # 未单独声明时默认使用 1 秒周期
+
 # 常改：live 运行参数。
 live:
   account_type: USDT_FUTURES         # Binance U 本位合约账户
+  log_level_file: INFO               # live 原始日志级别
+  margin_type: CROSS                 # U 本位合约保证金模式
+  leverage: 1                        # 默认杠杆
   modes:
     testnet:
       environment: TESTNET           # Binance 测试网

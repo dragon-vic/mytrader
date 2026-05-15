@@ -19,6 +19,7 @@ def load_settings(config_name: str | None = None, mode: str | None = None) -> di
     with (ROOT / "config" / f"{name}.yaml").open("r", encoding="utf-8") as f:
         strategy_settings = yaml.safe_load(f)
     settings = deep_merge(global_settings, strategy_settings)
+    apply_mode_markets(settings, mode)
     if mode in ("testnet", "live"):
         settings.pop("backtest", None)
     normalize_settings(settings)
@@ -35,6 +36,14 @@ def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]
         else:
             merged[key] = value
     return merged
+
+
+# live/backtest 可各自声明 markets；运行时提升到统一入口供后续模块使用。
+def apply_mode_markets(settings: dict[str, Any], mode: str | None) -> None:
+    section = "live" if mode in ("testnet", "live") else "backtest"
+    markets = settings.get(section, {}).get("markets")
+    if markets is not None:
+        settings["markets"] = markets
 
 
 # 把 snake_case 名字转成策略类名。
@@ -81,6 +90,12 @@ def normalize_settings(settings: dict[str, Any]) -> None:
     market_defaults = settings.get("market_defaults") or {}
     if "markets" not in settings:
         raise KeyError("markets is required")
+    if settings["markets"] == "all":
+        settings["markets_all"] = True
+        settings["markets"] = []
+        normalize_strategy(settings)
+        return
+    settings["markets_all"] = False
     settings["markets"] = [
         normalize_market(
             {**market_defaults, **({"symbol": market} if isinstance(market, str) else market)},
@@ -121,6 +136,11 @@ def reports_dir(settings: dict[str, Any]) -> Path:
 # 返回当前 set 的市场列表。
 def market_configs(settings: dict[str, Any]) -> list[dict[str, Any]]:
     return settings["markets"]
+
+
+# 当前 set 是否要求 live node 加载全量市场。
+def markets_all(settings: dict[str, Any]) -> bool:
+    return bool(settings.get("markets_all"))
 
 
 # 读取当前 set 的代理地址。

@@ -1,6 +1,3 @@
-market_defaults:
-  timeframe: 1s
-
 markets: [1000000BOB/USDT, AXS/USDT, BARD/USDT, CFG/USDT, COS/USDT,
           DRIFT/USDT, ENJ/USDT, ENSO/USDT, GUA/USDT, KITE/USDT,
           LYN/USDT, NOM/USDT, ORCA/USDT, POWER/USDT, RAVE/USDT,

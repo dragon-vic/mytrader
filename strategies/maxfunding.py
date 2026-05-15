@@ -311,6 +311,15 @@ class Maxfunding(Strategy):
 
     # 从 cache 读取 node 已加载的 USDT 本位永续。
     def _load_ins(self) -> None:
+        if self.trade is None:
+            self.ins = {
+                ins.id: ins
+                for ins in self.cache.instruments()
+                if ins is not None and str(ins.id).endswith("USDT-PERP.BINANCE")
+            }
+            if not self.ins:
+                raise RuntimeError("No USDT perpetual instruments loaded")
+            return
         ids = set(self.config.instrument_ids)
         self.ins = {
             ins.id: ins

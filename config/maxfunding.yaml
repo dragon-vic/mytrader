@@ -1,20 +1,8 @@
-market_defaults:
-  timeframe: 1s
-
-markets: [1000000BOB/USDT, AXS/USDT, BARD/USDT, CFG/USDT, COS/USDT,
-          DRIFT/USDT, ENJ/USDT, ENSO/USDT, GTC/USDT, GUA/USDT,
-          KITE/USDT, LYN/USDT, NOM/USDT, ORCA/USDT, POWER/USDT,
-          RAVE/USDT, RIVER/USDT, SAHARA/USDT, SIREN/USDT, SOON/USDT,
-          STEEM/USDT, SIGN/USDT, CHIP/USDT, MBOX/USDT, VIC/USDT,
-          BB/USDT, SOLV/USDT, MEGA/USDT, INJ/USDT, DOGS/USDT,
-          SAPIEN/USDT, KERNEL/USDT, COMP/USDT, SAGA/USDT, MOVE/USDT]
-
 strategy:
   name: maxfunding
   params:
     trade_notional: "8"
     min_rate_bps: "30"          # abs(rate) > 30bps 才进入候选
-    # 上面的 markets 是 watch list；实际下单只在 trade list 里选最大 abs(rate)，也可写 all。
     # trade_symbols: [AXS, BARD, CFG, COS, DRIFT, ENSO, KITE, LYN, RIVER, STEEM]
     trade_symbols: "all"
     pre_sec: 3                  # t-3 预拉候选，t-2 覆盖
@@ -32,10 +20,7 @@ strategy:
 
 # 常改：live 运行参数。
 live:
-  account_type: USDT_FUTURES
-  log_level_file: INFO
-  margin_type: CROSS
-  leverage: 1
+  markets: all
 
 # 常改：回测账户参数；本策略主要用于 live 观察。
 backtest:

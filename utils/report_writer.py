@@ -469,7 +469,7 @@ def build_backtest_overview_table(payload: dict[str, Any], settings: dict[str, A
 # 用 NT 回测结果组装总体概览行。
 def backtest_overview_rows(payload: dict[str, Any], settings: dict[str, Any]) -> list[tuple[str, str]]:
     markets = settings["markets"]
-    symbols = ", ".join(market["instrument_symbol"] for market in markets)
+    symbols = "all" if settings.get("markets_all") else ", ".join(market["instrument_symbol"] for market in markets)
     timeframes = ", ".join(sorted({market["timeframe"] for market in markets}))
     stats_pnls = payload.get("stats_pnls", {})
     currency = next(iter(stats_pnls), "")
@@ -514,7 +514,7 @@ def build_live_overview_table(settings: dict[str, Any], output_dir: Path) -> Tab
 # 用 live/testnet 已落盘报告组装总体概览行。
 def live_overview_rows(settings: dict[str, Any], output_dir: Path) -> list[tuple[str, str]]:
     markets = settings["markets"]
-    symbols = ", ".join(market["instrument_symbol"] for market in markets)
+    symbols = "all" if settings.get("markets_all") else ", ".join(market["instrument_symbol"] for market in markets)
     orders = read_report_csv(output_dir, "orders.csv")
     positions = read_report_csv(output_dir, POSITIONS_FILE)
     return [

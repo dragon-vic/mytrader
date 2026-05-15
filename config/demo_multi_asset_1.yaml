@@ -18,7 +18,6 @@ markets:
 
 # 常改：live 运行参数。
 live:
-  account_type: USDT_FUTURES
   external_signal: true
 
 # 常改：回测资金和账户。

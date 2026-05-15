@@ -17,6 +17,7 @@ from nautilus_trader.config import RoutingConfig
 from utils.arguments import BINANCE_CLIENT_NAME
 from utils.config_loader import ROOT
 from utils.config_loader import market_configs
+from utils.config_loader import markets_all
 from utils.config_loader import proxy_url
 from utils.instrument_factory import InstrumentFactory
 
@@ -26,7 +27,11 @@ class BinanceConfigBuilder:
     def __init__(self, settings: dict[str, Any]) -> None:
         self.settings = settings
         self.factory = InstrumentFactory(settings)
-        self.venues = frozenset(market["venue"] for market in self.factory.markets)
+        self.venues = (
+            frozenset({settings["exchange"]["venue"]})
+            if markets_all(settings)
+            else frozenset(market["venue"] for market in self.factory.markets)
+        )
 
     # 构建 NT cache 配置，当前只收紧 bar/tick 内存容量。
     def cache_config(self) -> CacheConfig:
@@ -39,6 +44,8 @@ class BinanceConfigBuilder:
 
     # 构建 Binance data/exec client 共用的 instrument provider 配置。
     def instrument_provider(self) -> BinanceInstrumentProviderConfig:
+        if markets_all(self.settings):
+            return BinanceInstrumentProviderConfig(load_all=True)
         return BinanceInstrumentProviderConfig(
             load_all=False,
             load_ids=frozenset(
@@ -50,7 +57,7 @@ class BinanceConfigBuilder:
     # 从当前 set 的 live.margin_type 构建 Binance 合约全仓/逐仓设置。
     def futures_margin_types(self) -> dict[BinanceSymbol, BinanceFuturesMarginType] | None:
         margin_type = self.settings["live"].get("margin_type")
-        if not margin_type:
+        if not margin_type or markets_all(self.settings):
             return None
         return {
             BinanceSymbol(market["raw_symbol"]): getattr(BinanceFuturesMarginType, margin_type)
