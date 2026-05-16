@@ -8,9 +8,9 @@ strategy:
     pre_sec: 3                  # t-3 预拉候选，t-2 覆盖
     entry_sec: 2                # t-2 拉一次观察列表 rate/mark 快照
     pre_deadline: 1             # t-2 最多拉 1 秒，超时保留 t-3 结果
-    entry_before: 1             # t-1 定时触发下单/冻结
-    exit_sec: 2                 # t+2 平仓并写本轮交易记录
-    post_sec: 3                 # t+3 拉全量实际 funding，用于分析
+    entry_before: 0.5             # t-1 定时触发下单/冻结
+    exit_sec: 0.2               # t+0.5 平仓并写本轮交易记录
+    post_sec: 10                # t+10 拉全量实际 funding，用于分析并重置状态
     api_url: https://fapi.binance.com
     api_timeout: 0.8            # 快照超时，避免阻塞下单和平仓
     proxy_url: http://127.0.0.1:7890

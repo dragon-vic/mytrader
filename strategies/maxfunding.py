@@ -176,10 +176,6 @@ class Maxfunding(Strategy):
     def _freeze_funding(self) -> None:
         if self.sent_done:
             return
-        if self.open_ids:
-            self.sent_done = True
-            self.log.warning(f"跳过本轮，上一轮持仓未平，交易对{','.join(map(self._base, self.open_ids))}")
-            return
         if not self.entry_done:
             self.sent_done = True
             self.log.info("跳过本轮，候选未准备好")
@@ -227,7 +223,7 @@ class Maxfunding(Strategy):
             f"耗时{self._ms(stats['elapsed_ms'])}ms，前三 {self._rate_list(limit=3, key='settle_rate')}"
         )
 
-    # t+2 平仓并写本轮交易记录。
+    # t+n 平仓并写本轮交易记录。
     def _close_funding(self) -> None:
         if not self.close_done:
             close_cnt = 0
@@ -240,7 +236,7 @@ class Maxfunding(Strategy):
             )
             self._write_trade(close_cnt)
 
-    # t+3 再拉一次全量实际资金费率，用于观察分析。
+    # t+n 再拉一次全量实际资金费率，用于观察分析。
     def _post_funding(self) -> None:
         start = perf_counter()
         rows, errors = self._fetch_rates()
@@ -356,7 +352,9 @@ class Maxfunding(Strategy):
             try:
                 price = Decimal(str(item["markPrice"]))
                 if phase == "pre":
-                    if int(item["nextFundingTime"]) * 1_000_000 != self.fund_ns:
+                    next_funding_minute = int(item["nextFundingTime"]) // 60_000
+                    current_funding_minute = self.fund_ns // 60_000_000_000
+                    if next_funding_minute != current_funding_minute:
                         continue
                     rate = Decimal(str(item["lastFundingRate"]))
                     row = self.obs_map.setdefault(ins_id, {})
@@ -414,8 +412,8 @@ class Maxfunding(Strategy):
     # 为下一次 funding 注册一次性 clock alert。
     def _schedule_next(self) -> None:
         now_ns = self.clock.timestamp_ns()
-        four_ns = 4 * 60 * 60 * 1_000_000_000
-        self.fund_ns = ((now_ns // four_ns) + 1) * four_ns
+        hour_ns = 60 * 60 * 1_000_000_000
+        self.fund_ns = ((now_ns // hour_ns) + 1) * hour_ns
         warmup_ns = self.fund_ns - int(self.config.pre_sec * 1_000_000_000)
         pre_ns = self.fund_ns - int(self.config.entry_sec * 1_000_000_000)
         freeze_ns = self.fund_ns - int(self.config.entry_before * 1_000_000_000)
@@ -424,14 +422,13 @@ class Maxfunding(Strategy):
         post_sec = max(float(self.config.post_sec), self.exit_sec + 1.0)
         post_ns = self.fund_ns + int(post_sec * 1_000_000_000)
         if now_ns >= pre_ns:
-            four_ns = 4 * 60 * 60 * 1_000_000_000
-            self.fund_ns += four_ns
-            warmup_ns += four_ns
-            pre_ns += four_ns
-            freeze_ns += four_ns
-            rate_ns += four_ns
-            close_ns += four_ns
-            post_ns += four_ns
+            self.fund_ns += hour_ns
+            warmup_ns += hour_ns
+            pre_ns += hour_ns
+            freeze_ns += hour_ns
+            rate_ns += hour_ns
+            close_ns += hour_ns
+            post_ns += hour_ns
         timers = [
             (self.WARMUP_TIMER, warmup_ns),
             (self.PRE_TIMER, pre_ns),

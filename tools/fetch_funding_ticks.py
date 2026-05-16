@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import random
 import time
 from datetime import datetime
@@ -15,20 +14,19 @@ API_URL = "https://fapi.binance.com"
 THRESHOLD_BPS = 30
 WINDOW_BEFORE_MS = 3000
 WINDOW_AFTER_MS = 3000
-BATCH_SIZE = 40
-BATCH_PAUSE_SEC = 120
-BATCH_PAUSE_JITTER_SEC = 30
-EVENT_SLEEP_SEC = 3.4
-EVENT_SLEEP_JITTER_SEC = 0.8
-PAGE_SLEEP_SEC = 1.2
-PAGE_SLEEP_JITTER_SEC = 0.5
+CHECKPOINT_EVERY = 40
+EVENT_SLEEP_SEC = 0.2
+EVENT_SLEEP_JITTER_SEC = 0.3
+PAGE_SLEEP_SEC = 0.3
+PAGE_SLEEP_JITTER_SEC = 0.3
 REQUEST_TIMEOUT_SEC = 20
+WEIGHT_SOFT_LIMIT = 2000
+WEIGHT_RESET_BUFFER_SEC = 1.0
 
 FUNDING_PATH = Path("data/funding/all_6m/funding_all_6m.parquet")
 OUT_DIR = Path("data/ticks/funding_6m")
 RAW_DIR = OUT_DIR / "raw_agg_trades_30bps"
 COMBINED_PATH = OUT_DIR / "events_abs30_tminus3_tplus3_agg_trades.parquet"
-META_PATH = OUT_DIR / "fetch_meta_abs30.json"
 
 
 # 先写临时文件，再替换正式文件，避免中断时留下半个 parquet。
@@ -47,7 +45,7 @@ def load_events() -> pd.DataFrame:
     events["event_key"] = events["symbol"] + "_" + events["funding_time"].astype(str)
     return events.sort_values(
         ["funding_time", "abs_rate_bps", "symbol"],
-        ascending=[True, False, True],
+        ascending=[False, False, True],
     )
 
 
@@ -85,12 +83,29 @@ def load_existing() -> tuple[pd.DataFrame, set[str]]:
 
 
 # 一个事件可能超过 1000 笔 aggTrade，分页拉完完整窗口。
+def used_weight_1m(response: requests.Response) -> int | None:
+    value = response.headers.get("X-MBX-USED-WEIGHT-1M")
+    return int(value) if value is not None else None
+
+
+# 触到软阈值后，等到下一分钟窗口，避免在同一窗口内继续累加。
+def wait_for_weight_reset(weight: int | None) -> None:
+    if weight is None or weight < WEIGHT_SOFT_LIMIT:
+        return
+    now = time.time()
+    pause = 60 - (now % 60) + WEIGHT_RESET_BUFFER_SEC
+    print(f"used_weight_1m={weight}, wait next minute {pause:.1f}s", flush=True)
+    time.sleep(pause)
+
+
 def fetch_window(
     session: requests.Session,
     symbol: str,
     funding_time: int,
-) -> list[dict]:
+) -> tuple[list[dict], int | None, int]:
     rows: list[dict] = []
+    max_weight: int | None = None
+    request_count = 0
     cursor = funding_time - WINDOW_BEFORE_MS
     end_ms = funding_time + WINDOW_AFTER_MS
     while cursor <= end_ms:
@@ -104,8 +119,14 @@ def fetch_window(
             },
             timeout=REQUEST_TIMEOUT_SEC,
         )
+        request_count += 1
+        weight = used_weight_1m(response)
+        if weight is not None:
+            max_weight = weight if max_weight is None else max(max_weight, weight)
         if response.status_code in (418, 429):
-            raise RuntimeError(f"{response.status_code} {response.text[:160]}")
+            raise RuntimeError(
+                f"{response.status_code} used_weight_1m={weight} {response.text[:160]}",
+            )
         response.raise_for_status()
         page = response.json()
         if not page:
@@ -116,7 +137,7 @@ def fetch_window(
             break
         cursor = last_ts + 1
         time.sleep(PAGE_SLEEP_SEC + random.random() * PAGE_SLEEP_JITTER_SEC)
-    return rows
+    return rows, max_weight, request_count
 
 
 # 统一成和现有回测 tick 文件一致的列。
@@ -161,26 +182,64 @@ def normalize_rows(row, rows: list[dict]) -> pd.DataFrame:
     return frame[columns].drop_duplicates(["event_key", "agg_trade_id"])
 
 
-# 每次只跑一小批，限流时立刻停，避免把 429 撞成 418。
-def run_batch(events: pd.DataFrame) -> tuple[int, bool]:
-    existing, done = load_existing()
-    pending = events[~events["event_key"].isin(done)].head(BATCH_SIZE)
+# 定期把 raw 合并进总文件，进程中断时可从上次 checkpoint 继续。
+def save_progress(
+    existing: pd.DataFrame,
+    new_frames: list[pd.DataFrame],
+    errors: list[dict],
+    stopped_on_limit: bool,
+    request_count: int,
+    max_weight: int | None,
+) -> pd.DataFrame:
+    frames = [existing] if not existing.empty else []
+    frames.extend(new_frames)
+    merged = (
+        pd.concat(frames, ignore_index=True)
+        .drop_duplicates(["event_key", "agg_trade_id"])
+        .sort_values(["funding_time", "symbol", "timestamp_ms", "agg_trade_id"])
+        if frames
+        else pd.DataFrame()
+    )
+    write_parquet_atomic(merged, COMBINED_PATH)
+
     print(
-        f"threshold={THRESHOLD_BPS}bps batch={len(pending)} "
-        f"done_before={len(done)} target={len(events)}",
+        f"done_after={merged['event_key'].nunique() if not merged.empty else 0} "
+        f"rows={len(merged)} new_events={len(new_frames)} "
+        f"requests={request_count} max_used_weight_1m={max_weight} "
+        f"stopped_on_limit={stopped_on_limit} errors={len(errors)}",
+        flush=True,
+    )
+    return merged
+
+
+# 连续续拉；可随时 Ctrl+C 手动停止。
+def main() -> None:
+    RAW_DIR.mkdir(parents=True, exist_ok=True)
+    events = load_events()
+    existing, done = load_existing()
+    pending = events[~events["event_key"].isin(done)]
+    done_count = len(done)
+    total_count = len(events)
+    progress = done_count / total_count * 100 if total_count else 100.0
+    print(
+        f"threshold={THRESHOLD_BPS}bps progress={done_count}/{total_count} "
+        f"({progress:.2f}%) remaining={len(pending)}",
         flush=True,
     )
     if pending.empty:
-        return 0, False
+        print("all requested events are done", flush=True)
+        return
 
     session = requests.Session()
     new_frames: list[pd.DataFrame] = []
     errors: list[dict] = []
-    stopped_on_limit = False
+    request_count = 0
+    max_weight_seen: int | None = None
 
     for index, row in enumerate(pending.itertuples(index=False), 1):
+        stopped_on_limit = False
         try:
-            rows = fetch_window(session, row.symbol, int(row.funding_time))
+            rows, max_weight, event_requests = fetch_window(session, row.symbol, int(row.funding_time))
         except Exception as exc:
             text = str(exc)
             errors.append(
@@ -195,10 +254,22 @@ def run_batch(events: pd.DataFrame) -> tuple[int, bool]:
             print(f"error {index}/{len(pending)} {row.event_key} {text}", flush=True)
             if "429" in text or "418" in text:
                 stopped_on_limit = True
-                break
+                existing = save_progress(
+                    existing,
+                    new_frames,
+                    errors,
+                    stopped_on_limit,
+                    request_count,
+                    max_weight_seen,
+                )
+                print("stopped after rate limit response", flush=True)
+                return
             time.sleep(5)
             continue
 
+        request_count += event_requests
+        if max_weight is not None:
+            max_weight_seen = max_weight if max_weight_seen is None else max(max_weight_seen, max_weight)
         if rows:
             frame = normalize_rows(row, rows)
             symbol_dir = RAW_DIR / row.symbol.lower()
@@ -208,65 +279,37 @@ def run_batch(events: pd.DataFrame) -> tuple[int, bool]:
                 symbol_dir / f"{row.symbol.lower()}_{int(row.funding_time)}.parquet",
             )
             new_frames.append(frame)
-            print(f"ok {index}/{len(pending)} {row.event_key} rows={len(frame)}", flush=True)
+            print(
+                f"ok {index}/{len(pending)} {row.event_key} rows={len(frame)} "
+                f"requests={event_requests} used_weight_1m={max_weight}",
+                flush=True,
+            )
         else:
-            print(f"empty {index}/{len(pending)} {row.event_key}", flush=True)
+            print(
+                f"empty {index}/{len(pending)} {row.event_key} "
+                f"requests={event_requests} used_weight_1m={max_weight}",
+                flush=True,
+            )
 
+        wait_for_weight_reset(max_weight)
+        if len(new_frames) >= CHECKPOINT_EVERY:
+            existing = save_progress(
+                existing,
+                new_frames,
+                errors,
+                False,
+                request_count,
+                max_weight_seen,
+            )
+            new_frames = []
+            errors = []
+            request_count = 0
+            max_weight_seen = None
         time.sleep(EVENT_SLEEP_SEC + random.random() * EVENT_SLEEP_JITTER_SEC)
 
-    frames = [existing] if not existing.empty else []
-    frames.extend(new_frames)
-    merged = (
-        pd.concat(frames, ignore_index=True)
-        .drop_duplicates(["event_key", "agg_trade_id"])
-        .sort_values(["funding_time", "symbol", "timestamp_ms", "agg_trade_id"])
-        if frames
-        else pd.DataFrame()
-    )
-    write_parquet_atomic(merged, COMBINED_PATH)
-
-    meta = json.loads(META_PATH.read_text(encoding="utf-8")) if META_PATH.exists() else {}
-    meta_errors = meta.get("errors", [])
-    meta_errors.extend(errors)
-    meta.update(
-        {
-            "updated_utc": datetime.now(timezone.utc).isoformat(),
-            "last_mode": f"abs{THRESHOLD_BPS}_batch{BATCH_SIZE}_direct_slow",
-            "batch_requested": int(len(pending)),
-            "batch_new_events": int(len(new_frames)),
-            "batch_errors": errors,
-            "stopped_on_limit": stopped_on_limit,
-            "events_done": int(merged["event_key"].nunique()) if not merged.empty else 0,
-            "trades_saved": int(len(merged)),
-            "errors": meta_errors,
-            "combined_path": str(COMBINED_PATH.resolve()),
-        },
-    )
-    META_PATH.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(
-        f"done_after={merged['event_key'].nunique() if not merged.empty else 0} "
-        f"rows={len(merged)} new_events={len(new_frames)} "
-        f"stopped_on_limit={stopped_on_limit} errors={len(errors)}",
-        flush=True,
-    )
-    return len(new_frames), stopped_on_limit
-
-
-# 自动按批次续拉；可随时 Ctrl+C 手动停止。
-def main() -> None:
-    RAW_DIR.mkdir(parents=True, exist_ok=True)
-    events = load_events()
-    while True:
-        new_events, stopped_on_limit = run_batch(events)
-        if stopped_on_limit:
-            print("stopped after rate limit response", flush=True)
-            return
-        if new_events == 0:
-            print("all requested events are done", flush=True)
-            return
-        pause = BATCH_PAUSE_SEC + random.random() * BATCH_PAUSE_JITTER_SEC
-        print(f"batch pause {pause:.1f}s", flush=True)
-        time.sleep(pause)
+    if new_frames or errors:
+        save_progress(existing, new_frames, errors, False, request_count, max_weight_seen)
+    print("all requested events are done", flush=True)
 
 
 if __name__ == "__main__":
