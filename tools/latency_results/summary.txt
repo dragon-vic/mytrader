@@ -1,0 +1,26 @@
+[REST_KEEP_ALIVE]
+count=500
+avg_ms=245.53
+p50_ms=239.77
+p90_ms=250.00
+p95_ms=256.26
+p99_ms=433.82
+max_ms=541.14
+over_200ms=500
+over_500ms=1
+over_1000ms=0
+
+[WS_API]
+count=500
+avg_ms=250.52
+p50_ms=245.55
+p90_ms=256.95
+p95_ms=262.50
+p99_ms=368.81
+max_ms=539.64
+over_200ms=500
+over_500ms=4
+over_1000ms=0
+
+[INTERPRETATION]
+Baseline latency is not extreme, but tail latency is not very clean. Compare with another region before changing trading logic.

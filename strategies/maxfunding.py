@@ -223,14 +223,26 @@ class Maxfunding(Strategy):
     def _close_funding(self) -> None:
         if not self.close_done:
             close_cnt = 0
-            for ins_id in list(self.open_ids):
+            for ins_id in sorted(self.open_ids, key=str):
                 self.close_all_positions(ins_id)
                 close_cnt += 1
+            close_cnt += self._close_btc_for_test()
             self.close_done = True
             self.log.info(
                 f"交易模式，平仓{close_cnt}个，候选{len(self.ins_map)}个"
             )
             self._write_trade(close_cnt)
+
+    # 临时测试：准点一起平 BTC，用于观察大币是否也有订单创建延迟。
+    def _close_btc_for_test(self) -> int:
+        eight_hour_ns = 8 * 60 * 60 * 1_000_000_000
+        if self.fund_ns % eight_hour_ns != 0:
+            return 0
+        for ins_id in self.ins:
+            if self._base(ins_id) == "BNB":
+                self.close_all_positions(ins_id)
+                return 1
+        return 0
 
     # t+n 再拉一次全量实际资金费率，用于观察分析。
     def _post_funding(self) -> None:
