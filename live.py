@@ -29,6 +29,22 @@ from utils.runtime_ids import release_run
 from utils.strategy_factory import build_strategy
 
 
+DATA_RECORDER_MODULE = "data_recorder"
+EXTERNAL_SIGNAL_MODULE = "external_signal"
+LIVE_MODULES = {DATA_RECORDER_MODULE, EXTERNAL_SIGNAL_MODULE}
+
+
+# live.modules 显式声明需要挂进 node 的可选组件。
+def enabled_modules(settings: dict) -> set[str]:
+    modules = settings["live"]["modules"]
+    if not isinstance(modules, list):
+        raise TypeError("live.modules must be a list")
+    unknown = set(modules) - LIVE_MODULES
+    if unknown:
+        raise ValueError(f"Unsupported live.modules: {sorted(unknown)}")
+    return set(modules)
+
+
 # 根据 run.py 传入的模式生成一份 live 配置，不修改原始 settings。
 def resolve_live_mode(settings: dict, mode: str | None) -> dict:
     if mode is None:
@@ -67,8 +83,9 @@ def build_live_node(settings: dict) -> tuple[TradingNode, TraderReportWriter]:
     output_dir = prepare_report_dir(settings, "live")
     log_dir = live_logs_dir()
     log_dir.mkdir(parents=True, exist_ok=True)
+    modules = enabled_modules(settings)
     data_clients = {BINANCE_CLIENT_NAME: binance.data_config()}
-    if settings["live"]["external_signal"] is True:
+    if EXTERNAL_SIGNAL_MODULE in modules:
         data_clients[EXTERNAL_SIGNAL_CLIENT_NAME] = ExternalSignalDataClientConfig(
             host=settings["external_signal"]["host"],
             port=int(settings["external_signal"]["port"]),
@@ -94,7 +111,7 @@ def build_live_node(settings: dict) -> tuple[TradingNode, TraderReportWriter]:
 
     node = TradingNode(config=trade_config)
     node.add_data_client_factory(BINANCE_CLIENT_NAME, BinanceLiveDataClientFactory)
-    if settings["live"]["external_signal"] is True:
+    if EXTERNAL_SIGNAL_MODULE in modules:
         node.add_data_client_factory(EXTERNAL_SIGNAL_CLIENT_NAME, ExternalSignalLiveDataClientFactory)
     node.add_exec_client_factory(BINANCE_CLIENT_NAME, BinanceLiveExecClientFactory)
 
@@ -102,7 +119,8 @@ def build_live_node(settings: dict) -> tuple[TradingNode, TraderReportWriter]:
     node.trader.add_strategy(strategy)
 
     report_writer = TraderReportWriter.from_settings(settings, "live")
-    node.trader.add_actor(DataRecorder(DataRecorderConfig(output_dir=str(output_dir))))
+    if DATA_RECORDER_MODULE in modules:
+        node.trader.add_actor(DataRecorder(DataRecorderConfig(output_dir=str(output_dir))))
     attach_node_stop_handler(node)
 
     node.build()

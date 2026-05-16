@@ -97,7 +97,7 @@ class Maxfunding(Strategy):
             raise RuntimeError("pre_deadline must be positive")
         if self.config.entry_before <= 0:
             raise RuntimeError("entry_before must be positive")
-        if self.config.exit_sec <= 0:
+        if self.config.exit_sec < 0:
             raise RuntimeError("exit_sec must be positive")
         if self.config.post_sec <= self.config.exit_sec:
             raise RuntimeError("post_sec must be greater than exit_sec")

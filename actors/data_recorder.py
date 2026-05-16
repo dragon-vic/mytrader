@@ -51,11 +51,11 @@ class DataRecorder(Actor):
         self.msgbus.unsubscribe(EVENT_ACCOUNT_TOPIC, self.handle_account_event)
 
     def  handle_funding(self, event: AccountState) -> None:
-        self.log.info(f"{YELLOW}[FUNDING]{RESET} {event}")
+        pass
 
     # 订单事件由 actor 统一打日志，避免策略和 NT 组件重复输出。
     def handle_order_event(self, event: OrderEvent) -> None:
-        self.log.info(f"{YELLOW}[ORDER]{RESET} {event}")
+        pass
 
     # 把账户余额变化展开成一币种一行，并保留 info 字段用于判断 funding。
     def handle_account_event(self, event: AccountState) -> None:
@@ -64,7 +64,6 @@ class DataRecorder(Actor):
         if event_id in self.seen_account_event_ids:
             return
         self.seen_account_event_ids.add(event_id)
-        self.log.info(f"{YELLOW}[ACCOUNT]{RESET} {event}")
         info = state.get("info") or {}
         info_type = info.get("type", "")
         info_reason = info.get("reason", "") or info.get("m", "")
@@ -83,7 +82,6 @@ class DataRecorder(Actor):
     # 把 live 仓位事件落盘，方便和账户变化对照。
     def handle_position_event(self, event: PositionEvent) -> None:
         row = type(event).to_dict(event)
-        self.log.info(f"{YELLOW}[POSITION]{RESET} {event}")
         row["ts_event"] = pd.to_datetime(event.ts_event, unit="ns", utc=True)
         row["event_type"] = type(event).__name__
         row["adjustment_type"] = row.get("adjustment_type", "")

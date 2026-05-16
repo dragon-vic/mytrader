@@ -5,7 +5,7 @@ market_defaults:
 # 常改：live 运行参数。
 live:
   markets: all                       # live 加载市场；all 表示全市场，也可在策略 yaml 覆盖成列表
-  external_signal: false             # 是否加载外部信号 data client；true/false
+  modules: [data_recorder]           # 加入 live node 的可选组件；可选 data_recorder/external_signal
   account_type: USDT_FUTURES         # Binance 账户类型；当前 live 使用 USDT_FUTURES
   log_level: INFO                    # 终端日志级别；常用 DEBUG/INFO/WARNING/ERROR
   log_level_file: INFO               # 原始日志文件级别；常用 DEBUG/INFO/WARNING/ERROR
@@ -13,7 +13,7 @@ live:
   clear_log_file: true               # 启动时是否清空同名运行中日志；true/false
   strategy_log_level: INFO           # 当前策略组件日志级别；常用 DEBUG/INFO/WARNING/ERROR
   log_component_levels:              # 共享组件日志级别
-    Portfolio: WARNING               # 组合组件日志级别
+    Portfolio: INFO               # 组合组件日志级别
     ExecClient-BINANCE: WARNING      # Binance 执行客户端日志级别
     BinanceFuturesInstrumentProvider: WARNING # instrument 刷新日志级别
     DataRecorder: INFO               # 通用 live 落盘 actor 日志级别

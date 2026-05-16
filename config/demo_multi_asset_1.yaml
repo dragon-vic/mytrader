@@ -16,7 +16,7 @@ live:
       timeframe: 1m
     - symbol: ETH/USDT
       timeframe: 1m
-  external_signal: true
+  modules: [data_recorder, external_signal]
 
 # 常改：回测资金和账户。
 backtest:
