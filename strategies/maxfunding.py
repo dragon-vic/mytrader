@@ -128,7 +128,7 @@ class Maxfunding(Strategy):
         elif name == self.FREEZE_TIMER:
             self._freeze_funding()
         elif name == self.RATE_TIMER:
-            self._rate_funding()
+            self._close_funding()
         elif name == self.CLOSE_TIMER:
             self._close_funding()
         elif name == self.POST_TIMER:
@@ -219,16 +219,6 @@ class Maxfunding(Strategy):
 
         self.sent_done = True
 
-    # 准点复核候选的实际资金费率。
-    def _rate_funding(self) -> None:
-        stats = self._load_snap("rate")
-        if stats is None:
-            return
-        self.log.info(
-            f"准点复核成功，命中{stats['priced']}个，"
-            f"耗时{self._ms(stats['elapsed_ms'])}ms，前三 {self._rate_list(limit=3, key='settle_rate')}"
-        )
-
     # t+n 平仓并写本轮交易记录。
     def _close_funding(self) -> None:
         if not self.close_done:
@@ -250,14 +240,18 @@ class Maxfunding(Strategy):
         if errors:
             self.log.info(f"实际资金费率分析失败，错误{errors}个，耗时{self._ms(elapsed_ms)}ms")
         else:
+            current_symbols = {
+                self.symbols[ins_id]
+                for ins_id in self.obs_map
+                if ins_id in self.symbols
+            }
             trade_symbols = {
                 symbol
                 for ins_id, symbol in self.symbols.items()
-                if ins_id in self.trade_ids
+                if ins_id in self.trade_ids and symbol in current_symbols
             }
             self.log.info(
-                f"实际资金费率分析，全量前三 {self._top_rates(rows)}，"
-                f"可交易前三 {self._top_rates(rows, trade_symbols)}，"
+                f"实际资金费率分析，可交易前三 {self._top_rates(rows, trade_symbols)}，"
                 f"耗时{self._ms(elapsed_ms)}ms"
             )
         self._reset_closed_state()
@@ -445,10 +439,12 @@ class Maxfunding(Strategy):
             (self.WARMUP_TIMER, warmup_ns),
             (self.PRE_TIMER, pre_ns),
             (self.FREEZE_TIMER, freeze_ns),
-            (self.RATE_TIMER, rate_ns),
-            (self.CLOSE_TIMER, close_ns),
             (self.POST_TIMER, post_ns),
         ]
+        if self.exit_sec == 0:
+            timers.append((self.RATE_TIMER, rate_ns))
+        else:
+            timers.append((self.CLOSE_TIMER, close_ns))
         for name, ts_ns in timers:
             if name == self.WARMUP_TIMER and now_ns >= ts_ns:
                 continue
@@ -506,7 +502,7 @@ class Maxfunding(Strategy):
                 continue
         rated.sort(key=lambda item: abs(item[1]), reverse=True)
         parts = [
-            f"{symbol.replace('USDT', '')} {self._bps(rate)}bps {self._side_cn(self._side(rate))}"
+            f"{symbol.replace('USDT', '')} {self._bps(rate)}bps"
             for symbol, rate in rated[:3]
         ]
         return "，".join(parts) if parts else "无"
@@ -525,8 +521,7 @@ class Maxfunding(Strategy):
         rows.sort(key=lambda item: abs(item[1][key]), reverse=True)
         parts = []
         for ins_id, row in rows[:limit]:
-            side = row.get("side") or self._side(row[key])
-            parts.append(f"{self._base(ins_id)} {self._bps(row[key])}bps {self._side_cn(side)}")
+            parts.append(f"{self._base(ins_id)} {self._bps(row[key])}bps")
         if not parts:
             return "无"
         return "，".join(parts)
