@@ -256,16 +256,18 @@ class TraderReportWriter:
             return
 
         lines = source.read_text(encoding="utf-8", errors="replace").splitlines()
-        start = 0
-        for index, line in enumerate(lines):
-            if start_marker in line:
-                start = index
-                break
         end = len(lines)
-        for index, line in enumerate(lines[start:], start=start):
-            if stop_marker in line:
+        for index in range(len(lines) - 1, -1, -1):
+            if stop_marker in lines[index]:
                 end = index
                 break
+        start = None
+        for index in range(end - 1, -1, -1):
+            if start_marker in lines[index]:
+                start = index + 1
+                break
+        if start is None:
+            return
         localized_lines = [self.localize_live_log_line(line) for line in lines[start:end]]
         target.write_text("\n".join(localized_lines) + "\n", encoding="utf-8")
         source.unlink()

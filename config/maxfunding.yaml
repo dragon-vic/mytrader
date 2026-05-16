@@ -20,7 +20,7 @@ strategy:
 # 常改：live 运行参数。
 live:
   markets: all
-  strategy_log_level: WARNING
+  strategy_log_level: INFO
 
 # 常改：回测账户参数；本策略主要用于 live 观察。
 backtest:
