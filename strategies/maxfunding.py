@@ -226,7 +226,7 @@ class Maxfunding(Strategy):
             for ins_id in sorted(self.open_ids, key=str):
                 self.close_all_positions(ins_id)
                 close_cnt += 1
-            close_cnt += self._close_btc_for_test()
+                close_cnt += self._close_btc_for_test()
             self.close_done = True
             self.log.info(
                 f"交易模式，平仓{close_cnt}个，候选{len(self.ins_map)}个"
