@@ -2,7 +2,7 @@ strategy:
   name: maxfunding
   params:
     trade_notional: "8"
-    min_rate_bps: "30"          # abs(rate) > 30bps 才进入候选
+    min_rate_bps: "50"          # abs(rate) > 30bps 才进入候选
     # trade_symbols: [AXS, BARD, CFG, COS, DRIFT, ENSO, KITE, LYN, RIVER, STEEM]
     trade_symbols: all
     pre_sec: 3                  # t-3 预拉候选，t-2 覆盖
