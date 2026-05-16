@@ -22,10 +22,12 @@ class BacktestfundingConfig(StrategyConfig, frozen=True):
     bar_types: list[BarType]
     trade_notional: Decimal
     min_rate_bps: Decimal
-    whitelist_symbols: list[str]
-    events_path: str = ""
-    exclude_symbols: list[str] = []
-    event_log_path: str = "auto"
+    trade_symbols: list[str] | str
+    exclude_symbols: list[str]
+    events_path: str
+    entry_before_ms: int
+    exit_after_ms: int
+    event_log_path: str
 
 
 class Backtestfunding(Strategy):
@@ -36,7 +38,11 @@ class Backtestfunding(Strategy):
         self.last_px: dict[InstrumentId, Decimal] = {}
         self.log_path = Path(config.event_log_path)
         self.min_rate_bps = Decimal(str(config.min_rate_bps))
-        self.whitelist = {self._base_symbol(symbol) for symbol in config.whitelist_symbols}
+        self.entry_before_ms = int(config.entry_before_ms)
+        self.exit_after_ms = int(config.exit_after_ms)
+        self.trade = None if config.trade_symbols == "all" else {
+            self._base_symbol(symbol) for symbol in config.trade_symbols
+        }
         self.exclude = {self._base_symbol(symbol) for symbol in config.exclude_symbols}
 
     # 启动时加载 funding 事件，并注册 t-1/t+1 定时器。
@@ -118,40 +124,70 @@ class Backtestfunding(Strategy):
             raise RuntimeError("backtestfunding 当前只支持回测，请在 backtest.events_path 配置历史 funding 事件文件。")
         path = Path(self.config.events_path)
         df = pd.read_parquet(path) if path.suffix == ".parquet" else pd.read_csv(path)
-        allowed = set(self.config.instrument_ids)
+        by_base = {
+            self._base_symbol(str(instrument_id)): instrument_id
+            for instrument_id in self.config.instrument_ids
+        }
+        if self.trade is None:
+            allowed = set(self.config.instrument_ids)
+        else:
+            missing = sorted(self.trade - set(by_base))
+            if missing:
+                raise RuntimeError(f"trade_symbols not loaded: {','.join(missing)}")
+            allowed = {by_base[symbol] for symbol in self.trade}
+        missing_exclude = sorted(self.exclude - set(by_base))
+        if missing_exclude:
+            raise RuntimeError(f"exclude_symbols not loaded: {','.join(missing_exclude)}")
+        allowed -= {by_base[symbol] for symbol in self.exclude}
+        if not allowed:
+            raise RuntimeError("trade_symbols is empty after exclude_symbols")
+
         by_node: dict[int, dict] = {}
         for row in df.to_dict("records"):
-            instrument_id = InstrumentId.from_str(row["instrument_id"])
-            if instrument_id not in allowed:
-                continue
             base = self._base_symbol(row["symbol"])
-            if base in self.exclude or base not in self.whitelist:
+            instrument_id = (
+                InstrumentId.from_str(row["instrument_id"])
+                if "instrument_id" in row
+                else by_base.get(base)
+            )
+            if instrument_id is None or instrument_id not in allowed:
+                continue
+            if base in self.exclude:
                 continue
             abs_rate_bps = Decimal(str(row["abs_rate_bps"]))
             if abs_rate_bps <= self.min_rate_bps:
                 continue
-            node_ms = int(row["funding_time"]) // 14_400_000 * 14_400_000
+            node_ms = int(row["funding_time"]) // 60_000 * 60_000
             current = by_node.get(node_ms)
             if current is None or abs_rate_bps > current["_abs_rate_bps"]:
                 by_node[node_ms] = {**row, "_abs_rate_bps": abs_rate_bps}
 
         for row in by_node.values():
-            instrument_id = InstrumentId.from_str(row["instrument_id"])
+            base = self._base_symbol(row["symbol"])
+            instrument_id = (
+                InstrumentId.from_str(row["instrument_id"])
+                if "instrument_id" in row
+                else by_base[base]
+            )
             rate = Decimal(str(row["rate"]))
-            side = OrderSide.SELL if row["side"] == "SELL" else OrderSide.BUY
+            side = OrderSide.SELL if rate > 0 else OrderSide.BUY
             event_id = f"{row['symbol']}:{int(row['funding_time'])}"
             row.pop("_abs_rate_bps")
+            fund_ms = int(row["funding_time"])
             self.events[event_id] = {
                 **row,
                 "event_id": event_id,
                 "instrument_id": instrument_id,
                 "rate": rate,
+                "side": "SELL" if side == OrderSide.SELL else "BUY",
                 "order_side": side,
+                "entry_time_ms": row.get("entry_time_ms", fund_ms - self.entry_before_ms),
+                "exit_time_ms": row.get("exit_time_ms", fund_ms + self.exit_after_ms),
                 "funding_gain": self.config.trade_notional * abs(rate),
             }
 
     def _base_symbol(self, symbol: str) -> str:
-        return symbol.upper().replace("-PERP.BINANCE", "").replace("USDT", "")
+        return symbol.upper().replace("-PERP.BINANCE", "").replace("USDT", "").replace("/", "")
 
     def _qty(self, instrument: Instrument, price: Decimal):
         raw = self.config.trade_notional / price

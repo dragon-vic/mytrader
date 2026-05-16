@@ -30,6 +30,7 @@ class MaxfundingConfig(StrategyConfig, frozen=True):
     instrument_ids: list[InstrumentId]
     bar_types: list[BarType]
     trade_symbols: list[str] | str
+    exclude_symbols: list[str]
     trade_notional: Decimal
     min_rate_bps: Decimal
     pre_sec: float
@@ -62,6 +63,10 @@ class Maxfunding(Strategy):
         self.trade = None if config.trade_symbols == "all" else {
             symbol.upper().replace("-PERP.BINANCE", "").replace("USDT", "").replace("/", "")
             for symbol in config.trade_symbols
+        }
+        self.exclude = {
+            symbol.upper().replace("-PERP.BINANCE", "").replace("USDT", "").replace("/", "")
+            for symbol in config.exclude_symbols
         }
         self.fund_ns = 0
         self.entry_done = False
@@ -109,6 +114,7 @@ class Maxfunding(Strategy):
         self.log.info(
             f"资金费率交易启动，已加载{len(self.ins)}个，"
             f"可交易{len(self.trade_ids)}个，"
+            f"排除{len(self.exclude)}个，"
             f"阈值{self._bps(self.min_rate)}bps，单币名义{self.notional:.2f}USDT"
         )
 
@@ -399,14 +405,20 @@ class Maxfunding(Strategy):
             for ins_id in sorted(self.ins, key=str)
         }
         if self.trade is None:
-            self.trade_ids = set(self.ins)
-            return
-        ids = {by_base[symbol] for symbol in self.trade if symbol in by_base}
-        missing = sorted(self.trade - set(by_base))
+            ids = set(self.ins)
+        else:
+            ids = {by_base[symbol] for symbol in self.trade if symbol in by_base}
+            missing = sorted(self.trade - set(by_base))
+            if not ids:
+                raise RuntimeError("trade_symbols is empty")
+            if missing:
+                raise RuntimeError(f"trade_symbols not loaded: {','.join(missing)}")
+        missing_exclude = sorted(self.exclude - set(by_base))
+        if missing_exclude:
+            raise RuntimeError(f"exclude_symbols not loaded: {','.join(missing_exclude)}")
+        ids -= {by_base[symbol] for symbol in self.exclude}
         if not ids:
-            raise RuntimeError("trade_symbols is empty")
-        if missing:
-            raise RuntimeError(f"trade_symbols not loaded: {','.join(missing)}")
+            raise RuntimeError("trade_symbols is empty after exclude_symbols")
         self.trade_ids = ids
 
     # 为下一次 funding 注册一次性 clock alert。

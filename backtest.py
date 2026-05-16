@@ -8,10 +8,12 @@ from nautilus_trader.model.enums import OmsType
 from nautilus_trader.model.identifiers import Venue
 from nautilus_trader.model.objects import Money
 from nautilus_trader.persistence.catalog import ParquetDataCatalog
+import pandas as pd
 
 from utils.config_loader import ROOT
 from utils.binance_clients import BinanceConfigBuilder
 from utils.config_loader import load_settings
+from utils.config_loader import normalize_market
 from utils.market_data import MarketDataStore
 from utils.report_writer import prepare_report_dir
 from utils.report_writer import print_backtest_summary
@@ -22,8 +24,33 @@ from utils.runtime_ids import release_run
 from utils.strategy_factory import build_strategy
 
 
+# tick parquet 回测直接从数据推导市场，避免维护巨大的 markets 列表。
+def prepare_tick_backtest(settings: dict) -> None:
+    tick_path = settings["backtest"].get("tick_data_path")
+    if not tick_path:
+        return
+    df = pd.read_parquet(ROOT / tick_path, columns=["symbol"])
+    symbols = sorted({
+        str(symbol)
+        for symbol in df["symbol"].dropna().unique()
+        if str(symbol).isascii() and str(symbol).endswith("USDT")
+    })
+    settings["markets"] = [
+        normalize_market(
+            {
+                **settings["market_defaults"],
+                "symbol": f"{symbol[:-4]}/USDT",
+            },
+            settings,
+        )
+        for symbol in symbols
+    ]
+    settings["markets_all"] = False
+
+
 # 为当前 set 创建一个新的 NT 回测引擎。
 def build_backtest_engine(settings: dict) -> BacktestEngine:
+    prepare_tick_backtest(settings)
     binance = BinanceConfigBuilder(settings)
     store = MarketDataStore(settings)
 
@@ -43,7 +70,11 @@ def build_backtest_engine(settings: dict) -> BacktestEngine:
         base_currency=None,
         starting_balances=[Money.from_str(settings["backtest"]["starting_balance"])],
     )
-    if "tick_catalog" in settings["backtest"]:
+    if "tick_data_path" in settings["backtest"]:
+        for instrument in store.factory.instruments():
+            engine.add_instrument(instrument)
+        engine.add_data(store.load_trade_ticks(ROOT / settings["backtest"]["tick_data_path"]))
+    elif "tick_catalog" in settings["backtest"]:
         catalog_path = ROOT / settings["backtest"]["tick_catalog"]
         catalog = ParquetDataCatalog(str(catalog_path))
         ids = [str(store.factory.instrument_id(market)) for market in store.markets]

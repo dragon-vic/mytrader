@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,11 @@ from nautilus_trader.adapters.binance.common.urls import get_http_base_url
 from nautilus_trader.adapters.binance.http.client import BinanceHttpClient
 from nautilus_trader.adapters.binance.http.market import BinanceMarketHttpAPI
 from nautilus_trader.common.component import LiveClock
+from nautilus_trader.model.data import TradeTick
+from nautilus_trader.model.enums import AggressorSide
+from nautilus_trader.model.identifiers import TradeId
+from nautilus_trader.model.objects import Price
+from nautilus_trader.model.objects import Quantity
 from nautilus_trader.persistence.wranglers import BarDataWrangler
 
 from utils.config_loader import ROOT
@@ -149,3 +155,32 @@ class MarketDataStore:
     # 读取指定市场的 CSV 并转成 NT Bar。
     def load_bars(self, market: dict[str, Any]):
         return self.ohlcv_to_bars(self.load_ohlcv(self.raw_ohlcv_path(market)), market)
+
+    # 从 trade tick parquet 构建 NT TradeTick。
+    def load_trade_ticks(self, path: Path) -> list[TradeTick]:
+        df = pd.read_parquet(
+            path,
+            columns=["symbol", "timestamp_ms", "price", "quantity", "buyer_maker", "trade_id"],
+        )
+        by_symbol = {
+            self.factory.raw_symbol(market): self.factory.instrument(market)
+            for market in self.markets
+        }
+        df = df[df["symbol"].isin(by_symbol)].sort_values(["timestamp_ms", "trade_id"])
+        ticks = []
+        for row in df.to_dict("records"):
+            instrument = by_symbol[row["symbol"]]
+            ts_ns = int(row["timestamp_ms"]) * 1_000_000
+            side = AggressorSide.SELLER if bool(row["buyer_maker"]) else AggressorSide.BUYER
+            ticks.append(
+                TradeTick(
+                    instrument_id=instrument.id,
+                    price=Price(Decimal(str(row["price"])), instrument.price_precision),
+                    size=Quantity(Decimal(str(row["quantity"])), instrument.size_precision),
+                    aggressor_side=side,
+                    trade_id=TradeId(str(row["trade_id"])),
+                    ts_event=ts_ns,
+                    ts_init=ts_ns,
+                ),
+            )
+        return ticks

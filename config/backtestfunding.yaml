@@ -1,19 +1,35 @@
 strategy:
   name: backtestfunding
   params:
-    trade_notional: "10"
-    min_rate_bps: "60"
-    whitelist_symbols: [AXS, BARD, CFG, COS, DRIFT, ENSO, KITE, LYN, RIVER, STEEM]
-    events_path: data/funding/bt_3m/funding_events_over30_3m_selected20_for_backtest.parquet
+    trade_notional: "1000"
+    min_rate_bps: "50"
+    trade_symbols: all
+    exclude_symbols: [LYN, BEAT, PIPPIN, RAVE, SOON, SENT, ORCA]
+    events_path: data/funding/all_6m/funding_all_6m.parquet
+    entry_before_ms: 500
+    exit_after_ms: 200
 
 backtest:
-  markets: [1000000BOB/USDT, AXS/USDT, BARD/USDT, CFG/USDT, COS/USDT,
-            DRIFT/USDT, ENJ/USDT, ENSO/USDT, GUA/USDT, KITE/USDT,
-            LYN/USDT, NOM/USDT, ORCA/USDT, POWER/USDT, RAVE/USDT,
-            RIVER/USDT, SAHARA/USDT, SIREN/USDT, SOON/USDT, STEEM/USDT]
-  tick_catalog: data/ticks/funding_bt/catalog_selected20
-  starting_balance: "100000 USDT"
+  markets: all
+  tick_data_path: data/ticks/funding_6m/events_abs30_tminus3_tplus3_agg_trades.parquet
+  starting_balance: "10000 USDT"
   account_type: MARGIN
   oms_type: NETTING
   log_level: WARNING
   log_bypass: true
+  instrument:
+    settlement_currency: USDT
+    is_inverse: false
+    price_precision: 7
+    size_precision: 3
+    price_increment: "0.0000001"
+    size_increment: "0.001"
+    multiplier: "1"
+    min_quantity: "0.001"
+    max_quantity: "100000000"
+    min_notional: "5"
+    max_price: "10000000"
+    margin_init: "1"
+    margin_maint: "1"
+    maker_fee: "0.0002"
+    taker_fee: "0.0005"

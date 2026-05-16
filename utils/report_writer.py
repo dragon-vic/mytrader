@@ -375,8 +375,9 @@ def build_backtest_overview_table(payload: dict[str, Any], settings: dict[str, A
 
 # 用 NT 回测结果组装总体概览行。
 def backtest_overview_rows(payload: dict[str, Any], settings: dict[str, Any]) -> list[tuple[str, str]]:
+    output_dir = run_reports_dir(settings, "backtest")
     markets = settings["markets"]
-    symbols = "all" if settings.get("markets_all") else ", ".join(market["instrument_symbol"] for market in markets)
+    symbols = market_symbols(settings, "backtest")
     timeframes = ", ".join(sorted({market["timeframe"] for market in markets}))
     stats_pnls = payload.get("stats_pnls", {})
     currency = next(iter(stats_pnls), "")
@@ -386,7 +387,8 @@ def backtest_overview_rows(payload: dict[str, Any], settings: dict[str, Any]) ->
     return [
         ("配置名", settings["project"]["config_name"]),
         ("策略名", settings["strategy"]["name"]),
-        ("标的", symbols),
+        ("markets", symbols),
+        ("实际成交", traded_symbols(output_dir)),
         ("K线周期", timeframes),
         ("回测开始", format_timestamp_ns(payload.get("backtest_start"))),
         ("回测结束", format_timestamp_ns(payload.get("backtest_end"))),
@@ -421,7 +423,7 @@ def build_live_overview_table(settings: dict[str, Any], output_dir: Path) -> Tab
 # 用 live/testnet 已落盘报告组装总体概览行。
 def live_overview_rows(settings: dict[str, Any], output_dir: Path) -> list[tuple[str, str]]:
     markets = settings["markets"]
-    symbols = "all" if settings.get("markets_all") else ", ".join(market["instrument_symbol"] for market in markets)
+    symbols = market_symbols(settings, "live")
     orders = read_report_csv(output_dir, "orders.csv")
     positions = read_report_csv(output_dir, POSITIONS_FILE)
     return [
@@ -429,11 +431,39 @@ def live_overview_rows(settings: dict[str, Any], output_dir: Path) -> list[tuple
         ("策略名", settings["strategy"]["name"]),
         ("运行模式", settings["mode"]),
         ("报告目录", output_dir.name),
-        ("标的", symbols),
+        ("markets", symbols),
+        ("实际成交", traded_symbols(output_dir)),
         ("生成时间", datetime.now(LOCAL_TZ).strftime("%Y-%m-%d %H:%M:%S")),
         ("订单数", format_int(len(orders))),
         ("持仓数", format_int(len(positions))),
     ]
+
+
+# 总览里按 yaml 写法显示标的；markets: all 不展开成长列表。
+def market_symbols(settings: dict[str, Any], run_type: str) -> str:
+    if settings.get(run_type, {}).get("markets") == "all" or settings.get("markets_all"):
+        return "all"
+    return ", ".join(market["instrument_symbol"] for market in settings["markets"])
+
+
+# 从报告里提取真正有成交的交易对。
+def traded_symbols(output_dir: Path) -> str:
+    positions = read_report_csv(output_dir, POSITIONS_FILE)
+    if not positions.empty and "标的" in positions.columns:
+        symbols = sorted({short_symbol(value) for value in positions["标的"].dropna()})
+        return ", ".join(symbols) if symbols else "无"
+
+    orders = read_report_csv(output_dir, "orders.csv")
+    if orders.empty or "标的" not in orders.columns or "已成交数量" not in orders.columns:
+        return "无"
+    qty = pd.to_numeric(orders["已成交数量"], errors="coerce").fillna(0)
+    symbols = sorted({short_symbol(value) for value in orders.loc[qty > 0, "标的"].dropna()})
+    return ", ".join(symbols) if symbols else "无"
+
+
+def short_symbol(value: Any) -> str:
+    text = str(value)
+    return text.split(".")[0].replace("USDT-PERP", "")
 
 
 # 从持仓汇总表组装交易统计表。
