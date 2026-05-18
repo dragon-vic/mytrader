@@ -114,6 +114,15 @@ def run(config_name: str, mode: str) -> None:
         live.main(config_name, mode=mode)
 
 
+def show_backtest_running(config_name: str) -> None:
+    if os.name != "nt":
+        return
+    clear_screen()
+    print(f"配置：{config_name}")
+    print("回测中...")
+    sys.stdout.flush()
+
+
 def main() -> None:
     if len(sys.argv) == 3:
         run(sys.argv[1], parse_mode(sys.argv[2]))
@@ -149,6 +158,8 @@ def main() -> None:
             if confirm is None:
                 continue
 
+        if mode == "backtest":
+            show_backtest_running(selected_config)
         run(selected_config, mode)
         return
 

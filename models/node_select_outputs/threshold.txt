@@ -1,0 +1,3 @@
+horizon_ms=1000
+min_rate_bps=30.00
+threshold=7.5000

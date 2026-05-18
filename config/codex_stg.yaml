@@ -1,18 +1,15 @@
 strategy:
-  name: backtestfunding
+  name: codex_stg
   params:
+    signal_path: data/signal/codex_stg/CODEX_STG-SIGNAL-20260301.parquet
     trade_notional: "1000"
-    min_rate_bps: "50"
-    trade_symbols: all
-    exclude_symbols: [LYN, BEAT, PIPPIN, RAVE, SOON, SENT, ORCA]
-    events_path: data/funding/ALL-USDT-PERP-FUNDING-20250101.parquet
-    entry_before_ms: 500
-    exit_after_ms: 1000
+    min_score_bps: "10"
+    close_positions_on_stop: true
 
 backtest:
   markets: all
   tick_data_path: data/tick/event/ALL-USDT-PERP-AGGTRADE-EVENT-ABS30-20250101.parquet
-  starting_balance: "1000 USDT"
+  starting_balance: "10000 USDT"
   account_type: MARGIN
   oms_type: NETTING
   log_level: WARNING
