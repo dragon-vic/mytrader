@@ -15,15 +15,12 @@ from nautilus_trader.config import StrategyConfig
 from nautilus_trader.model.data import BarType
 from nautilus_trader.model.enums import OrderSide
 from nautilus_trader.model.enums import TimeInForce
-from nautilus_trader.model.events import AccountState
 from nautilus_trader.model.events import OrderFilled
 from nautilus_trader.model.events import OrderRejected
 from nautilus_trader.model.identifiers import ClientOrderId
 from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.model.instruments import Instrument
 from nautilus_trader.trading.strategy import Strategy
-
-from utils.arguments import EVENT_ACCOUNT_TOPIC
 
 
 class MaxfundingConfig(StrategyConfig, frozen=True):
@@ -81,8 +78,6 @@ class Maxfunding(Strategy):
         self.order_map: dict[ClientOrderId, InstrumentId] = {}
         self.chosen_id: InstrumentId | None = None
         self.had_order = False
-        self.post_account_count = 0
-        self.funding_logged = False
         self.log_path = Path(config.event_log_path)
         use_proxy = platform.system() == "Windows" and config.proxy_url
         self.proxies = {"http": config.proxy_url, "https": config.proxy_url} if use_proxy else None
@@ -107,7 +102,6 @@ class Maxfunding(Strategy):
         self._load_ins()
         self._load_lists()
         self._init_log()
-        self.msgbus.subscribe(EVENT_ACCOUNT_TOPIC, self._on_account)
 
         self._schedule_next()
 
@@ -209,8 +203,6 @@ class Maxfunding(Strategy):
             self.chosen_id = ins_id
             self.submit_order(order)
             self.had_order = True
-            self.post_account_count = 0
-            self.funding_logged = False
             self.log.info(
                 f"交易模式，候选{len(self.ins_map)}个，选择{self._base(ins_id)}，"
                 f"费率{self._bps(row['rate'])}bps"
@@ -226,23 +218,11 @@ class Maxfunding(Strategy):
             for ins_id in sorted(self.open_ids, key=str):
                 self.close_all_positions(ins_id)
                 close_cnt += 1
-                close_cnt += self._close_btc_for_test()
             self.close_done = True
             self.log.info(
                 f"交易模式，平仓{close_cnt}个，候选{len(self.ins_map)}个"
             )
             self._write_trade(close_cnt)
-
-    # 临时测试：准点一起平 BTC，用于观察大币是否也有订单创建延迟。
-    def _close_btc_for_test(self) -> int:
-        eight_hour_ns = 8 * 60 * 60 * 1_000_000_000
-        if self.fund_ns % eight_hour_ns != 0:
-            return 0
-        for ins_id in self.ins:
-            if self._base(ins_id) == "BNB":
-                self.close_all_positions(ins_id)
-                return 1
-        return 0
 
     # t+n 再拉一次全量实际资金费率，用于观察分析。
     def _post_funding(self) -> None:
@@ -269,17 +249,6 @@ class Maxfunding(Strategy):
         self._reset_closed_state()
         self._schedule_next()
 
-    # t 后第二次账户事件视为本轮资金费已到账，只记录不参与决策。
-    def _on_account(self, event: AccountState) -> None:
-        if not self.had_order:
-            return
-        if not (self.fund_ns <= event.ts_event <= self.fund_ns + 10_000_000_000):
-            return
-        self.post_account_count += 1
-        if self.post_account_count == 2 and not self.funding_logged:
-            self.funding_logged = True
-            self.log.info("收到资金费账户事件")
-
     # 成交后才记录待平仓 instrument。
     def on_order_filled(self, event: OrderFilled) -> None:
         ins_id = self.order_map.pop(event.client_order_id, None)
@@ -293,7 +262,6 @@ class Maxfunding(Strategy):
             self.log.warning(f"订单被拒，交易对{self._base(ins_id)}，原因{event.reason}")
 
     def on_stop(self) -> None:
-        self.msgbus.unsubscribe(EVENT_ACCOUNT_TOPIC, self._on_account)
         names = set(self.clock.timer_names)
         for kind in self.TIMERS:
             name = f"{kind}:{self.fund_ns}"
@@ -617,8 +585,6 @@ class Maxfunding(Strategy):
         self.order_map.clear()
         self.chosen_id = None
         self.had_order = False
-        self.post_account_count = 0
-        self.funding_logged = False
         self.entry_done = False
         self.sent_done = False
         self.close_done = False
@@ -630,8 +596,6 @@ class Maxfunding(Strategy):
         self.open_ids = {ins_id for ins_id in self.open_ids if not self.portfolio.is_flat(ins_id)}
         self.chosen_id = next(iter(self.open_ids), None)
         self.had_order = False
-        self.post_account_count = 0
-        self.funding_logged = False
         self.entry_done = False
         self.sent_done = False
         self.close_done = False

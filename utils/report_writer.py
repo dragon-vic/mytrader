@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import shutil
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
@@ -15,9 +14,7 @@ from rich.table import Table
 
 from utils.arguments import LIVE_LOG_START_MARKER
 from utils.arguments import LIVE_LOG_STOP_MARKER
-from utils.arguments import LIVE_RESULT_FILES
 from utils.arguments import LOGS_DIR
-from utils.arguments import OBSOLETE_REPORT_FILES
 from utils.arguments import POSITIONS_FILE
 from utils.arguments import REPORT_COLUMNS
 from utils.arguments import REPORT_FILES
@@ -65,13 +62,11 @@ def final_live_log_path(settings: dict[str, Any]) -> Path:
     return live_logs_dir() / f"{settings['project']['config_name']}-{settings['mode']}-{end_time}.log"
 
 
-# 每次运行前清空当前 set 的报告目录，避免旧文件混进新结果。
+# 创建当前运行的报告目录；每次运行使用新目录，不再清理旧文件。
 def prepare_report_dir(settings: dict[str, Any], run_type: str) -> Path:
     reports_root = (ROOT / settings["project"]["reports_dir"]).resolve()
     output_dir = run_reports_dir(settings, run_type).resolve()
     output_dir.relative_to(reports_root)
-    if output_dir.exists():
-        shutil.rmtree(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
 
@@ -83,43 +78,17 @@ def report_columns(name: str, df: pd.DataFrame) -> pd.DataFrame:
 
 
 class TraderReportWriter:
-    def __init__(self, output_dir: Path, clear_files: tuple[str, ...] = ()) -> None:
+    def __init__(self, output_dir: Path) -> None:
         self.output_dir = output_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.clear_files(clear_files)
 
     # 从配置创建当前运行类型的报告整理器。
     @classmethod
     def from_settings(cls, settings: dict[str, Any], run_type: str):
-        clear_files = (*LIVE_RESULT_FILES, *OBSOLETE_REPORT_FILES) if run_type == "live" else ()
-        return cls(run_reports_dir(settings, run_type), clear_files=clear_files)
-
-    # 清理本次运行会重新生成或已经废弃的报告文件。
-    def clear_files(self, filenames: tuple[str, ...]) -> None:
-        for filename in filenames:
-            path = self.output_dir / filename
-            if path.exists():
-                path.unlink()
+        return cls(run_reports_dir(settings, run_type))
 
     # 保存 NT trader 在运行结束后生成的订单和持仓结果。
     def write_final_reports(self, trader, names=("orders", "positions")) -> None:
-        self.clear_files(
-            (
-                "orders.csv",
-                "orders_aggregate.csv",
-                "fills.csv",
-                "positions.csv",
-                "positions_aggregate.csv",
-                "accounts_aggregate.csv",
-                "result.csv",
-                "position_events.csv",
-                "live_report.csv",
-                "live_report_aggregate.csv",
-                "summary.md",
-                "summary_aggregate.md",
-            )
-        )
-
         report_fns = {
             "orders": trader.generate_orders_report,
             "positions": trader.generate_positions_report,
@@ -135,7 +104,6 @@ class TraderReportWriter:
                     self.write_csv(self.filter_nonzero_accounts(reports[name]), REPORT_FILES[name])
         self.write_position_events(trader)
         self.write_clean_reports(reports.get("positions", pd.DataFrame()))
-        self.localize_runtime_csv("account_changes.csv")
         self.localize_runtime_csv("funding_fees.csv")
 
     # 从 NT cache 的全部账户生成最终账户快照。
@@ -330,21 +298,18 @@ def print_live_summary(settings: dict[str, Any]) -> None:
 
 # 总览、交易统计、订单统计并排显示；标的统计较宽，单独放下面。
 def print_summary_tables(console: Console, overview: Table, output_dir: Path, elapsed_days: float) -> None:
-    top_tables = [
-        table
-        for table in (
-            overview,
-            build_trade_stats_table(output_dir, elapsed_days),
-            build_order_stats_table(output_dir),
+    console.print(
+        Columns(
+            (
+                overview,
+                build_trade_stats_table(output_dir, elapsed_days),
+                build_order_stats_table(output_dir),
+            ),
+            equal=True,
+            expand=True,
         )
-        if table is not None
-    ]
-    if top_tables:
-        console.print(Columns(top_tables, equal=True, expand=True))
-
-    instrument = build_instrument_stats_table(output_dir)
-    if instrument is not None:
-        console.print(instrument)
+    )
+    console.print(build_instrument_stats_table(output_dir))
 
 
 # 保存终端同款表格到 markdown 摘要。
@@ -469,8 +434,6 @@ def short_symbol(value: Any) -> str:
 # 从持仓汇总表组装交易统计表。
 def build_trade_stats_table(output_dir: Path, elapsed_days: float) -> Table | None:
     rows = trade_stats_rows(output_dir, elapsed_days)
-    if not rows:
-        return None
 
     table = Table(title="交易统计")
     table.add_column("指标")
@@ -484,7 +447,18 @@ def build_trade_stats_table(output_dir: Path, elapsed_days: float) -> Table | No
 def trade_stats_rows(output_dir: Path, elapsed_days: float) -> list[tuple[str, str]]:
     positions = read_report_csv(output_dir, POSITIONS_FILE)
     if positions.empty:
-        return []
+        return [
+            ("已完成交易数", "0"),
+            ("多单数量", "0"),
+            ("空单数量", "0"),
+            ("平均每日交易数", "0"),
+            ("胜率", "0%"),
+            ("净收益", "0"),
+            ("平均单笔收益", "0"),
+            ("总手续费", "0"),
+            ("平均持仓分钟", "0"),
+            ("最长持仓分钟", "0"),
+        ]
 
     pnl = positions["已实现盈亏"].map(money_to_float)
     fees = positions["手续费合计"].map(commissions_to_float)
@@ -515,8 +489,6 @@ def trade_stats_rows(output_dir: Path, elapsed_days: float) -> list[tuple[str, s
 # 从持仓汇总表按标的聚合统计。
 def build_instrument_stats_table(output_dir: Path) -> Table | None:
     rows = instrument_stats_rows(output_dir)
-    if not rows:
-        return None
 
     table = Table(title="标的统计")
     for column, justify in (
@@ -541,7 +513,7 @@ def build_instrument_stats_table(output_dir: Path) -> Table | None:
 def instrument_stats_rows(output_dir: Path) -> list[tuple[str, ...]]:
     positions = read_report_csv(output_dir, POSITIONS_FILE)
     if positions.empty:
-        return []
+        return [("无成交", "0", "0%", "0", "0%", "0", "0", "0", "0")]
 
     data = positions.copy()
     data["净收益"] = data["已实现盈亏"].map(money_to_float)
@@ -568,8 +540,6 @@ def instrument_stats_rows(output_dir: Path) -> list[tuple[str, ...]]:
 # 从订单和成交表组装执行统计表。
 def build_order_stats_table(output_dir: Path) -> Table | None:
     rows = order_stats_rows(output_dir)
-    if not rows:
-        return None
 
     table = Table(title="订单执行统计")
     table.add_column("指标")
@@ -583,7 +553,13 @@ def build_order_stats_table(output_dir: Path) -> Table | None:
 def order_stats_rows(output_dir: Path) -> list[tuple[str, str]]:
     orders = read_report_csv(output_dir, "orders.csv")
     if orders.empty:
-        return []
+        return [
+            ("订单总数", "0"),
+            ("有成交订单数", "0"),
+            ("已完成订单数", "0"),
+            ("已取消订单数", "0"),
+            ("已拒绝订单数", "0"),
+        ]
     filled_qty = pd.to_numeric(orders["已成交数量"], errors="coerce").fillna(0)
     return [
         ("订单总数", format_int(len(orders))),

@@ -44,7 +44,6 @@ TIMEFRAME_UNITS = {"s": "SECOND", "m": "MINUTE", "h": "HOUR", "d": "DAY"}
 # 报告文件名。
 ORDERS_FILE = "orders.csv"
 POSITIONS_FILE = "positions.csv"
-ACCOUNT_CHANGES_FILE = "account_changes.csv"
 POSITION_EVENTS_FILE = "position_events.csv"
 SUMMARY_FILE = "summary.md"
 
@@ -55,7 +54,6 @@ REPORT_FILES = {
 LIVE_RESULT_FILES = (
     ORDERS_FILE,
     POSITIONS_FILE,
-    ACCOUNT_CHANGES_FILE,
     POSITION_EVENTS_FILE,
     "orders_aggregate.csv",
     "positions_aggregate.csv",
@@ -135,22 +133,6 @@ REPORT_COLUMNS = {
         "position_id",
     ],
 }
-
-ACCOUNT_COLUMNS = [
-    "ts_event",
-    "currency",
-    "total",
-    "free",
-    "locked",
-    "event_type",
-    "info_type",
-    "info_reason",
-    "info",
-    "account_id",
-    "account_type",
-    "base_currency",
-    "is_reported",
-]
 
 POSITION_COLUMNS = [
     "ts_event",

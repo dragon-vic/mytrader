@@ -120,7 +120,7 @@ def build_live_node(settings: dict) -> tuple[TradingNode, TraderReportWriter]:
 
     report_writer = TraderReportWriter.from_settings(settings, "live")
     if DATA_RECORDER_MODULE in modules:
-        node.trader.add_actor(DataRecorder(DataRecorderConfig(output_dir=str(output_dir))))
+        node.trader.add_actor(DataRecorder(DataRecorderConfig()))
     attach_node_stop_handler(node)
 
     node.build()
@@ -145,14 +145,16 @@ def main(config_name: str, mode: str | None = None) -> None:
     settings = resolve_live_mode(load_settings(config_name, mode=mode), mode)
     settings = claim_run(settings)
     node = None
+    report_writer = None
 
     try:
         node, report_writer = build_live_node(settings)
         run_live_node(node)
         report_writer.write_final_reports(node.trader)
-        print_live_summary(settings)
-        report_writer.write_clean_live_log(settings)
     finally:
         if node is not None:
             node.dispose()
+        if report_writer is not None:
+            report_writer.write_clean_live_log(settings)
+            print_live_summary(settings)
         release_run(settings)

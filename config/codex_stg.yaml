@@ -8,7 +8,7 @@ strategy:
 
 backtest:
   markets: all
-  tick_data_path: data/tick/event/ALL-USDT-PERP-AGGTRADE-EVENT-ABS30-20250101.parquet
+  tick_data_path: data/tick/event/ALL-FUNDING-EVENTS-20250101.parquet
   starting_balance: "10000 USDT"
   account_type: MARGIN
   oms_type: NETTING

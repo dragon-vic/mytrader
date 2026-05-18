@@ -18,8 +18,8 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 
 ROOT = Path(__file__).resolve().parents[1]
-FUNDING_PATH = ROOT / "data" / "funding" / "ALL-USDT-PERP-FUNDING-20250101.parquet"
-TICK_PATH = ROOT / "data" / "tick" / "event" / "ALL-USDT-PERP-AGGTRADE-EVENT-ABS30-20250101.parquet"
+FUNDING_PATH = ROOT / "data" / "funding" / "ALL-20250101.parquet"
+TICK_PATH = ROOT / "data" / "tick" / "event" / "ALL-FUNDING-EVENTS-20250101.parquet"
 OUT_DIR = ROOT / "models" / "funding_return_outputs"
 FEE_BPS = 8.0
 WINDOWS_MS = (500, 1000, 3000)
