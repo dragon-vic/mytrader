@@ -9,6 +9,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+from rich.columns import Columns
 from rich.console import Console
 from rich.table import Table
 
@@ -294,7 +295,7 @@ def print_backtest_summary(payload: dict[str, Any], settings: dict[str, Any]) ->
             ("交易统计", ("指标", "数值"), trade_stats_rows(output_dir, elapsed_days)),
             (
                 "标的统计",
-                ("标的", "交易数", "胜率", "净收益", "平均收益", "最大盈利", "最大亏损", "手续费"),
+                ("标的", "交易数", "胜率", "净收益", "收益率", "平均收益", "最大盈利", "最大亏损", "手续费"),
                 instrument_stats_rows(output_dir),
             ),
             ("订单执行统计", ("指标", "数值"), order_stats_rows(output_dir)),
@@ -302,8 +303,7 @@ def print_backtest_summary(payload: dict[str, Any], settings: dict[str, Any]) ->
         output_dir,
     )
     console = Console()
-    console.print(build_backtest_overview_table(payload, settings))
-    print_common_tables(console, output_dir, elapsed_days)
+    print_summary_tables(console, build_backtest_overview_table(payload, settings), output_dir, elapsed_days)
 
 
 # 打印 live/testnet 结束摘要。
@@ -317,7 +317,7 @@ def print_live_summary(settings: dict[str, Any]) -> None:
             ("交易统计", ("指标", "数值"), trade_stats_rows(output_dir, elapsed_days)),
             (
                 "标的统计",
-                ("标的", "交易数", "胜率", "净收益", "平均收益", "最大盈利", "最大亏损", "手续费"),
+                ("标的", "交易数", "胜率", "净收益", "收益率", "平均收益", "最大盈利", "最大亏损", "手续费"),
                 instrument_stats_rows(output_dir),
             ),
             ("订单执行统计", ("指标", "数值"), order_stats_rows(output_dir)),
@@ -325,19 +325,26 @@ def print_live_summary(settings: dict[str, Any]) -> None:
         output_dir,
     )
     console = Console()
-    console.print(build_live_overview_table(settings, output_dir))
-    print_common_tables(console, output_dir, elapsed_days)
+    print_summary_tables(console, build_live_overview_table(settings, output_dir), output_dir, elapsed_days)
 
 
-# 打印交易、标的和订单三张公共表。
-def print_common_tables(console: Console, output_dir: Path, elapsed_days: float) -> None:
-    for table in (
-        build_trade_stats_table(output_dir, elapsed_days),
-        build_instrument_stats_table(output_dir),
-        build_order_stats_table(output_dir),
-    ):
-        if table is not None:
-            console.print(table)
+# 总览、交易统计、订单统计并排显示；标的统计较宽，单独放下面。
+def print_summary_tables(console: Console, overview: Table, output_dir: Path, elapsed_days: float) -> None:
+    top_tables = [
+        table
+        for table in (
+            overview,
+            build_trade_stats_table(output_dir, elapsed_days),
+            build_order_stats_table(output_dir),
+        )
+        if table is not None
+    ]
+    if top_tables:
+        console.print(Columns(top_tables, equal=True, expand=True))
+
+    instrument = build_instrument_stats_table(output_dir)
+    if instrument is not None:
+        console.print(instrument)
 
 
 # 保存终端同款表格到 markdown 摘要。
@@ -390,7 +397,7 @@ def backtest_overview_rows(payload: dict[str, Any], settings: dict[str, Any]) ->
         ("配置名", settings["project"]["config_name"]),
         ("策略名", settings["strategy"]["name"]),
         ("markets", symbols),
-        ("实际成交", traded_symbols(output_dir)),
+        ("交易标的", traded_symbol_count(output_dir)),
         ("K线周期", timeframes),
         ("回测开始", format_timestamp_ns(payload.get("backtest_start"))),
         ("回测结束", format_timestamp_ns(payload.get("backtest_end"))),
@@ -398,17 +405,11 @@ def backtest_overview_rows(payload: dict[str, Any], settings: dict[str, Any]) ->
         ("初始资金", settings["backtest"]["starting_balance"]),
         ("总收益", format_number(pnl_stats.get("PnL (total)"), currency)),
         ("总收益率", format_number(pnl_stats.get("PnL% (total)"), "%")),
-        ("胜率", format_percent(pnl_stats.get("Win Rate"))),
-        ("最大盈利单", format_number(pnl_stats.get("Max Winner"), currency)),
-        ("最大亏损单", format_number(pnl_stats.get("Max Loser"), currency)),
-        ("期望收益", format_number(pnl_stats.get("Expectancy"), currency)),
         ("盈利因子", format_number(return_stats.get("Profit Factor"))),
         ("Sharpe", format_number(return_stats.get("Sharpe Ratio (252 days)"))),
         ("Sortino", format_number(return_stats.get("Sortino Ratio (252 days)"))),
         ("迭代次数", format_int(payload.get("iterations"))),
         ("事件数", format_int(payload.get("total_events"))),
-        ("订单数", format_int(payload.get("total_orders"))),
-        ("持仓数", format_int(payload.get("total_positions"))),
     ]
 
 
@@ -434,33 +435,30 @@ def live_overview_rows(settings: dict[str, Any], output_dir: Path) -> list[tuple
         ("运行模式", settings["mode"]),
         ("报告目录", output_dir.name),
         ("markets", symbols),
-        ("实际成交", traded_symbols(output_dir)),
+        ("交易标的", traded_symbol_count(output_dir)),
         ("生成时间", datetime.now(LOCAL_TZ).strftime("%Y-%m-%d %H:%M:%S")),
-        ("订单数", format_int(len(orders))),
-        ("持仓数", format_int(len(positions))),
     ]
 
 
 # 总览里按 yaml 写法显示标的；markets: all 不展开成长列表。
 def market_symbols(settings: dict[str, Any], run_type: str) -> str:
-    if settings.get(run_type, {}).get("markets") == "all" or settings.get("markets_all"):
+    if settings.get("mode_markets") == "all" or settings.get(run_type, {}).get("markets") == "all" or settings.get("markets_all"):
         return "all"
     return ", ".join(market["instrument_symbol"] for market in settings["markets"])
 
 
 # 从报告里提取真正有成交的交易对。
-def traded_symbols(output_dir: Path) -> str:
-    positions = read_report_csv(output_dir, POSITIONS_FILE)
-    if not positions.empty and "标的" in positions.columns:
-        symbols = sorted({short_symbol(value) for value in positions["标的"].dropna()})
-        return ", ".join(symbols) if symbols else "无"
-
+def traded_symbol_count(output_dir: Path) -> str:
     orders = read_report_csv(output_dir, "orders.csv")
-    if orders.empty or "标的" not in orders.columns or "已成交数量" not in orders.columns:
-        return "无"
-    qty = pd.to_numeric(orders["已成交数量"], errors="coerce").fillna(0)
-    symbols = sorted({short_symbol(value) for value in orders.loc[qty > 0, "标的"].dropna()})
-    return ", ".join(symbols) if symbols else "无"
+    symbols: set[str] = set()
+    if not orders.empty and "标的" in orders.columns and "已成交数量" in orders.columns:
+        qty = pd.to_numeric(orders["已成交数量"], errors="coerce").fillna(0)
+        symbols = {short_symbol(value) for value in orders.loc[qty > 0, "标的"].dropna()}
+    if not symbols:
+        positions = read_report_csv(output_dir, POSITIONS_FILE)
+        if not positions.empty and "标的" in positions.columns:
+            symbols = {short_symbol(value) for value in positions["标的"].dropna()}
+    return f"{len(symbols)}个"
 
 
 def short_symbol(value: Any) -> str:
@@ -526,6 +524,7 @@ def build_instrument_stats_table(output_dir: Path) -> Table | None:
         ("交易数", "right"),
         ("胜率", "right"),
         ("净收益", "right"),
+        ("收益率", "right"),
         ("平均收益", "right"),
         ("最大盈利", "right"),
         ("最大亏损", "right"),
@@ -547,20 +546,23 @@ def instrument_stats_rows(output_dir: Path) -> list[tuple[str, ...]]:
     data = positions.copy()
     data["净收益"] = data["已实现盈亏"].map(money_to_float)
     data["手续费"] = data["手续费合计"].map(commissions_to_float)
+    data["开仓名义额"] = pd.to_numeric(data["数量"], errors="coerce") * pd.to_numeric(data["开仓均价"], errors="coerce")
     rows = []
     for instrument, group in data.groupby("标的"):
         pnl = group["净收益"]
+        notional = group["开仓名义额"].sum()
         rows.append((
             str(instrument),
             format_int(len(group)),
             format_percent((pnl > 0).mean()),
             format_number(pnl.sum()),
+            format_percent(pnl.sum() / notional if notional else 0),
             format_number(pnl.mean()),
             format_number(pnl.max()),
             format_number(pnl.min()),
             format_number(group["手续费"].sum()),
         ))
-    return rows
+    return sorted(rows, key=lambda row: money_to_float(row[3]), reverse=True)
 
 
 # 从订单和成交表组装执行统计表。

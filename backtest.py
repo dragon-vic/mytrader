@@ -94,6 +94,7 @@ def build_backtest_engine(settings: dict) -> BacktestEngine:
 # 把 NT 生成的报告保存到当前 set 对应的目录。
 def write_reports(engine: BacktestEngine, result, settings: dict) -> None:
     payload = write_backtest_result(result, settings)
+    print("生成报告...")
     write_trader_reports(engine.trader, settings, "backtest")
     print_backtest_summary(payload, settings)
 

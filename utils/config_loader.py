@@ -42,6 +42,7 @@ def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]
 def select_mode_markets(settings: dict[str, Any], mode: str | None) -> None:
     section = "live" if mode in ("testnet", "live") else "backtest"
     settings["markets"] = settings[section]["markets"]
+    settings["mode_markets"] = settings[section]["markets"]
 
 
 # 把 snake_case 名字转成策略类名。
