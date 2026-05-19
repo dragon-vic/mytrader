@@ -1,3 +1,3 @@
-horizon_ms=1000
-min_rate_bps=30.00
-threshold=7.5000
+horizon_ms=500 min_rate_bps=30.00 threshold=12.8477
+horizon_ms=1000 min_rate_bps=30.00 threshold=11.1221
+horizon_ms=3000 min_rate_bps=30.00 threshold=8.6330

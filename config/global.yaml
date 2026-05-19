@@ -5,7 +5,8 @@ market_defaults:
 # 常改：live 运行参数。
 live:
   markets: all                       # live 加载市场；all 表示全市场，也可在策略 yaml 覆盖成列表
-  modules: [data_recorder]           # 加入 live node 的可选组件；可选 data_recorder/external_signal
+  record_data: true                  # 用 PyO3 DataRecorder 从事件流逐行落盘 orders/fills/position_events
+  modules: []                        # 预留给额外 actor；默认 recorder 由 live.py 挂载
   account_type: USDT_FUTURES         # Binance 账户类型；当前 live 使用 USDT_FUTURES
   log_level: INFO                    # 终端日志级别；常用 DEBUG/INFO/WARNING/ERROR
   log_level_file: INFO               # 原始日志文件级别；常用 DEBUG/INFO/WARNING/ERROR
@@ -65,9 +66,8 @@ project:
   data_dir: data                     # 数据目录
   reports_dir: reports               # 报告目录
 
-# 全局：交易所和代理，和具体策略无关。
+# 全局：交易平台和代理，exchange.name 由 venue 推导。
 exchange:
-  name: binance                      # 交易所名称；当前代码只接 Binance
   venue: BINANCE                     # NT venue 标识；需与 adapter 使用的 venue 一致
   proxy_url: http://127.0.0.1:7890   # Windows 下 HTTP/WS 代理；Linux 运行时会忽略
 

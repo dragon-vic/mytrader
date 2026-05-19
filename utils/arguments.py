@@ -11,10 +11,6 @@ RUN_MODES = ("backtest", "testnet", "live")
 
 # 项目默认入口参数。
 DEFAULT_CONFIG_NAME = "maxfunding"
-DEFAULT_LIVE_LOG_FILE = "live_raw"
-LOGS_DIR = "logs"
-LIVE_LOG_START_MARKER = "TradingNode: RUNNING"
-LIVE_LOG_STOP_MARKER = "TradingNode: STOPPING"
 
 # NT msgbus topic。
 NODE_STOP_TOPIC = "controls.node.stop"
@@ -43,6 +39,7 @@ TIMEFRAME_UNITS = {"s": "SECOND", "m": "MINUTE", "h": "HOUR", "d": "DAY"}
 
 # 报告文件名。
 ORDERS_FILE = "orders.csv"
+FILLS_FILE = "fills.csv"
 POSITIONS_FILE = "positions.csv"
 POSITION_EVENTS_FILE = "position_events.csv"
 SUMMARY_FILE = "summary.md"
@@ -103,6 +100,22 @@ REPORT_COLUMNS = {
         "position_id",
         "opening_order_id",
         "closing_order_id",
+    ],
+    "fills": [
+        "ts_event",
+        "instrument_id",
+        "order_side",
+        "last_qty",
+        "last_px",
+        "commission",
+        "liquidity_side",
+        "order_type",
+        "trade_id",
+        "client_order_id",
+        "venue_order_id",
+        "position_id",
+        "account_id",
+        "strategy_id",
     ],
     "accounts": [
         "ts_event",

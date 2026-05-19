@@ -20,17 +20,21 @@ from sklearn.preprocessing import StandardScaler
 ROOT = Path(__file__).resolve().parents[1]
 FEATURE_PATH = ROOT / "models" / "funding_return_outputs" / "event_features.parquet"
 OUT_DIR = ROOT / "models" / "node_select_outputs"
-HORIZON_MS = 1000
+HORIZONS_MS = (500, 1000, 3000)
 MIN_RATE_BPS = 30.0
+TEST_START = pd.Timestamp("2026-01-01T00:00:00Z")
 
 
 def split_data(df: pd.DataFrame) -> tuple[pd.Timestamp, pd.Timestamp]:
-    times = df["funding_utc"].sort_values().reset_index(drop=True)
-    return times.iloc[int(len(times) * 0.70)], times.iloc[int(len(times) * 0.85)]
+    times = df[df["funding_utc"] < TEST_START]["funding_utc"].sort_values().reset_index(drop=True)
+    if times.empty:
+        raise RuntimeError(f"no training data before {TEST_START}")
+    return times.iloc[int(len(times) * 0.85)], TEST_START
 
 
 def feature_cols(ms: int) -> tuple[list[str], list[str]]:
     numeric = [
+        "rate_bps",
         "abs_rate_bps",
         "interval_h",
         "rank_abs",
@@ -42,18 +46,15 @@ def feature_cols(ms: int) -> tuple[list[str], list[str]]:
         "candidate_n",
         "candidate_abs_mean",
         "candidate_abs_max",
-        "log_usdt_pre",
-        "log_tick_pre",
-        "pre_cost_bps",
-        "pre_vol_bps",
-        "entry_err_ms",
+        "rate_bucket_ord",
+        "log_liquidity_usdt",
+        "liquidity_bucket_ord",
         "symbol_hist_count",
         f"symbol_hist_mean_cost_{ms}ms",
         f"symbol_hist_p75_cost_{ms}ms",
-        "is_bad_symbol",
         "is_negative_funding",
     ]
-    categorical = ["base", "rate_bucket", "node_type", "side"]
+    categorical = ["liquidity_bucket", "node_type", "side"]
     return numeric, categorical
 
 
@@ -159,6 +160,7 @@ def choose_threshold(nodes: pd.DataFrame) -> float:
 
 def node_stats(nodes: pd.DataFrame, threshold: float) -> dict[str, float]:
     chosen = nodes[nodes["pred_net"] >= threshold]
+    oracle = nodes[nodes["true_best_net"] > 0]["true_best_net"].sum()
     return {
         "nodes": int(len(nodes)),
         "trades": int(len(chosen)),
@@ -168,7 +170,7 @@ def node_stats(nodes: pd.DataFrame, threshold: float) -> dict[str, float]:
         "chosen_win_pct": float((chosen["actual_net"] > 0).mean() * 100.0) if len(chosen) else np.nan,
         "chosen_avg_bps": float(chosen["actual_net"].mean()) if len(chosen) else np.nan,
         "chosen_sum_bps": float(chosen["actual_net"].sum()),
-        "oracle_sum_bps": float(nodes["true_best_net"].sum()),
+        "oracle_sum_bps": float(oracle),
         "all_selected_sum_bps": float(nodes["actual_net"].sum()),
     }
 
@@ -182,15 +184,14 @@ def print_stats(name: str, stats: dict[str, float]) -> None:
     )
 
 
-def main() -> None:
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    df = load_frame(HORIZON_MS)
+def fit_horizon(ms: int) -> dict[str, object]:
+    df = load_frame(ms)
     train_end, valid_end = split_data(df)
     train = df[df["funding_utc"] < train_end].copy()
     valid = df[(df["funding_utc"] >= train_end) & (df["funding_utc"] < valid_end)].copy()
     test = df[df["funding_utc"] >= valid_end].copy()
 
-    numeric, categorical = feature_cols(HORIZON_MS)
+    numeric, categorical = feature_cols(ms)
     x_train = model_frame(train, numeric, categorical)
     reg = make_reg(numeric, categorical)
     clf = make_clf(numeric, categorical)
@@ -203,7 +204,7 @@ def main() -> None:
 
     dump(
         {
-            "horizon_ms": HORIZON_MS,
+            "horizon_ms": ms,
             "min_rate_bps": MIN_RATE_BPS,
             "threshold": threshold,
             "train_end": train_end,
@@ -213,21 +214,44 @@ def main() -> None:
             "reg": reg,
             "clf": clf,
         },
-        OUT_DIR / "node_select_1000ms.joblib",
-    )
-    (OUT_DIR / "threshold.txt").write_text(
-        f"horizon_ms={HORIZON_MS}\nmin_rate_bps={MIN_RATE_BPS:.2f}\nthreshold={threshold:.4f}\n",
-        encoding="utf-8",
+        OUT_DIR / f"node_select_{ms}ms.joblib",
     )
 
-    print(f"train_events={len(train)} valid_events={len(valid)} test_events={len(test)}")
+    print(f"horizon_ms={ms} train_events={len(train)} valid_events={len(valid)} test_events={len(test)}")
     print(f"train_end={train_end} valid_end={valid_end} threshold={threshold:.2f}bps")
-    print_stats("valid", node_stats(valid_nodes, threshold))
-    print_stats("test", node_stats(test_nodes, threshold))
+    valid_stats = node_stats(valid_nodes, threshold)
+    test_stats = node_stats(test_nodes, threshold)
+    print_stats("valid", valid_stats)
+    print_stats("test", test_stats)
     one = test_nodes[test_nodes["candidate_n"] == 1]
     many = test_nodes[test_nodes["candidate_n"] > 1]
     print_stats("test_candidate_1", node_stats(one, threshold))
     print_stats("test_candidate_gt1", node_stats(many, threshold))
+    return {
+        "horizon_ms": ms,
+        "threshold": threshold,
+        "train_events": len(train),
+        "valid_events": len(valid),
+        "test_events": len(test),
+        "train_end": train_end,
+        "valid_end": valid_end,
+        **{f"valid_{k}": v for k, v in valid_stats.items()},
+        **{f"test_{k}": v for k, v in test_stats.items()},
+    }
+
+
+def main() -> None:
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    rows = [fit_horizon(ms) for ms in HORIZONS_MS]
+    summary = pd.DataFrame(rows)
+    summary.to_parquet(OUT_DIR / "node_select_summary.parquet", index=False)
+    (OUT_DIR / "threshold.txt").write_text(
+        "\n".join(
+            f"horizon_ms={int(row.horizon_ms)} min_rate_bps={MIN_RATE_BPS:.2f} threshold={row.threshold:.4f}"
+            for row in summary.itertuples()
+        ) + "\n",
+        encoding="utf-8",
+    )
 
 
 if __name__ == "__main__":

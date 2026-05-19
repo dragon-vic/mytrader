@@ -1,32 +1,32 @@
 strategy:
-  name: maxfunding
+  name: xgbfunding
   modes: [testnet, live]
   params:
     trade_notional: "8"
-    min_rate_bps: "50"          # abs(rate) 超过该阈值才进入候选
-    # trade_symbols: [AXS, BARD, CFG, COS, DRIFT, ENSO, KITE, LYN, RIVER, STEEM]
+    min_rate_bps: "30"
     trade_symbols: all
     exclude_symbols: [LYN, BEAT, PIPPIN, RAVE, SOON, SENT, ORCA]
-    pre_sec: 2.5                  # t-3 预拉候选，t-2 覆盖
-    entry_sec: 1.5                # t-2 拉一次观察列表 rate/mark 快照
-    pre_deadline: 1             # t-2 最多拉 1 秒，超时保留 t-3 结果
-    entry_before: 0.5             # t-1 定时触发下单/冻结
-    exit_sec: 0.1               # t+0.5 平仓并写本轮交易记录
-    post_sec: 10                # t+10 拉全量实际 funding，用于分析并重置状态
+    pre_sec: 2.5
+    entry_sec: 1.5
+    pre_deadline: 1
+    entry_before: 0.5
+    exit_sec: 0.1
+    post_sec: 10
     api_url: https://fapi.binance.com
-    api_timeout: 0.8            # 快照超时，避免阻塞下单和平仓
+    api_timeout: 0.8
     proxy_url: http://127.0.0.1:7890
     stop_close: true
+    model_horizon_ms: 500
+    model_path: models/node_select_outputs/node_select_500ms.joblib
+    feature_path: models/funding_return_outputs/event_features.parquet
 
 exchange:
   venue: BINANCE
 
-# 常改：live 运行参数。
 live:
   markets: all
   strategy_log_level: INFO
 
-# 常改：回测账户参数；本策略主要用于 live 观察。
 backtest:
   markets: [1000000BOB/USDT, AXS/USDT, BARD/USDT, CFG/USDT, COS/USDT,
             DRIFT/USDT, ENJ/USDT, ENSO/USDT, GTC/USDT, GUA/USDT,

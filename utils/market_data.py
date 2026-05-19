@@ -7,31 +7,25 @@ from typing import Any
 
 import pandas as pd
 import requests
-from nautilus_trader.adapters.binance.common.enums import BinanceAccountType
-from nautilus_trader.adapters.binance.common.enums import BinanceEnvironment
-from nautilus_trader.adapters.binance.common.enums import BinanceKlineInterval
-from nautilus_trader.adapters.binance.common.urls import get_http_base_url
-from nautilus_trader.adapters.binance.http.client import BinanceHttpClient
-from nautilus_trader.adapters.binance.http.market import BinanceMarketHttpAPI
-from nautilus_trader.common.component import LiveClock
-from nautilus_trader.model.data import TradeTick
-from nautilus_trader.model.enums import AggressorSide
-from nautilus_trader.model.identifiers import TradeId
-from nautilus_trader.model.objects import Price
-from nautilus_trader.model.objects import Quantity
-from nautilus_trader.persistence.wranglers import BarDataWrangler
+from nautilus_trader.core.nautilus_pyo3 import AggressorSide
+from nautilus_trader.core.nautilus_pyo3 import Bar
+from nautilus_trader.core.nautilus_pyo3 import Price
+from nautilus_trader.core.nautilus_pyo3 import Quantity
+from nautilus_trader.core.nautilus_pyo3 import TradeId
+from nautilus_trader.core.nautilus_pyo3 import TradeTick
 
 from utils.config_loader import ROOT
 from utils.config_loader import proxy_url
 from utils.instrument_factory import InstrumentFactory
 
 
-# 把配置里的周期字符串转成 NT 的 Binance kline interval。
-def kline_interval(timeframe: str) -> BinanceKlineInterval:
-    for item in BinanceKlineInterval:
-        if item.value == timeframe:
-            return item
-    raise ValueError(f"Unsupported Binance timeframe: {timeframe}")
+# 把配置里的周期字符串转成 Binance REST interval。
+def kline_interval(timeframe: str) -> str:
+    unit = timeframe[-1]
+    value = timeframe[:-1]
+    if unit not in {"s", "m", "h", "d", "w", "M"}:
+        raise ValueError(f"Unsupported Binance timeframe: {timeframe}")
+    return f"{value}{unit}"
 
 
 # 管理当前 set 的行情拉取、CSV 路径和 NT bar 转换。
@@ -47,32 +41,32 @@ class MarketDataStore:
         filename = f"{market['exchange']}_{instrument}_{market['timeframe']}_ohlcv.csv"
         return ROOT / self.settings["project"]["data_dir"] / "raw" / filename
 
-    # 通过 NT 的 Binance adapter 异步拉取某个市场的 kline。
+    # 通过 Binance REST 拉取某个市场的 kline。
     async def fetch_ohlcv_async(self, market: dict[str, Any]) -> pd.DataFrame:
-        account_type = getattr(BinanceAccountType, self.settings["live"]["account_type"])
-        client = BinanceHttpClient(
-            clock=LiveClock(),
-            api_key=None,
-            api_secret=None,
-            base_url=get_http_base_url(account_type, BinanceEnvironment.LIVE, is_us=False),
-            proxy_url=proxy_url(self.settings),
-        )
         interval = kline_interval(market["timeframe"])
         limit = int(market["limit"])
         end_time = None
         klines = []
+        url = "https://fapi.binance.com/fapi/v1/klines"
+        proxies = {"http": proxy_url(self.settings), "https": proxy_url(self.settings)} if proxy_url(self.settings) else None
 
         for _ in range(int(market.get("batches", 1))):
-            batch = await BinanceMarketHttpAPI(client=client, account_type=account_type).query_klines(
-                symbol=self.factory.raw_symbol(market),
-                interval=interval,
-                limit=limit,
-                end_time=end_time,
+            params = {"symbol": self.factory.raw_symbol(market), "interval": interval, "limit": limit}
+            if end_time is not None:
+                params["endTime"] = end_time
+            response = await asyncio.to_thread(
+                requests.get,
+                url,
+                params=params,
+                proxies=proxies,
+                timeout=10,
             )
+            response.raise_for_status()
+            batch = response.json()
             if not batch:
                 break
             klines = batch + klines
-            end_time = batch[0].open_time - 1
+            end_time = int(batch[0][0]) - 1
             if len(batch) < limit:
                 break
 
@@ -82,12 +76,12 @@ class MarketDataStore:
         return pd.DataFrame(
             [
                 {
-                    "timestamp": pd.to_datetime(k.open_time, unit="ms", utc=True),
-                    "open": float(k.open),
-                    "high": float(k.high),
-                    "low": float(k.low),
-                    "close": float(k.close),
-                    "volume": float(k.volume),
+                    "timestamp": pd.to_datetime(k[0], unit="ms", utc=True),
+                    "open": float(k[1]),
+                    "high": float(k[2]),
+                    "low": float(k[3]),
+                    "close": float(k[4]),
+                    "volume": float(k[5]),
                 }
                 for k in klines
             ],
@@ -142,15 +136,26 @@ class MarketDataStore:
         df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
         return df
 
-    # 把普通 OHLCV 数据转成 NT 回测引擎需要的 Bar 对象。
+    # 把普通 OHLCV 数据转成 PyO3 Bar 对象。
     def ohlcv_to_bars(self, df: pd.DataFrame, market: dict[str, Any]):
-        data = df.copy()
-        data["timestamp"] = pd.to_datetime(data["timestamp"], utc=True)
-        data = data.set_index("timestamp")
-        return BarDataWrangler(
-            self.factory.bar_type(market),
-            self.factory.instrument(market),
-        ).process(data[["open", "high", "low", "close", "volume"]])
+        instrument = self.factory.instrument(market)
+        bar_type = self.factory.bar_type(market)
+        bars = []
+        for row in df.to_dict("records"):
+            ts_ns = int(pd.Timestamp(row["timestamp"]).timestamp() * 1_000_000_000)
+            bars.append(
+                Bar(
+                    bar_type=bar_type,
+                    open=Price(Decimal(str(row["open"])), instrument.price_precision),
+                    high=Price(Decimal(str(row["high"])), instrument.price_precision),
+                    low=Price(Decimal(str(row["low"])), instrument.price_precision),
+                    close=Price(Decimal(str(row["close"])), instrument.price_precision),
+                    volume=Quantity(Decimal(str(row["volume"])), instrument.size_precision),
+                    ts_event=ts_ns,
+                    ts_init=ts_ns,
+                ),
+            )
+        return bars
 
     # 读取指定市场的 CSV 并转成 NT Bar。
     def load_bars(self, market: dict[str, Any]):

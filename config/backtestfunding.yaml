@@ -1,5 +1,6 @@
 strategy:
   name: backtestfunding
+  modes: [backtest]
   params:
     trade_notional: "1000"
     min_rate_bps: "50"
@@ -9,9 +10,12 @@ strategy:
     entry_before_ms: 500
     exit_after_ms: 1000
 
+exchange:
+  venue: BINANCE
+
 backtest:
   markets: all
-  tick_data_path: data/tick/event/ALL-FUNDING-EVENTS-20250101.parquet
+  tick_data_path: data/tick/ALL-FUNDING-EVENTS-20250101.parquet
   starting_balance: "1000 USDT"
   account_type: MARGIN
   oms_type: NETTING

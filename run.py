@@ -4,15 +4,24 @@ import os
 import sys
 from pathlib import Path
 
+import yaml
+
 import backtest
 import live
 from utils.arguments import MODE_OPTIONS
 from utils.arguments import RUN_MODES
+from utils.config_loader import ROOT
 
 
 def config_names() -> list[str]:
     config_dir = Path(__file__).resolve().parent / "config"
     return sorted(path.stem for path in config_dir.glob("*.yaml") if path.stem != "global")
+
+
+def config_modes(config_name: str) -> list[str]:
+    path = ROOT / "config" / f"{config_name}.yaml"
+    settings = yaml.safe_load(path.read_text(encoding="utf-8"))
+    return settings.get("strategy", {}).get("modes", list(RUN_MODES))
 
 
 def clear_screen() -> None:
@@ -143,7 +152,7 @@ def main() -> None:
 
         selected_label = choose(
             f"配置：{selected_config}\n请选择模式：",
-            [label for label, _mode in MODE_OPTIONS],
+            [label for label, mode in MODE_OPTIONS if mode in config_modes(selected_config)],
         )
         if selected_label is None:
             selected_config = None

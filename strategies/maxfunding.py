@@ -8,22 +8,26 @@ from datetime import datetime
 from decimal import Decimal
 from decimal import ROUND_CEILING
 from pathlib import Path
+from typing import Any
 
 import requests
-from nautilus_trader.common.events import TimeEvent
-from nautilus_trader.config import StrategyConfig
-from nautilus_trader.model.data import BarType
-from nautilus_trader.model.enums import OrderSide
-from nautilus_trader.model.enums import TimeInForce
-from nautilus_trader.model.events import OrderFilled
-from nautilus_trader.model.events import OrderRejected
-from nautilus_trader.model.identifiers import ClientOrderId
-from nautilus_trader.model.identifiers import InstrumentId
-from nautilus_trader.model.instruments import Instrument
-from nautilus_trader.trading.strategy import Strategy
+from actors.data_recorder import DataRecorder
+from nautilus_trader.core.nautilus_pyo3 import BarType
+from nautilus_trader.core.nautilus_pyo3 import ClientOrderId
+from nautilus_trader.core.nautilus_pyo3 import InstrumentId
+from nautilus_trader.core.nautilus_pyo3 import LogColor
+from nautilus_trader.core.nautilus_pyo3 import MarketOrder
+from nautilus_trader.core.nautilus_pyo3 import OrderFilled
+from nautilus_trader.core.nautilus_pyo3 import OrderRejected
+from nautilus_trader.core.nautilus_pyo3 import OrderSide
+from nautilus_trader.core.nautilus_pyo3 import Strategy
+from nautilus_trader.core.nautilus_pyo3 import StrategyConfig
+from nautilus_trader.core.nautilus_pyo3 import TimeEvent
+from nautilus_trader.core.nautilus_pyo3 import TimeInForce
+from nautilus_trader.core.nautilus_pyo3 import UUID4
 
 
-class MaxfundingConfig(StrategyConfig, frozen=True):
+class MaxfundingConfig(StrategyConfig):
     instrument_ids: list[InstrumentId]
     bar_types: list[BarType]
     trade_symbols: list[str] | str
@@ -42,6 +46,52 @@ class MaxfundingConfig(StrategyConfig, frozen=True):
     proxy_url: str
     event_log_path: str = "auto"
 
+    def __new__(
+        cls,
+        instrument_ids: list[InstrumentId],
+        bar_types: list[BarType],
+        trade_symbols: list[str] | str,
+        exclude_symbols: list[str],
+        trade_notional: Decimal,
+        min_rate_bps: Decimal,
+        pre_sec: float,
+        entry_sec: float,
+        pre_deadline: float,
+        entry_before: float,
+        exit_sec: float,
+        post_sec: float,
+        stop_close: bool,
+        api_url: str,
+        api_timeout: float,
+        proxy_url: str,
+        event_log_path: str = "auto",
+    ):
+        config = super().__new__(cls)
+        config.instrument_ids = [
+            InstrumentId.from_str(value) if isinstance(value, str) else value
+            for value in instrument_ids
+        ]
+        config.bar_types = [
+            BarType.from_str(value) if isinstance(value, str) else value
+            for value in bar_types
+        ]
+        config.trade_symbols = trade_symbols
+        config.exclude_symbols = exclude_symbols
+        config.trade_notional = Decimal(str(trade_notional))
+        config.min_rate_bps = Decimal(str(min_rate_bps))
+        config.pre_sec = pre_sec
+        config.entry_sec = entry_sec
+        config.pre_deadline = pre_deadline
+        config.entry_before = entry_before
+        config.exit_sec = exit_sec
+        config.post_sec = post_sec
+        config.stop_close = stop_close
+        config.api_url = api_url
+        config.api_timeout = api_timeout
+        config.proxy_url = proxy_url
+        config.event_log_path = event_log_path
+        return config
+
 
 class Maxfunding(Strategy):
     WARMUP_TIMER = "maxfunding_warmup"
@@ -54,6 +104,7 @@ class Maxfunding(Strategy):
 
     def __init__(self, config: MaxfundingConfig) -> None:
         super().__init__(config)
+        self.config = config
         self.notional = Decimal(str(config.trade_notional))
         self.min_rate = Decimal(str(config.min_rate_bps)) / Decimal("10000")
         self.exit_sec = float(config.exit_sec)
@@ -69,7 +120,7 @@ class Maxfunding(Strategy):
         self.entry_done = False
         self.sent_done = False
         self.close_done = False
-        self.ins: dict[InstrumentId, Instrument] = {}
+        self.ins: dict[InstrumentId, Any] = {}
         self.trade_ids: set[InstrumentId] = set()
         self.symbols: dict[InstrumentId, str] = {}
         self.obs_map: dict[InstrumentId, dict[str, Decimal | OrderSide]] = {}
@@ -79,6 +130,7 @@ class Maxfunding(Strategy):
         self.chosen_id: InstrumentId | None = None
         self.had_order = False
         self.log_path = Path(config.event_log_path)
+        self.recorder = DataRecorder(self.log_path.parent)
         use_proxy = platform.system() == "Windows" and config.proxy_url
         self.proxies = {"http": config.proxy_url, "https": config.proxy_url} if use_proxy else None
 
@@ -101,6 +153,7 @@ class Maxfunding(Strategy):
 
         self._load_ins()
         self._load_lists()
+        self.recorder.start()
         self._init_log()
 
         self._schedule_next()
@@ -109,7 +162,8 @@ class Maxfunding(Strategy):
             f"资金费率交易启动，已加载{len(self.ins)}个，"
             f"可交易{len(self.trade_ids)}个，"
             f"排除{len(self.exclude)}个，"
-            f"阈值{self._bps(self.min_rate)}bps，单币名义{self.notional:.2f}USDT"
+            f"阈值{self._bps(self.min_rate)}bps，单币名义{self.notional:.2f}USDT",
+            LogColor.NORMAL,
         )
 
     # clock alert 负责 t-3/t-2/t-1/t/t+2/t+3 六个确定动作。
@@ -162,7 +216,8 @@ class Maxfunding(Strategy):
             self.entry_done = previous_ready
             self.log.info(
                 f"拉取资金费率超时，超过{self._ms(self.config.pre_deadline * 1000)}ms停止，"
-                f"保留预拉候选{len(self.ins_map)}个，耗时{self._ms(stats['elapsed_ms'])}ms"
+                f"保留预拉候选{len(self.ins_map)}个，耗时{self._ms(stats['elapsed_ms'])}ms",
+                LogColor.NORMAL,
             )
         else:
             self._log_pre_result(stats, "拉取资金费率成功")
@@ -170,7 +225,7 @@ class Maxfunding(Strategy):
         order_ns = self.fund_ns - int(self.config.entry_before * 1_000_000_000)
         if self.clock.timestamp_ns() >= order_ns:
             self.sent_done = True
-            self.log.info("跳过本轮，资金费率拉取太晚")
+            self.log.info("跳过本轮，资金费率拉取太晚", LogColor.NORMAL)
 
     # t-1 提交订单。
     def _freeze_funding(self) -> None:
@@ -178,7 +233,7 @@ class Maxfunding(Strategy):
             return
         if not self.entry_done:
             self.sent_done = True
-            self.log.info("跳过本轮，候选未准备好")
+            self.log.info("跳过本轮，候选未准备好", LogColor.NORMAL)
             return
         rows = []
         for ins_id, row in self.ins_map.items():
@@ -186,19 +241,14 @@ class Maxfunding(Strategy):
                 continue
             rows.append((ins_id, row))
         if not rows:
-            self.log.info(f"交易模式，候选{len(self.ins_map)}个，无可下单交易对")
+            self.log.info(f"交易模式，候选{len(self.ins_map)}个，无可下单交易对", LogColor.NORMAL)
         else:
             ins_id, row = max(rows, key=lambda item: abs(item[1]["rate"]))
             ins = self.ins[ins_id]
             side = self._side(row["rate"])
             row["side"] = side
             qty = self._qty(ins, row["pre"])
-            order = self.order_factory.market(
-                instrument_id=ins_id,
-                order_side=side,
-                quantity=qty,
-                time_in_force=TimeInForce.GTC,
-            )
+            order = self._market_order(ins_id, side, qty)
             self.order_map[order.client_order_id] = ins_id
             self.chosen_id = ins_id
             self.submit_order(order)
@@ -206,7 +256,8 @@ class Maxfunding(Strategy):
             self.log.info(
                 f"交易模式，候选{len(self.ins_map)}个，选择{self._base(ins_id)}，"
                 f"费率{self._bps(row['rate'])}bps"
-                f"名义{self.notional:.2f}USDT"
+                f"名义{self.notional:.2f}USDT",
+                LogColor.NORMAL,
             )
 
         self.sent_done = True
@@ -220,7 +271,8 @@ class Maxfunding(Strategy):
                 close_cnt += 1
             self.close_done = True
             self.log.info(
-                f"交易模式，平仓{close_cnt}个，候选{len(self.ins_map)}个"
+                f"交易模式，平仓{close_cnt}个，候选{len(self.ins_map)}个",
+                LogColor.NORMAL,
             )
             self._write_trade(close_cnt)
 
@@ -230,7 +282,10 @@ class Maxfunding(Strategy):
         rows, errors = self._fetch_rates()
         elapsed_ms = (perf_counter() - start) * 1000
         if errors:
-            self.log.info(f"实际资金费率分析失败，错误{errors}个，耗时{self._ms(elapsed_ms)}ms")
+            self.log.info(
+                f"实际资金费率分析失败，错误{errors}个，耗时{self._ms(elapsed_ms)}ms",
+                LogColor.NORMAL,
+            )
         else:
             current_symbols = {
                 self.symbols[ins_id]
@@ -244,25 +299,44 @@ class Maxfunding(Strategy):
             }
             self.log.info(
                 f"实际资金费率分析，可交易前三 {self._top_rates(rows, trade_symbols)}，"
-                f"耗时{self._ms(elapsed_ms)}ms"
+                f"耗时{self._ms(elapsed_ms)}ms",
+                LogColor.NORMAL,
             )
         self._reset_closed_state()
         self._schedule_next()
 
     # 成交后才记录待平仓 instrument。
     def on_order_filled(self, event: OrderFilled) -> None:
+        self.recorder.on_order_filled(event)
         ins_id = self.order_map.pop(event.client_order_id, None)
         if ins_id is not None:
             self.open_ids.add(ins_id)
 
     # 拒单后清理本地订单映射。
     def on_order_rejected(self, event: OrderRejected) -> None:
+        self.recorder.on_order_rejected(event)
         ins_id = self.order_map.pop(event.client_order_id, None)
         if ins_id is not None:
-            self.log.warning(f"订单被拒，交易对{self._base(ins_id)}，原因{event.reason}")
+            self.log.warning(f"订单被拒，交易对{self._base(ins_id)}，原因{event.reason}", LogColor.YELLOW)
+
+    def on_order_canceled(self, event) -> None:
+        self.recorder.on_order_canceled(event)
+
+    def on_position_opened(self, event) -> None:
+        self.recorder.on_position_opened(event)
+
+    def on_position_changed(self, event) -> None:
+        self.recorder.on_position_changed(event)
+
+    def on_position_adjusted(self, event) -> None:
+        self.recorder.on_position_adjusted(event)
+
+    def on_position_closed(self, event) -> None:
+        self.recorder.on_position_closed(event)
 
     def on_stop(self) -> None:
-        names = set(self.clock.timer_names)
+        timer_names = self.clock.timer_names
+        names = set(timer_names() if callable(timer_names) else timer_names)
         for kind in self.TIMERS:
             name = f"{kind}:{self.fund_ns}"
             if name in names:
@@ -274,7 +348,7 @@ class Maxfunding(Strategy):
             for ins_id in self.open_ids:
                 self.close_all_positions(ins_id)
 
-        self.log.info("资金费率监控停止")
+        self.log.info("资金费率监控停止", LogColor.NORMAL)
 
     def on_reset(self) -> None:
         self._reset_state()
@@ -443,14 +517,16 @@ class Maxfunding(Strategy):
             self.log.info(
                 f"{title}，已加载{stats['rows']}个，可交易{len(self.trade_ids)}个，"
                 f"阈值{self._bps(self.min_rate)}bps，无超过阈值候选，"
-                f"前三 {self._rate_list(limit=3, rows=self.obs_map)}，耗时{self._ms(stats['elapsed_ms'])}ms"
+                f"前三 {self._rate_list(limit=3, rows=self.obs_map)}，耗时{self._ms(stats['elapsed_ms'])}ms",
+                LogColor.NORMAL,
             )
             return
         self.log.info(
             f"{title}，已加载{stats['rows']}个，可交易{len(self.trade_ids)}个，"
             f"阈值{self._bps(self.min_rate)}bps，"
             f"候选{len(self.ins_map)}个，耗时{self._ms(stats['elapsed_ms'])}ms，"
-            f"候选 {self._rate_list(limit=3)}"
+            f"候选 {self._rate_list(limit=3)}",
+            LogColor.NORMAL,
         )
 
     def _fetch_rates(self, timeout: float | None = None) -> tuple[list[dict], int]:
@@ -521,13 +597,30 @@ class Maxfunding(Strategy):
     def _side(self, rate: Decimal) -> OrderSide:
         return OrderSide.SELL if rate > 0 else OrderSide.BUY
 
-    def _qty(self, ins: Instrument, price: Decimal):
+    def _qty(self, ins: Any, price: Decimal):
         raw_qty = self.notional / price
         step = Decimal(str(ins.size_increment))
         if step > 0:
             steps = (raw_qty / step).to_integral_value(rounding=ROUND_CEILING)
             raw_qty = steps * step
         return ins.make_qty(raw_qty)
+
+    # 构建 PyO3 市价单。
+    def _market_order(self, ins_id: InstrumentId, side: OrderSide, qty) -> MarketOrder:
+        ts_init = self.clock.timestamp_ns()
+        return MarketOrder(
+            trader_id=self.trader_id,
+            strategy_id=self.strategy_id,
+            instrument_id=ins_id,
+            client_order_id=ClientOrderId(f"O-{ts_init}"),
+            order_side=side,
+            quantity=qty,
+            init_id=UUID4(),
+            ts_init=ts_init,
+            time_in_force=TimeInForce.GTC,
+            reduce_only=False,
+            quote_quantity=False,
+        )
 
     # 写本轮选中交易的资金费率记录。
     def _write_trade(self, close_cnt: int) -> None:
@@ -593,14 +686,15 @@ class Maxfunding(Strategy):
         self.obs_map.clear()
         self.ins_map.clear()
         self.order_map.clear()
-        self.open_ids = {ins_id for ins_id in self.open_ids if not self.portfolio.is_flat(ins_id)}
+        open_position_ids = {str(position.instrument_id) for position in self.cache.positions_open()}
+        self.open_ids = {ins_id for ins_id in self.open_ids if str(ins_id) in open_position_ids}
         self.chosen_id = next(iter(self.open_ids), None)
         self.had_order = False
         self.entry_done = False
         self.sent_done = False
         self.close_done = False
         if self.open_ids:
-            self.log.warning(f"平仓后仍有持仓跟踪，交易对{','.join(map(self._base, self.open_ids))}")
+            self.log.warning(f"平仓后仍有持仓跟踪，交易对{','.join(map(self._base, self.open_ids))}", LogColor.YELLOW)
 
     def _iso(self, ts_ns: int) -> str:
         return datetime.fromtimestamp(ts_ns / 1_000_000_000, tz=UTC).isoformat()

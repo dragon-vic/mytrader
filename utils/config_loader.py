@@ -19,12 +19,22 @@ def load_settings(config_name: str | None = None, mode: str | None = None) -> di
     with (ROOT / "config" / f"{name}.yaml").open("r", encoding="utf-8") as f:
         strategy_settings = yaml.safe_load(f)
     settings = deep_merge(global_settings, strategy_settings)
+    validate_mode(settings, mode)
     select_mode_markets(settings, mode)
     if mode in ("testnet", "live"):
         settings.pop("backtest", None)
     normalize_settings(settings)
     settings["project"]["config_name"] = name
     return settings
+
+
+# 策略 set 显式声明可运行模式，避免选到不兼容的入口。
+def validate_mode(settings: dict[str, Any], mode: str | None) -> None:
+    if mode is None:
+        return
+    modes = settings["strategy"].get("modes")
+    if modes is not None and mode not in modes:
+        raise ValueError(f"{settings['strategy']['name']} does not support mode: {mode}")
 
 
 # 递归合并配置，右侧 set 配置覆盖左侧 global 配置。
@@ -50,8 +60,11 @@ def snake_to_pascal(name: str) -> str:
     return "".join(part.capitalize() for part in name.split("_"))
 
 
-# 补齐一个市场的交易所、币种和 Binance/NT symbol。
+# 补齐一个 Binance 市场的交易所、币种和 NT symbol。
 def normalize_market(market: dict[str, Any], settings: dict[str, Any]) -> dict[str, Any]:
+    if settings["exchange"]["venue"].upper() == "POLYMARKET":
+        return normalize_polymarket_market(market, settings)
+
     instrument_kind = settings["instrument"]["kind"]
     if "timeframe" not in market:
         raise KeyError("markets[].timeframe is required")
@@ -74,6 +87,34 @@ def normalize_market(market: dict[str, Any], settings: dict[str, Any]) -> dict[s
     return normalized
 
 
+# 补齐一个 Polymarket binary option 市场的 instrument id。
+def normalize_polymarket_market(market: dict[str, Any], settings: dict[str, Any]) -> dict[str, Any]:
+    if isinstance(market, str):
+        market = {"instrument_id": market}
+    if "symbol" in market and "instrument_id" not in market:
+        market = {**market, "instrument_id": market["symbol"]}
+    venue = settings["exchange"]["venue"]
+    if "instrument_id" in market:
+        symbol, _, raw_venue = market["instrument_id"].partition(".")
+        if raw_venue and raw_venue != venue:
+            raise ValueError(f"Polymarket instrument venue mismatch: {market['instrument_id']}")
+        instrument_id = f"{symbol}.{venue}"
+        token_id = symbol.split("-", 1)[1] if "-" in symbol else symbol
+    else:
+        condition_id = market["condition_id"]
+        token_id = str(market["token_id"])
+        symbol = f"{condition_id}-{token_id}"
+        instrument_id = f"{symbol}.{venue}"
+    return {
+        "exchange": settings["exchange"]["name"],
+        "venue": venue,
+        "instrument_symbol": symbol,
+        "instrument_id": instrument_id,
+        "raw_symbol": token_id,
+        **market,
+    }
+
+
 # 补齐策略模块名、类名和配置类名。
 def normalize_strategy(settings: dict[str, Any]) -> None:
     strategy = settings["strategy"]
@@ -84,8 +125,16 @@ def normalize_strategy(settings: dict[str, Any]) -> None:
     strategy.setdefault("config_class", f"{class_name}Config")
 
 
+# exchange.name 默认从 venue 推导，避免新增 venue 时继承 global 里的 binance。
+def normalize_exchange(settings: dict[str, Any]) -> None:
+    exchange = settings["exchange"]
+    exchange["venue"] = exchange["venue"].upper()
+    exchange["name"] = exchange["venue"].lower()
+
+
 # 补齐从 symbol 可推导的市场字段。
 def normalize_settings(settings: dict[str, Any]) -> None:
+    normalize_exchange(settings)
     market_defaults = settings.get("market_defaults") or {}
     if "markets" not in settings:
         raise KeyError("markets is required")
@@ -104,11 +153,11 @@ def normalize_settings(settings: dict[str, Any]) -> None:
     ]
 
     first_market = market_configs(settings)[0]
-    if "instrument" in settings:
+    if "instrument" in settings and "base_currency" in first_market:
         settings["instrument"].setdefault("base_currency", first_market["base_currency"])
         settings["instrument"].setdefault("quote_currency", first_market["quote_currency"])
         settings["instrument"].setdefault("settlement_currency", first_market["settlement_currency"])
-    if "instrument" in settings.get("backtest", {}):
+    if "instrument" in settings.get("backtest", {}) and "base_currency" in first_market:
         settings["backtest"]["instrument"].setdefault("base_currency", first_market["base_currency"])
         settings["backtest"]["instrument"].setdefault("quote_currency", first_market["quote_currency"])
         settings["backtest"]["instrument"].setdefault("settlement_currency", first_market["settlement_currency"])

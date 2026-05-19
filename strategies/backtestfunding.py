@@ -6,18 +6,22 @@ from decimal import ROUND_CEILING
 from pathlib import Path
 
 import pandas as pd
-from nautilus_trader.common.events import TimeEvent
-from nautilus_trader.config import StrategyConfig
-from nautilus_trader.model.data import BarType
-from nautilus_trader.model.data import TradeTick
-from nautilus_trader.model.enums import OrderSide
-from nautilus_trader.model.enums import TimeInForce
-from nautilus_trader.model.identifiers import InstrumentId
-from nautilus_trader.model.instruments import Instrument
-from nautilus_trader.trading.strategy import Strategy
+from actors.data_recorder import DataRecorder
+from nautilus_trader.core.nautilus_pyo3 import BarType
+from nautilus_trader.core.nautilus_pyo3 import ClientOrderId
+from nautilus_trader.core.nautilus_pyo3 import InstrumentId
+from nautilus_trader.core.nautilus_pyo3 import LogColor
+from nautilus_trader.core.nautilus_pyo3 import MarketOrder
+from nautilus_trader.core.nautilus_pyo3 import OrderSide
+from nautilus_trader.core.nautilus_pyo3 import Strategy
+from nautilus_trader.core.nautilus_pyo3 import StrategyConfig
+from nautilus_trader.core.nautilus_pyo3 import TimeEvent
+from nautilus_trader.core.nautilus_pyo3 import TimeInForce
+from nautilus_trader.core.nautilus_pyo3 import TradeTick
+from nautilus_trader.core.nautilus_pyo3 import UUID4
 
 
-class BacktestfundingConfig(StrategyConfig, frozen=True):
+class BacktestfundingConfig(StrategyConfig):
     instrument_ids: list[InstrumentId]
     bar_types: list[BarType]
     trade_notional: Decimal
@@ -29,14 +33,48 @@ class BacktestfundingConfig(StrategyConfig, frozen=True):
     exit_after_ms: int
     event_log_path: str
 
+    def __new__(
+        cls,
+        instrument_ids: list[InstrumentId],
+        bar_types: list[BarType],
+        trade_notional: Decimal,
+        min_rate_bps: Decimal,
+        trade_symbols: list[str] | str,
+        exclude_symbols: list[str],
+        events_path: str,
+        entry_before_ms: int,
+        exit_after_ms: int,
+        event_log_path: str,
+    ):
+        config = super().__new__(cls)
+        config.instrument_ids = [
+            InstrumentId.from_str(value) if isinstance(value, str) else value
+            for value in instrument_ids
+        ]
+        config.bar_types = [
+            BarType.from_str(value) if isinstance(value, str) else value
+            for value in bar_types
+        ]
+        config.trade_notional = Decimal(str(trade_notional))
+        config.min_rate_bps = Decimal(str(min_rate_bps))
+        config.trade_symbols = trade_symbols
+        config.exclude_symbols = exclude_symbols
+        config.events_path = events_path
+        config.entry_before_ms = entry_before_ms
+        config.exit_after_ms = exit_after_ms
+        config.event_log_path = event_log_path
+        return config
+
 
 class Backtestfunding(Strategy):
     def __init__(self, config: BacktestfundingConfig) -> None:
         super().__init__(config)
+        self.config = config
         self.events: dict[str, dict] = {}
         self.open_events: dict[InstrumentId, str] = {}
         self.last_px: dict[InstrumentId, Decimal] = {}
         self.log_path = Path(config.event_log_path)
+        self.recorder = DataRecorder(self.log_path.parent)
         self.min_rate_bps = Decimal(str(config.min_rate_bps))
         self.entry_before_ms = int(config.entry_before_ms)
         self.exit_after_ms = int(config.exit_after_ms)
@@ -48,9 +86,19 @@ class Backtestfunding(Strategy):
     # 启动时加载 funding 事件，并注册 t-1/t+1 定时器。
     def on_start(self) -> None:
         self._load_events()
+        self.recorder.start()
         self._init_log()
         for instrument_id in self.config.instrument_ids:
-            self.subscribe_trade_ticks(instrument_id)
+            self.subscribe_trades(instrument_id)
+        current_ns = self.clock.timestamp_ns()
+        active_events = {
+            event_id: row
+            for event_id, row in self.events.items()
+            if int(row["entry_time_ms"]) * 1_000_000 > current_ns
+            and int(row["exit_time_ms"]) * 1_000_000 > current_ns
+        }
+        skipped = len(self.events) - len(active_events)
+        self.events = active_events
         for event_id, row in self.events.items():
             self.clock.set_time_alert_ns(
                 f"backtestfunding_entry:{event_id}",
@@ -64,10 +112,13 @@ class Backtestfunding(Strategy):
                 callback=self._on_time,
                 allow_past=False,
             )
-        self.log.info(f"backtestfunding启动，事件{len(self.events)}个，交易对{len(self.config.instrument_ids)}个")
+        self.log.info(
+            f"backtestfunding启动，事件{len(self.events)}个，跳过过期事件{skipped}个，交易对{len(self.config.instrument_ids)}个",
+            LogColor.NORMAL,
+        )
 
     # trade tick 只用于估算市价单数量。
-    def on_trade_tick(self, tick: TradeTick) -> None:
+    def on_trade(self, tick: TradeTick) -> None:
         self.last_px[tick.instrument_id] = Decimal(str(tick.price))
 
     # 定时开仓和平仓。
@@ -81,7 +132,7 @@ class Backtestfunding(Strategy):
     def _entry(self, event_id: str) -> None:
         row = self.events[event_id]
         instrument_id = row["instrument_id"]
-        if not self.portfolio.is_flat(instrument_id):
+        if instrument_id in self.open_events:
             self._write(row, "skip_not_flat", None)
             return
         price = self.last_px.get(instrument_id)
@@ -89,12 +140,7 @@ class Backtestfunding(Strategy):
             self._write(row, "skip_no_tick", None)
             return
         instrument = self.cache.instrument(instrument_id)
-        order = self.order_factory.market(
-            instrument_id=instrument_id,
-            order_side=row["order_side"],
-            quantity=self._qty(instrument, price),
-            time_in_force=TimeInForce.GTC,
-        )
+        order = self._market_order(instrument_id, row["order_side"], self._qty(instrument, price))
         self.submit_order(order)
         self.open_events[instrument_id] = event_id
         self._write(row, "OPEN", price)
@@ -113,7 +159,28 @@ class Backtestfunding(Strategy):
         for instrument_id in self.config.instrument_ids:
             self.cancel_all_orders(instrument_id)
             self.close_all_positions(instrument_id)
-            self.unsubscribe_trade_ticks(instrument_id)
+            self.unsubscribe_trades(instrument_id)
+
+    def on_order_filled(self, event) -> None:
+        self.recorder.on_order_filled(event)
+
+    def on_order_canceled(self, event) -> None:
+        self.recorder.on_order_canceled(event)
+
+    def on_order_rejected(self, event) -> None:
+        self.recorder.on_order_rejected(event)
+
+    def on_position_opened(self, event) -> None:
+        self.recorder.on_position_opened(event)
+
+    def on_position_changed(self, event) -> None:
+        self.recorder.on_position_changed(event)
+
+    def on_position_adjusted(self, event) -> None:
+        self.recorder.on_position_adjusted(event)
+
+    def on_position_closed(self, event) -> None:
+        self.recorder.on_position_closed(event)
 
     def on_reset(self) -> None:
         self.open_events.clear()
@@ -189,7 +256,23 @@ class Backtestfunding(Strategy):
     def _base_symbol(self, symbol: str) -> str:
         return symbol.upper().replace("-PERP.BINANCE", "").replace("USDT", "").replace("/", "")
 
-    def _qty(self, instrument: Instrument, price: Decimal):
+    def _market_order(self, instrument_id: InstrumentId, side: OrderSide, quantity):
+        ts_init = self.clock.timestamp_ns()
+        return MarketOrder(
+            trader_id=self.trader_id,
+            strategy_id=self.strategy_id,
+            instrument_id=instrument_id,
+            client_order_id=ClientOrderId(f"O-{ts_init}"),
+            order_side=side,
+            quantity=quantity,
+            init_id=UUID4(),
+            ts_init=ts_init,
+            time_in_force=TimeInForce.GTC,
+            reduce_only=False,
+            quote_quantity=False,
+        )
+
+    def _qty(self, instrument, price: Decimal):
         raw = self.config.trade_notional / price
         step = Decimal(str(instrument.size_increment))
         if step > 0:

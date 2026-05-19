@@ -3,17 +3,16 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
-from nautilus_trader.model.data import BarType
-from nautilus_trader.model.identifiers import InstrumentId
-from nautilus_trader.model.identifiers import Symbol
-from nautilus_trader.model.identifiers import Venue
-from nautilus_trader.model.instruments import CryptoPerpetual
-from nautilus_trader.model.instruments import CurrencyPair
-from nautilus_trader.model.instruments import Instrument
-from nautilus_trader.model.objects import Currency
-from nautilus_trader.model.objects import Money
-from nautilus_trader.model.objects import Price
-from nautilus_trader.model.objects import Quantity
+from nautilus_trader.core.nautilus_pyo3 import BarType
+from nautilus_trader.core.nautilus_pyo3 import CryptoPerpetual
+from nautilus_trader.core.nautilus_pyo3 import Currency
+from nautilus_trader.core.nautilus_pyo3 import CurrencyPair
+from nautilus_trader.core.nautilus_pyo3 import InstrumentId
+from nautilus_trader.core.nautilus_pyo3 import Money
+from nautilus_trader.core.nautilus_pyo3 import Price
+from nautilus_trader.core.nautilus_pyo3 import Quantity
+from nautilus_trader.core.nautilus_pyo3 import Symbol
+from nautilus_trader.core.nautilus_pyo3 import Venue
 
 from utils.arguments import TIMEFRAME_UNITS
 from utils.config_loader import market_configs
@@ -50,6 +49,8 @@ class InstrumentFactory:
 
     # 构建指定市场的 NT instrument id。
     def instrument_id(self, market: dict[str, Any]) -> InstrumentId:
+        if "instrument_id" in market:
+            return InstrumentId.from_str(market["instrument_id"])
         return InstrumentId(Symbol(market["instrument_symbol"]), Venue(market["venue"]))
 
     # 构建现货 CurrencyPair instrument。
@@ -113,24 +114,30 @@ class InstrumentFactory:
         )
 
     # 根据 instrument.kind 选择现货或永续合约。
-    def instrument(self, market: dict[str, Any]) -> Instrument:
+    def instrument(self, market: dict[str, Any]):
         kind = self.cfg["kind"]
         if kind == "spot":
             return self.currency_pair(market)
         if kind == "perpetual":
             return self.crypto_perpetual(market)
+        if kind == "binary_option":
+            raise RuntimeError("Polymarket binary options are loaded by the live instrument provider")
         raise ValueError(f"Unsupported instrument kind: {kind}")
 
     # 构建当前 set 的全部 instrument。
-    def instruments(self) -> list[Instrument]:
+    def instruments(self) -> list:
         return [self.instrument(market) for market in self.markets]
 
     # 构建指定市场对应的 NT BarType。
     def bar_type(self, market: dict[str, Any]) -> BarType:
+        if "timeframe" not in market:
+            raise RuntimeError("markets[].timeframe is required for bar types")
         spec = timeframe_to_bar_spec(market["timeframe"])
         aggregation_source = "INTERNAL" if market["timeframe"].endswith("s") else "EXTERNAL"
         return BarType.from_str(f"{market['instrument_symbol']}.{market['venue']}-{spec}-LAST-{aggregation_source}")
 
     # 构建当前 set 的全部 BarType。
     def bar_types(self) -> list[BarType]:
+        if self.cfg["kind"] == "binary_option":
+            return []
         return [self.bar_type(market) for market in self.markets]

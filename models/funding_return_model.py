@@ -19,11 +19,12 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 ROOT = Path(__file__).resolve().parents[1]
 FUNDING_PATH = ROOT / "data" / "funding" / "ALL-20250101.parquet"
-TICK_PATH = ROOT / "data" / "tick" / "event" / "ALL-FUNDING-EVENTS-20250101.parquet"
+TICK_PATH = ROOT / "data" / "tick" / "ALL-FUNDING-EVENTS-20250101.parquet"
 OUT_DIR = ROOT / "models" / "funding_return_outputs"
 FEE_BPS = 8.0
 WINDOWS_MS = (500, 1000, 3000)
 BAD_SYMBOLS = {"DODOX", "STORJ", "SIREN", "RIVER", "BARD", "PIPPIN", "ORCA"}
+RATE_BUCKET_ORDER = {"30-50": 1, "50-75": 2, "75-100": 3, "100-150": 4, "150+": 5}
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,20 @@ def bucket_rate(v: float) -> str:
     if v < 150:
         return "100-150"
     return "150+"
+
+
+def bucket_liq(v: float) -> str:
+    if pd.isna(v) or v <= 0:
+        return "unknown"
+    if v < 10_000:
+        return "micro"
+    if v < 100_000:
+        return "small"
+    if v < 1_000_000:
+        return "mid"
+    if v < 10_000_000:
+        return "large"
+    return "top"
 
 
 def node_type(ts: pd.Timestamp) -> str:
@@ -80,6 +95,7 @@ def build_ticks() -> pd.DataFrame:
 
     for event_key, rows in ticks.sort_values(["event_key", "timestamp_ms", "agg_trade_id"]).groupby("event_key", sort=False):
         first = rows.iloc[0]
+        fut_t1_px, fut_t1_err = nearest_price(rows, -1000)
         entry_px, entry_err = nearest_price(rows, -500)
         direction = 1.0 if first["side"] == "BUY" else -1.0
         item: dict[str, object] = {
@@ -92,6 +108,8 @@ def build_ticks() -> pd.DataFrame:
             "abs_rate_bps": float(first["abs_rate_bps"]),
             "side": first["side"],
             "direction": direction,
+            "fut_t1_px": fut_t1_px,
+            "fut_t1_err_ms": fut_t1_err,
             "entry_px": entry_px,
             "entry_err_ms": entry_err,
             "tick_count_all": int(len(rows)),
@@ -129,6 +147,83 @@ def build_ticks() -> pd.DataFrame:
     return pd.DataFrame(out)
 
 
+def add_spot_basis(events: pd.DataFrame) -> pd.DataFrame:
+    events = events.copy()
+    fund = pd.read_parquet(FUNDING_PATH)
+    cols = {
+        "symbol",
+        "funding_time",
+        "spot_status",
+        "spot_t1_price",
+        "spot_t1_time_ms",
+        "spot_t1_age_ms",
+    }
+    if not cols.issubset(set(fund.columns)):
+        events["spot_status"] = "not_fetched"
+        events["has_spot_t1"] = 0
+        events["spot_t1_price"] = np.nan
+        events["spot_t1_time_ms"] = np.nan
+        events["spot_t1_age_ms"] = np.nan
+        events["basis_t1_bps"] = np.nan
+        events["side_basis_t1_bps"] = np.nan
+        return events
+
+    keep = [
+        "symbol",
+        "funding_time",
+        "event_key",
+        "spot_status",
+        "spot_t1_price",
+        "spot_t1_time_ms",
+        "spot_t1_age_ms",
+    ]
+    fund = fund.copy()
+    fund["funding_time"] = fund["funding_time"].astype("int64")
+    fund["event_key"] = fund["symbol"].astype(str) + "_" + fund["funding_time"].astype(str)
+    spot = fund[[col for col in keep if col in fund.columns]].copy()
+    merged = events.merge(spot.drop(columns=["symbol", "funding_time"]), on="event_key", how="left")
+    merged["spot_status"] = merged["spot_status"].fillna("not_fetched")
+    merged["has_spot_t1"] = (merged["spot_status"] == "has_spot_t1").astype(int)
+    merged["spot_t1_price"] = pd.to_numeric(merged["spot_t1_price"], errors="coerce")
+    merged["spot_t1_time_ms"] = pd.to_numeric(merged["spot_t1_time_ms"], errors="coerce")
+    merged["spot_t1_age_ms"] = pd.to_numeric(merged["spot_t1_age_ms"], errors="coerce")
+    merged["basis_t1_bps"] = (merged["fut_t1_px"] / merged["spot_t1_price"] - 1.0) * 10000.0
+    merged.loc[merged["has_spot_t1"] == 0, "basis_t1_bps"] = np.nan
+    merged["side_basis_t1_bps"] = merged["direction"] * merged["basis_t1_bps"]
+    return merged
+
+
+def add_liquidity(events: pd.DataFrame) -> pd.DataFrame:
+    events = events.copy()
+    events["liq_month"] = events["funding_utc"].dt.to_period("M").dt.to_timestamp()
+    monthly = (
+        events.groupby(["base", "liq_month"], as_index=False)
+        .agg(liquidity_usdt=("usdt_all", "mean"), liquidity_events=("event_key", "nunique"))
+        .sort_values(["base", "liq_month"])
+    )
+    monthly["next_month"] = monthly.groupby("base")["liq_month"].shift(-1)
+    prev = monthly.dropna(subset=["next_month"])[[
+        "base",
+        "next_month",
+        "liquidity_usdt",
+        "liquidity_events",
+    ]].rename(columns={"next_month": "liq_month"})
+    events = events.merge(
+        prev[["base", "liq_month", "liquidity_usdt", "liquidity_events"]],
+        on=["base", "liq_month"],
+        how="left",
+    )
+    past = events.groupby("base")["usdt_all"].expanding().mean().reset_index(level=0, drop=True)
+    events["liquidity_usdt"] = events["liquidity_usdt"].fillna(past.groupby(events["base"]).shift(1))
+    events["liquidity_events"] = events["liquidity_events"].fillna(0).astype(int)
+    events["log_liquidity_usdt"] = np.log1p(events["liquidity_usdt"].fillna(0))
+    events["liquidity_bucket"] = events["liquidity_usdt"].map(bucket_liq)
+    events["liquidity_bucket_ord"] = events["liquidity_bucket"].map(
+        {"unknown": 0, "micro": 1, "small": 2, "mid": 3, "large": 4, "top": 5},
+    ).astype(int)
+    return events
+
+
 def build_funding_features(events: pd.DataFrame) -> pd.DataFrame:
     fund = pd.read_parquet(FUNDING_PATH).sort_values(["symbol", "funding_utc"]).reset_index(drop=True)
     fund["funding_utc"] = pd.to_datetime(fund["funding_utc"], utc=True)
@@ -161,6 +256,7 @@ def build_funding_features(events: pd.DataFrame) -> pd.DataFrame:
     merged = events.merge(rank[cols], on=["symbol", "funding_time"], how="left")
     merged = merged.merge(node, on="node", how="left")
     merged["rate_bucket"] = merged["abs_rate_bps"].map(bucket_rate)
+    merged["rate_bucket_ord"] = merged["rate_bucket"].map(RATE_BUCKET_ORDER).astype(int)
     merged["node_type"] = merged["node"].map(node_type)
     merged["is_bad_symbol"] = merged["base"].isin(BAD_SYMBOLS).astype(int)
     merged["is_negative_funding"] = (merged["rate_bps"] < 0).astype(int)
@@ -170,6 +266,8 @@ def build_funding_features(events: pd.DataFrame) -> pd.DataFrame:
     merged["rank_abs"] = merged["rank_abs"].fillna(999)
     merged["interval_h"] = merged["interval_h"].fillna(0).astype(int)
 
+    merged = add_spot_basis(merged)
+    merged = add_liquidity(merged)
     merged = merged.sort_values(["symbol", "funding_utc"]).reset_index(drop=True)
     for ms in WINDOWS_MS:
         target = f"price_cost_{ms}ms"
@@ -196,6 +294,7 @@ def split_data(df: pd.DataFrame) -> Split:
 
 def feature_cols(ms: int) -> tuple[list[str], list[str]]:
     numeric = [
+        "rate_bps",
         "abs_rate_bps",
         "interval_h",
         "rank_abs",
@@ -206,6 +305,11 @@ def feature_cols(ms: int) -> tuple[list[str], list[str]]:
         "node_mean_abs",
         "log_usdt_pre",
         "log_tick_pre",
+        "fut_t1_err_ms",
+        "has_spot_t1",
+        "spot_t1_age_ms",
+        "basis_t1_bps",
+        "side_basis_t1_bps",
         "pre_cost_bps",
         "pre_vol_bps",
         "entry_err_ms",
@@ -215,7 +319,7 @@ def feature_cols(ms: int) -> tuple[list[str], list[str]]:
         "is_bad_symbol",
         "is_negative_funding",
     ]
-    categorical = ["base", "rate_bucket", "node_type", "side"]
+    categorical = ["base", "rate_bucket", "node_type", "side", "spot_status"]
     return numeric, categorical
 
 
@@ -431,12 +535,24 @@ def save_md(path: Path, split: Split, events: pd.DataFrame, metrics: pd.DataFram
 def main() -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     events_path = OUT_DIR / "event_features.parquet"
+    source_mtime = max(FUNDING_PATH.stat().st_mtime, TICK_PATH.stat().st_mtime)
+    has_required = False
     if events_path.exists():
+        cols = set(pd.read_parquet(events_path, columns=None).columns)
+        has_required = {"spot_status", "has_spot_t1", "basis_t1_bps", "side_basis_t1_bps"}.issubset(cols)
+    if events_path.exists() and events_path.stat().st_mtime >= source_mtime and has_required:
         events = pd.read_parquet(events_path)
         events["funding_utc"] = pd.to_datetime(events["funding_utc"], utc=True)
     else:
         events = build_funding_features(build_ticks())
         events.to_parquet(events_path, index=False)
+        events[[
+            "base",
+            "liq_month",
+            "liquidity_usdt",
+            "liquidity_events",
+            "liquidity_bucket",
+        ]].drop_duplicates().to_parquet(OUT_DIR / "liquidity_monthly.parquet", index=False)
 
     split = split_data(events)
     train = events[events["funding_utc"] < split.train_end].copy()
