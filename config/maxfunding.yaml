@@ -1,5 +1,5 @@
 strategy:
-  name: maxfunding
+  name: max_funding
   params:
     trade_notional: "8"
     min_rate_bps: "50"          # abs(rate) 超过该阈值才进入候选

@@ -17,7 +17,7 @@ from nautilus_trader.model.instruments import Instrument
 from nautilus_trader.trading.strategy import Strategy
 
 
-class BacktestfundingConfig(StrategyConfig, frozen=True):
+class BacktestFundingConfig(StrategyConfig, frozen=True):
     instrument_ids: list[InstrumentId]
     bar_types: list[BarType]
     trade_notional: Decimal
@@ -30,8 +30,8 @@ class BacktestfundingConfig(StrategyConfig, frozen=True):
     event_log_path: str
 
 
-class Backtestfunding(Strategy):
-    def __init__(self, config: BacktestfundingConfig) -> None:
+class BacktestFundingStrategy(Strategy):
+    def __init__(self, config: BacktestFundingConfig) -> None:
         super().__init__(config)
         self.events: dict[str, dict] = {}
         self.open_events: dict[InstrumentId, str] = {}

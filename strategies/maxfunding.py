@@ -23,7 +23,7 @@ from nautilus_trader.model.instruments import Instrument
 from nautilus_trader.trading.strategy import Strategy
 
 
-class MaxfundingConfig(StrategyConfig, frozen=True):
+class MaxFundingConfig(StrategyConfig, frozen=True):
     instrument_ids: list[InstrumentId]
     bar_types: list[BarType]
     trade_symbols: list[str] | str
@@ -43,7 +43,7 @@ class MaxfundingConfig(StrategyConfig, frozen=True):
     event_log_path: str = "auto"
 
 
-class Maxfunding(Strategy):
+class MaxFundingStrategy(Strategy):
     WARMUP_TIMER = "maxfunding_warmup"
     PRE_TIMER = "maxfunding_pre"
     FREEZE_TIMER = "maxfunding_freeze"
@@ -52,7 +52,7 @@ class Maxfunding(Strategy):
     POST_TIMER = "maxfunding_post"
     TIMERS = (WARMUP_TIMER, PRE_TIMER, FREEZE_TIMER, RATE_TIMER, CLOSE_TIMER, POST_TIMER)
 
-    def __init__(self, config: MaxfundingConfig) -> None:
+    def __init__(self, config: MaxFundingConfig) -> None:
         super().__init__(config)
         self.notional = Decimal(str(config.trade_notional))
         self.min_rate = Decimal(str(config.min_rate_bps)) / Decimal("10000")

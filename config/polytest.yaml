@@ -1,0 +1,19 @@
+strategy:
+  name: poly_test
+  params:
+    max_ticks: 5
+    timeout_sec: 30
+    labels: [BTC150K-YES]
+
+exchange:
+  name: polymarket
+
+instrument:
+  kind: binary_option
+
+live:
+  modules: []
+  markets:
+    - instrument_id: 0xa0f4c4924ea1a8b410b4ce821c2a9955fad21a1b19bdcfde90816732278b3dd5-13915689317269078219168496739008737517740566192006337297676041270492637394586.POLYMARKET
+      outcome: "Yes"
+      timeframe: 1s

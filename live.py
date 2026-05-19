@@ -3,21 +3,18 @@ from __future__ import annotations
 import sys
 from threading import Thread
 
-from nautilus_trader.adapters.binance.factories import BinanceLiveDataClientFactory
-from nautilus_trader.adapters.binance.factories import BinanceLiveExecClientFactory
 from nautilus_trader.common.enums import LogColor
 from nautilus_trader.config import LoggingConfig
 from nautilus_trader.config import TradingNodeConfig
 from nautilus_trader.live.node import TradingNode
 
+from adapters.registry import build_client_bundle
 from actors.data_recorder import DataRecorder
 from actors.data_recorder import DataRecorderConfig
-from utils.arguments import BINANCE_CLIENT_NAME
 from utils.arguments import NODE_STOP_TOPIC
 from external.data_engine import EXTERNAL_SIGNAL_CLIENT_NAME
 from external.data_engine import ExternalSignalDataClientConfig
 from external.data_engine import ExternalSignalLiveDataClientFactory
-from utils.binance_clients import BinanceConfigBuilder
 from utils.config_loader import load_settings
 from utils.report_writer import live_logs_dir
 from utils.report_writer import live_raw_log_name
@@ -45,22 +42,6 @@ def enabled_modules(settings: dict) -> set[str]:
     return set(modules)
 
 
-# 根据 run.py 传入的模式生成一份 live 配置，不修改原始 settings。
-def resolve_live_mode(settings: dict, mode: str | None) -> dict:
-    if mode is None:
-        raise RuntimeError("live.main 必须由 run.py 传入 mode")
-    live = settings["live"]
-    modes = live["modes"]
-    if mode not in modes:
-        raise ValueError(f"Unsupported live mode: {mode}")
-
-    base_live = {key: value for key, value in live.items() if key != "modes"}
-    resolved = dict(settings)
-    resolved["live"] = {**base_live, **modes[mode]}
-    resolved["mode"] = mode
-    return resolved
-
-
 # 在 node 自己的事件循环里请求停止。
 def stop_node(node: TradingNode, reason: str) -> None:
     node.get_logger().info(f"NODE_STOP_REQUEST reason={reason}", color=LogColor.YELLOW)
@@ -77,14 +58,14 @@ def attach_node_stop_handler(node: TradingNode) -> None:
     node.trader.subscribe(NODE_STOP_TOPIC, handle_node_stop)
 
 
-# 为当前 set 构建 Binance live/testnet node，并挂上 live 成交落盘。
-def build_live_node(settings: dict) -> tuple[TradingNode, TraderReportWriter]:
-    binance = BinanceConfigBuilder(settings)
-    output_dir = prepare_report_dir(settings, "live")
+# 为当前 set 构建 live/testnet node。
+def build_live_node(settings: dict) -> TradingNode:
+    bundle = build_client_bundle(settings)
+    prepare_report_dir(settings, "live")
     log_dir = live_logs_dir()
     log_dir.mkdir(parents=True, exist_ok=True)
     modules = enabled_modules(settings)
-    data_clients = {BINANCE_CLIENT_NAME: binance.data_config()}
+    data_clients = {bundle.name: bundle.data_config}
     if EXTERNAL_SIGNAL_MODULE in modules:
         data_clients[EXTERNAL_SIGNAL_CLIENT_NAME] = ExternalSignalDataClientConfig(
             host=settings["external_signal"]["host"],
@@ -92,7 +73,7 @@ def build_live_node(settings: dict) -> tuple[TradingNode, TraderReportWriter]:
         )
     trade_config = TradingNodeConfig(
         trader_id=settings["runtime"]["trader_id"],
-        cache=binance.cache_config(),
+        cache=bundle.cache,
         logging=LoggingConfig(
             log_level=settings["live"]["log_level"],
             log_level_file=settings["live"]["log_level_file"],
@@ -106,25 +87,24 @@ def build_live_node(settings: dict) -> tuple[TradingNode, TraderReportWriter]:
             clear_log_file=bool(settings["live"]["clear_log_file"]),
         ),
         data_clients=data_clients,
-        exec_clients={BINANCE_CLIENT_NAME: binance.exec_config()},
+        exec_clients={bundle.name: bundle.exec_config},
     )
 
     node = TradingNode(config=trade_config)
-    node.add_data_client_factory(BINANCE_CLIENT_NAME, BinanceLiveDataClientFactory)
+    node.add_data_client_factory(bundle.name, bundle.data_factory)
     if EXTERNAL_SIGNAL_MODULE in modules:
         node.add_data_client_factory(EXTERNAL_SIGNAL_CLIENT_NAME, ExternalSignalLiveDataClientFactory)
-    node.add_exec_client_factory(BINANCE_CLIENT_NAME, BinanceLiveExecClientFactory)
+    node.add_exec_client_factory(bundle.name, bundle.exec_factory)
 
     strategy = build_strategy(settings, "live")
     node.trader.add_strategy(strategy)
 
-    report_writer = TraderReportWriter.from_settings(settings, "live")
     if DATA_RECORDER_MODULE in modules:
         node.trader.add_actor(DataRecorder(DataRecorderConfig()))
     attach_node_stop_handler(node)
 
     node.build()
-    return node, report_writer
+    return node
 
 
 # 挂上回车停止监听，然后按 NT 标准方式运行 node。
@@ -142,19 +122,19 @@ def run_live_node(node: TradingNode) -> None:
 
 # 运行 live/testnet，由 run.py 负责传入配置名和模式。
 def main(config_name: str, mode: str | None = None) -> None:
-    settings = resolve_live_mode(load_settings(config_name, mode=mode), mode)
+    settings = load_settings(config_name, mode=mode)
+    settings["mode"] = mode
     settings = claim_run(settings)
     node = None
-    report_writer = None
+    report_writer = TraderReportWriter.from_settings(settings, "live")
 
     try:
-        node, report_writer = build_live_node(settings)
+        node = build_live_node(settings)
         run_live_node(node)
         report_writer.write_final_reports(node.trader)
     finally:
         if node is not None:
             node.dispose()
-        if report_writer is not None:
-            report_writer.write_clean_live_log(settings)
-            print_live_summary(settings)
+        report_writer.write_clean_live_log(settings)
+        print_live_summary(settings)
         release_run(settings)

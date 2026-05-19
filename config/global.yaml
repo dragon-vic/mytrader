@@ -19,15 +19,6 @@ live:
     DataRecorder: INFO               # 通用 live 落盘 actor 日志级别
   margin_type: CROSS                 # U 本位保证金模式；CROSS 或 ISOLATED
   leverage: 1                        # 杠杆倍数；正整数，策略 yaml 可覆盖
-  modes:
-    testnet:
-      environment: TESTNET           # 运行环境；TESTNET 表示 Binance 测试网
-      api_key_env: BINANCE_FUTURES_TESTNET_API_KEY # 测试网 API key 环境变量名
-      api_secret_env: BINANCE_FUTURES_TESTNET_API_SECRET # 测试网 API secret 环境变量名
-    live:
-      environment: LIVE              # 运行环境；LIVE 表示 Binance 实盘
-      api_key_env: BINANCE_FUTURES_API_KEY # 实盘 API key 环境变量名
-      api_secret_env: BINANCE_FUTURES_API_SECRET # 实盘 API secret 环境变量名
 
 # 低频：live 只需要市场类型来推导 NT symbol。
 instrument:
@@ -67,9 +58,16 @@ project:
 
 # 全局：交易所和代理，和具体策略无关。
 exchange:
-  name: binance                      # 交易所名称；当前代码只接 Binance
-  venue: BINANCE                     # NT venue 标识；需与 adapter 使用的 venue 一致
+  name: binance                      # adapter 选择；支持 binance/polymarket
   proxy_url: http://127.0.0.1:7890   # Windows 下 HTTP/WS 代理；Linux 运行时会忽略
+
+# 全局：Polymarket adapter 参数；只有 exchange.name=polymarket 时使用。
+polymarket:
+  signature_type: 1
+  instrument_provider:
+    load_all: false                  # live.markets=all 时仍会按全量加载
+    use_gamma_markets: true          # 通过 Gamma API 加载市场元数据
+    event_slug_builder: null         # 可填 "module:function"，动态返回 event slug 列表
 
 # 全局：本地外部信号 data client。
 external_signal:

@@ -10,8 +10,8 @@ from nautilus_trader.model.objects import Money
 from nautilus_trader.persistence.catalog import ParquetDataCatalog
 import pandas as pd
 
+from adapters.common import cache_config
 from utils.config_loader import ROOT
-from utils.binance_clients import BinanceConfigBuilder
 from utils.config_loader import load_settings
 from utils.config_loader import normalize_market
 from utils.market_data import MarketDataStore
@@ -51,12 +51,11 @@ def prepare_tick_backtest(settings: dict) -> None:
 # 为当前 set 创建一个新的 NT 回测引擎。
 def build_backtest_engine(settings: dict) -> BacktestEngine:
     prepare_tick_backtest(settings)
-    binance = BinanceConfigBuilder(settings)
     store = MarketDataStore(settings)
 
     engine = BacktestEngine(
         config=BacktestEngineConfig(
-            cache=binance.cache_config(),
+            cache=cache_config(settings),
             logging=LoggingConfig(
                 log_level=settings["backtest"]["log_level"],
                 bypass_logging=bool(settings["backtest"].get("log_bypass", False)),

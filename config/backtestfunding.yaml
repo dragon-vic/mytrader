@@ -1,5 +1,5 @@
 strategy:
-  name: backtestfunding
+  name: backtest_funding
   params:
     trade_notional: "1000"
     min_rate_bps: "50"

@@ -9,6 +9,10 @@ import yaml
 from utils.arguments import DEFAULT_CONFIG_NAME
 
 ROOT = Path(__file__).resolve().parent.parent
+EXCHANGE_VENUES = {
+    "binance": "BINANCE",
+    "polymarket": "POLYMARKET",
+}
 
 
 # 加载一个具名 set，让每个策略保留自己的市场和参数。
@@ -50,8 +54,44 @@ def snake_to_pascal(name: str) -> str:
     return "".join(part.capitalize() for part in name.split("_"))
 
 
-# 补齐一个市场的交易所、币种和 Binance/NT symbol。
+# 把 snake_case 策略名转成全小写模块名。
+def strategy_module_name(name: str) -> str:
+    return name.replace("_", "").lower()
+
+
+# 补齐一个 Polymarket 市场的 condition/token instrument id。
+def normalize_poly_market(market: dict[str, Any], settings: dict[str, Any]) -> dict[str, Any]:
+    exchange = settings["exchange"]
+    raw_id = market.get("instrument_id")
+    if raw_id:
+        symbol = str(raw_id).split(".", 1)[0]
+    else:
+        symbol = f"{market['condition_id']}-{market['token_id']}"
+    return {
+        "exchange": exchange["name"],
+        "venue": exchange["venue"],
+        "base_currency": market.get("outcome", "POLY"),
+        "quote_currency": "USD",
+        "settlement_currency": "USD",
+        "raw_symbol": symbol,
+        "instrument_symbol": symbol,
+        **market,
+    }
+
+
+# 根据 exchange.name 补齐 NT venue。
+def normalize_exchange(settings: dict[str, Any]) -> None:
+    name = settings["exchange"]["name"].lower()
+    if name not in EXCHANGE_VENUES:
+        raise ValueError(f"Unsupported exchange.name: {settings['exchange']['name']}")
+    settings["exchange"]["name"] = name
+    settings["exchange"]["venue"] = EXCHANGE_VENUES[name]
+
+
+# 补齐一个市场的交易所、币种和 NT symbol。
 def normalize_market(market: dict[str, Any], settings: dict[str, Any]) -> dict[str, Any]:
+    if settings["exchange"]["name"] == "polymarket":
+        return normalize_poly_market(market, settings)
     instrument_kind = settings["instrument"]["kind"]
     if "timeframe" not in market:
         raise KeyError("markets[].timeframe is required")
@@ -79,13 +119,14 @@ def normalize_strategy(settings: dict[str, Any]) -> None:
     strategy = settings["strategy"]
     name = strategy["name"]
     class_name = snake_to_pascal(name)
-    strategy.setdefault("module", f"strategies.{name}")
-    strategy.setdefault("class", class_name)
+    strategy.setdefault("module", f"strategies.{strategy_module_name(name)}")
+    strategy.setdefault("class", f"{class_name}Strategy")
     strategy.setdefault("config_class", f"{class_name}Config")
 
 
 # 补齐从 symbol 可推导的市场字段。
 def normalize_settings(settings: dict[str, Any]) -> None:
+    normalize_exchange(settings)
     market_defaults = settings.get("market_defaults") or {}
     if "markets" not in settings:
         raise KeyError("markets is required")
