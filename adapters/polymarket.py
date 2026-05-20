@@ -24,7 +24,7 @@ POLYMARKET_CLIENT_NAME = "POLYMARKET"
 # 从 .env 读取 Polymarket 固定凭证变量。
 def credentials() -> dict[str, str]:
     return {
-        "private_key": os.environ["POLYMARKET_PK"],
+        "private_key": os.environ["POLYMARKET_SIGNER"],
         "funder": os.environ["POLYMARKET_FUNDER"],
         "api_key": os.environ["POLYMARKET_API_KEY"],
         "api_secret": os.environ["POLYMARKET_API_SECRET"],

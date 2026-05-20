@@ -5,13 +5,13 @@ strategy:
     min_rate_bps: "50"
     trade_symbols: all
     exclude_symbols: [LYN, BEAT, PIPPIN, RAVE, SOON, SENT, ORCA]
-    events_path: data/funding/ALL-20250101.parquet
+    events_path: data/funding/ALL-Funding-20250101.parquet
     entry_before_ms: 500
     exit_after_ms: 1000
 
 backtest:
   markets: all
-  tick_data_path: data/tick/event/ALL-FUNDING-EVENTS-20250101.parquet
+  tick_data_path: data/ticks/ALL-PERP-FundingEventTicks-20250101.parquet
   starting_balance: "1000 USDT"
   account_type: MARGIN
   oms_type: NETTING

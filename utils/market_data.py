@@ -93,7 +93,7 @@ class MarketDataStore:
             ],
         )
 
-    # 同步入口包装，方便 fetch_data.py 直接调用。
+    # 同步入口包装，方便数据拉取脚本直接调用。
     def fetch_ohlcv(self, market: dict[str, Any]) -> pd.DataFrame:
         if market["exchange"].lower() != "binance":
             raise ValueError("This minimal project currently supports Binance only.")

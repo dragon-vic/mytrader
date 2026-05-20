@@ -1,9 +1,10 @@
 strategy:
   name: poly_test
   params:
-    max_ticks: 5
-    timeout_sec: 30
-    labels: [BTC150K-YES]
+    max_ticks: 0
+    timeout_sec: 0
+    scan_sec: 5
+    tick_log_path: data/polymarket/BTC-5m-tick.parquet
 
 exchange:
   name: polymarket
@@ -13,7 +14,10 @@ instrument:
 
 live:
   modules: []
-  markets:
-    - instrument_id: 0xa0f4c4924ea1a8b410b4ce821c2a9955fad21a1b19bdcfde90816732278b3dd5-13915689317269078219168496739008737517740566192006337297676041270492637394586.POLYMARKET
-      outcome: "Yes"
-      timeframe: 1s
+  markets: all
+  reports: false
+  reconciliation_scope: configured_markets
+
+polymarket:
+  instrument_provider:
+    event_slug_builder: utils.polymarket_btc5m:build_event_slugs

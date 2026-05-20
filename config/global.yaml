@@ -6,6 +6,8 @@ market_defaults:
 live:
   markets: all                       # live 加载市场；all 表示全市场，也可在策略 yaml 覆盖成列表
   modules: [data_recorder]           # 加入 live node 的可选组件；可选 data_recorder/external_signal
+  reports: true                      # 是否生成交易报告；Polymarket 行情采集可关闭
+  reconciliation_scope: null         # 可填 configured_markets，把启动对账限定到配置标的
   account_type: USDT_FUTURES         # Binance 账户类型；当前 live 使用 USDT_FUTURES
   log_level: INFO                    # 终端日志级别；常用 DEBUG/INFO/WARNING/ERROR
   log_level_file: INFO               # 原始日志文件级别；常用 DEBUG/INFO/WARNING/ERROR

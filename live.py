@@ -6,6 +6,7 @@ from threading import Thread
 from nautilus_trader.common.enums import LogColor
 from nautilus_trader.config import LoggingConfig
 from nautilus_trader.config import TradingNodeConfig
+from nautilus_trader.live.config import LiveExecEngineConfig
 from nautilus_trader.live.node import TradingNode
 
 from adapters.registry import build_client_bundle
@@ -16,6 +17,10 @@ from external.data_engine import EXTERNAL_SIGNAL_CLIENT_NAME
 from external.data_engine import ExternalSignalDataClientConfig
 from external.data_engine import ExternalSignalLiveDataClientFactory
 from utils.config_loader import load_settings
+from utils.config_loader import markets_all
+from utils.config_loader import proxy_url
+from utils.instrument_factory import InstrumentFactory
+from utils.polymarket_btc5m import up_instrument_ids
 from utils.report_writer import live_logs_dir
 from utils.report_writer import live_raw_log_name
 from utils.report_writer import prepare_report_dir
@@ -42,6 +47,30 @@ def enabled_modules(settings: dict) -> set[str]:
     return set(modules)
 
 
+# 当前 live 是否输出交易报告。
+def reports_enabled(settings: dict) -> bool:
+    return bool(settings["live"].get("reports", True))
+
+
+# 为 exec reconciliation 限定当前策略关心的 instrument。
+def reconciliation_instrument_ids(settings: dict):
+    if settings["live"].get("reconciliation_scope") != "configured_markets":
+        return None
+    if settings["exchange"]["name"] == "polymarket":
+        return up_instrument_ids(proxy_url(settings))
+    if markets_all(settings):
+        return None
+    factory = InstrumentFactory(settings)
+    return [factory.instrument_id(market) for market in factory.markets]
+
+
+# 构建 live exec engine 配置。
+def exec_engine_config(settings: dict) -> LiveExecEngineConfig:
+    return LiveExecEngineConfig(
+        reconciliation_instrument_ids=reconciliation_instrument_ids(settings),
+    )
+
+
 # 在 node 自己的事件循环里请求停止。
 def stop_node(node: TradingNode, reason: str) -> None:
     node.get_logger().info(f"NODE_STOP_REQUEST reason={reason}", color=LogColor.YELLOW)
@@ -61,7 +90,8 @@ def attach_node_stop_handler(node: TradingNode) -> None:
 # 为当前 set 构建 live/testnet node。
 def build_live_node(settings: dict) -> TradingNode:
     bundle = build_client_bundle(settings)
-    prepare_report_dir(settings, "live")
+    if reports_enabled(settings):
+        prepare_report_dir(settings, "live")
     log_dir = live_logs_dir()
     log_dir.mkdir(parents=True, exist_ok=True)
     modules = enabled_modules(settings)
@@ -88,6 +118,7 @@ def build_live_node(settings: dict) -> TradingNode:
         ),
         data_clients=data_clients,
         exec_clients={bundle.name: bundle.exec_config},
+        exec_engine=exec_engine_config(settings),
     )
 
     node = TradingNode(config=trade_config)
@@ -126,15 +157,17 @@ def main(config_name: str, mode: str | None = None) -> None:
     settings["mode"] = mode
     settings = claim_run(settings)
     node = None
-    report_writer = TraderReportWriter.from_settings(settings, "live")
+    report_writer = TraderReportWriter.from_settings(settings, "live") if reports_enabled(settings) else None
 
     try:
         node = build_live_node(settings)
         run_live_node(node)
-        report_writer.write_final_reports(node.trader)
+        if report_writer is not None:
+            report_writer.write_final_reports(node.trader)
     finally:
         if node is not None:
             node.dispose()
-        report_writer.write_clean_live_log(settings)
-        print_live_summary(settings)
+        if report_writer is not None:
+            report_writer.write_clean_live_log(settings)
+            print_live_summary(settings)
         release_run(settings)

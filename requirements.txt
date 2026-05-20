@@ -1,4 +1,5 @@
 nautilus-trader
+py-clob-client-v2
 pandas
 requests
 PyYAML
