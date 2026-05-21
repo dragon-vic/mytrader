@@ -62,6 +62,44 @@ def final_live_log_path(settings: dict[str, Any]) -> Path:
     return live_logs_dir() / f"{settings['project']['config_name']}-{settings['mode']}-{end_time}.log"
 
 
+# 把 NT 原始日志行首 UTC 时间改成北京时间，保存后的 live 日志更方便直接阅读。
+def localize_live_log_line(line: str) -> str:
+    match = LOG_UTC_PREFIX.match(line)
+    if match is None:
+        return line
+    timestamp = pd.Timestamp(match.group("ts")).tz_convert(LOCAL_TZ)
+    return f"{timestamp.isoformat()}{match.group('rest')}"
+
+
+# 保留 TradingNode RUNNING 到 STOPPING 之间的 live 日志。
+def write_clean_live_log(
+    settings: dict[str, Any],
+    start_marker: str = LIVE_LOG_START_MARKER,
+    stop_marker: str = LIVE_LOG_STOP_MARKER,
+) -> None:
+    source = live_raw_log_path(settings)
+    target = final_live_log_path(settings)
+    if not source.exists():
+        return
+
+    lines = source.read_text(encoding="utf-8", errors="replace").splitlines()
+    end = len(lines)
+    for index in range(len(lines) - 1, -1, -1):
+        if stop_marker in lines[index]:
+            end = index
+            break
+    start = None
+    for index in range(end - 1, -1, -1):
+        if start_marker in lines[index]:
+            start = index + 1
+            break
+    if start is None:
+        return
+    localized_lines = [localize_live_log_line(line) for line in lines[start:end]]
+    target.write_text("\n".join(localized_lines) + "\n", encoding="utf-8")
+    source.unlink()
+
+
 # 创建当前运行的报告目录；每次运行使用新目录，不再清理旧文件。
 def prepare_report_dir(settings: dict[str, Any], run_type: str) -> Path:
     reports_root = (ROOT / settings["project"]["reports_dir"]).resolve()
@@ -178,11 +216,7 @@ class TraderReportWriter:
 
     # 把 NT 原始日志行首 UTC 时间改成北京时间，保存后的 live 日志更方便直接阅读。
     def localize_live_log_line(self, line: str) -> str:
-        match = LOG_UTC_PREFIX.match(line)
-        if match is None:
-            return line
-        timestamp = pd.Timestamp(match.group("ts")).tz_convert(LOCAL_TZ)
-        return f"{timestamp.isoformat()}{match.group('rest')}"
+        return localize_live_log_line(line)
 
     # 生成更容易看的 positions.csv 和中文 summary.md。
     def write_clean_reports(self, positions: pd.DataFrame) -> None:
@@ -219,27 +253,7 @@ class TraderReportWriter:
         start_marker: str = LIVE_LOG_START_MARKER,
         stop_marker: str = LIVE_LOG_STOP_MARKER,
     ) -> None:
-        source = live_raw_log_path(settings)
-        target = final_live_log_path(settings)
-        if not source.exists():
-            return
-
-        lines = source.read_text(encoding="utf-8", errors="replace").splitlines()
-        end = len(lines)
-        for index in range(len(lines) - 1, -1, -1):
-            if stop_marker in lines[index]:
-                end = index
-                break
-        start = None
-        for index in range(end - 1, -1, -1):
-            if start_marker in lines[index]:
-                start = index + 1
-                break
-        if start is None:
-            return
-        localized_lines = [self.localize_live_log_line(line) for line in lines[start:end]]
-        target.write_text("\n".join(localized_lines) + "\n", encoding="utf-8")
-        source.unlink()
+        write_clean_live_log(settings, start_marker, stop_marker)
 
 
 # 保存 NT trader 生成的订单、持仓报告。

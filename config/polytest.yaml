@@ -5,6 +5,7 @@ strategy:
     timeout_sec: 0
     scan_sec: 5
     tick_log_path: data/polymarket/BTC-5m-tick.parquet
+    btc_spot_instrument_id: BTCUSDT.BINANCE
 
 exchange:
   name: polymarket
@@ -17,6 +18,17 @@ live:
   markets: all
   reports: false
   reconciliation_scope: configured_markets
+  binance_spot_data:
+    enabled: true
+    account_type: SPOT
+    instrument:
+      kind: spot
+    markets:
+      - instrument_symbol: BTCUSDT
+        raw_symbol: BTCUSDT
+        venue: BINANCE
+        base_currency: BTC
+        quote_currency: USDT
 
 polymarket:
   instrument_provider:

@@ -30,12 +30,19 @@ def build_event_slugs() -> list[str]:
 
 # 解析 Gamma event 里的 Up token instrument id。
 def up_instrument_ids(proxy_url: str | None = None) -> list[InstrumentId]:
+    return [InstrumentId.from_str(instrument_id) for instrument_id in up_instrument_windows(proxy_url)]
+
+
+# 解析 Gamma event 里的 Up token 和 5m 窗口时间。
+def up_instrument_windows(proxy_url: str | None = None) -> dict[str, dict[str, int | str]]:
     session = requests.Session()
     if proxy_url:
         session.proxies.update({"http": proxy_url, "https": proxy_url})
 
-    ids: list[InstrumentId] = []
+    windows: dict[str, dict[str, int | str]] = {}
     for slug in build_event_slugs():
+        start = slug_start(slug)
+        end = start + WINDOW_SECONDS
         event = fetch_event(session, slug)
         if event is None:
             continue
@@ -43,8 +50,18 @@ def up_instrument_ids(proxy_url: str | None = None) -> list[InstrumentId]:
             condition_id = market.get("conditionId")
             token_id = up_token_id(market)
             if condition_id and token_id:
-                ids.append(InstrumentId.from_str(f"{condition_id}-{token_id}.POLYMARKET"))
-    return ids
+                instrument_id = f"{condition_id}-{token_id}.POLYMARKET"
+                windows[instrument_id] = {
+                    "slug": slug,
+                    "event_start_ns": start * 1_000_000_000,
+                    "event_end_ns": end * 1_000_000_000,
+                }
+    return windows
+
+
+# BTC 5m slug 末尾就是窗口开始秒级时间戳。
+def slug_start(slug: str) -> int:
+    return int(slug.rsplit("-", 1)[1])
 
 
 # 读取单个 Gamma event，SSL EOF 时短重试。

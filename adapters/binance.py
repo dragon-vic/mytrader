@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import os
 from typing import Any
 
@@ -120,3 +121,22 @@ def build_client_bundle(settings: dict) -> ClientBundle:
         data_factory=BinanceLiveDataClientFactory,
         exec_factory=BinanceLiveExecClientFactory,
     )
+
+
+# 构建只用于行情的 Binance data client，不读取执行凭证。
+def build_data_client(settings: dict, config: dict[str, Any]) -> tuple[BinanceDataClientConfig, type[BinanceLiveDataClientFactory]]:
+    client_settings = deepcopy(settings)
+    client_settings["exchange"] = {"name": "binance", "venue": BINANCE_CLIENT_NAME}
+    client_settings["instrument"] = {
+        **client_settings.get("instrument", {}),
+        **config["instrument"],
+    }
+    client_settings["live"] = {
+        **client_settings["live"],
+        "account_type": config["account_type"],
+    }
+    client_settings["markets"] = config["markets"]
+    client_settings["markets_all"] = False
+
+    binance = BinanceBuilder(client_settings)
+    return binance.data_config(), BinanceLiveDataClientFactory

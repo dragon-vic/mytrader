@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable
 from datetime import datetime
 from datetime import timezone
 from pathlib import Path
@@ -24,6 +25,11 @@ LOCAL_TZ = ZoneInfo("Asia/Shanghai")
 POLYMARKET_VENUE = Venue("POLYMARKET")
 OUTPUT_COLUMNS = [
     "北京时间",
+    "event_start_utc",
+    "event_end_utc",
+    "btc_spot_price",
+    "btc_spot_ts_event_ns",
+    "btc_spot_age_ms",
     "ts_event_ns",
     "ts_init_ns",
     "instrument_id",
@@ -46,6 +52,8 @@ class PolyTestConfig(StrategyConfig, frozen=True):
     timeout_sec: int
     scan_sec: int
     tick_log_path: str
+    btc_spot_instrument_id: str
+    event_windows: dict[str, dict[str, int | str]]
 
 
 class PolyTestStrategy(Strategy):
@@ -56,13 +64,21 @@ class PolyTestStrategy(Strategy):
         self.scan_count = 0
         self.output_path = self._output_path(config.tick_log_path)
         self.subscribed: set[InstrumentId] = set()
+        self.btc_spot_instrument_id = InstrumentId.from_str(config.btc_spot_instrument_id)
+        self.btc_spot_subscribed = False
+        self.btc_spot_price: float | None = None
+        self.btc_spot_ts_event_ns: int | None = None
         self.instruments: dict[InstrumentId, BinaryOption] = {}
         self.buffers: dict[InstrumentId, list[dict[str, object]]] = {}
+        self.event_windows = config.event_windows
 
     # 启动后从 provider 已加载的 Polymarket instruments 中订阅 BTC 5m Up 成交。
     def on_start(self) -> None:
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
         self._log_account()
+        self.subscribe_trade_ticks(self.btc_spot_instrument_id)
+        self.btc_spot_subscribed = True
+        self._subscribe_ids(self.config.instrument_ids)
         self._refresh_subscriptions()
         self._flush_expired_buffers()
         self._schedule_scan()
@@ -76,19 +92,28 @@ class PolyTestStrategy(Strategy):
             f"polytest启动，订阅BTC 5m Up成交，当前订阅数={len(self.subscribed)}，落盘={self.output_path}",
         )
 
+    # 收到 Polymarket instrument 批量响应后订阅 Up token。
+    def on_instruments(self, instruments: list) -> None:
+        self._refresh_subscriptions(instruments)
+
+    # 收到单个 instrument 响应后订阅 Up token。
+    def on_instrument(self, instrument) -> None:
+        self._refresh_subscriptions([instrument])
+
     # 收到成交后先进入当前 event buffer，event 结束时统一落盘。
     def on_trade_tick(self, tick: TradeTick) -> None:
+        if tick.instrument_id == self.btc_spot_instrument_id:
+            self.btc_spot_price = float(str(tick.price))
+            self.btc_spot_ts_event_ns = int(tick.ts_event)
+            return
+        if not self._window_open(tick.instrument_id, self.clock.timestamp_ns()):
+            return
         instrument = self._instrument(tick.instrument_id)
         if instrument is None:
             return
 
         self.trade_count += 1
         self.buffers.setdefault(tick.instrument_id, []).append(self._row(tick, instrument))
-        if self.trade_count <= 5 or self.trade_count % 100 == 0:
-            self.log.info(
-                f"成交 n={self.trade_count} market={self._short_id(tick.instrument_id)} "
-                f"price={tick.price} size={tick.size} side={self._side_label(tick.aggressor_side)}",
-            )
         self._stop_if_done()
 
     # 打印启动时已经加载到账户和持仓摘要。
@@ -122,13 +147,14 @@ class PolyTestStrategy(Strategy):
         )
 
     # provider 刷新后，新增 Up token 会在这里补订阅。
-    def _refresh_subscriptions(self) -> None:
+    def _refresh_subscriptions(self, instruments: Iterable | None = None) -> None:
         now_ns = self.clock.timestamp_ns()
         added = 0
-        for instrument in self.cache.instruments(venue=POLYMARKET_VENUE):
+        source = instruments if instruments is not None else self.cache.instruments(venue=POLYMARKET_VENUE)
+        for instrument in source:
             if not self._is_up_option(instrument):
                 continue
-            if int(instrument.expiration_ns) <= now_ns:
+            if not self._window_open(instrument.id, now_ns):
                 continue
             self.instruments[instrument.id] = instrument
             if instrument.id in self.subscribed:
@@ -138,6 +164,20 @@ class PolyTestStrategy(Strategy):
             added += 1
         if added:
             self.log.info(f"新增订阅BTC 5m Up instrument={added}，总订阅数={len(self.subscribed)}")
+
+    def _subscribe_ids(self, instrument_ids: Iterable[InstrumentId]) -> None:
+        now_ns = self.clock.timestamp_ns()
+        added = 0
+        for instrument_id in instrument_ids:
+            if not self._window_open(instrument_id, now_ns):
+                continue
+            if instrument_id in self.subscribed:
+                continue
+            self.subscribe_trade_ticks(instrument_id)
+            self.subscribed.add(instrument_id)
+            added += 1
+        if added:
+            self.log.info(f"按配置订阅BTC 5m Up instrument={added}，总订阅数={len(self.subscribed)}")
 
     def _is_up_option(self, instrument) -> bool:
         return isinstance(instrument, BinaryOption) and str(instrument.outcome).lower() == "up"
@@ -154,9 +194,14 @@ class PolyTestStrategy(Strategy):
     # 到期的 event buffer 统一落盘。
     def _flush_expired_buffers(self) -> None:
         now_ns = self.clock.timestamp_ns()
-        for instrument_id, instrument in list(self.instruments.items()):
-            if int(instrument.expiration_ns) <= now_ns:
+        for instrument_id in list(self.instruments):
+            window = self._window(instrument_id)
+            if window and int(window["event_end_ns"]) <= now_ns:
                 self._flush_instrument(instrument_id)
+                if instrument_id in self.subscribed:
+                    self.unsubscribe_trade_ticks(instrument_id)
+                    self.subscribed.remove(instrument_id)
+                self.instruments.pop(instrument_id, None)
 
     def _flush_instrument(self, instrument_id: InstrumentId) -> None:
         rows = self.buffers.pop(instrument_id, [])
@@ -168,13 +213,17 @@ class PolyTestStrategy(Strategy):
     # 合并已有 parquet 后整体去重，写临时文件再替换。
     def _write_rows(self, rows: list[dict[str, object]]) -> None:
         new_df = pd.DataFrame(rows, columns=OUTPUT_COLUMNS)
-        old_df = pd.read_parquet(self.output_path) if self.output_path.exists() else pd.DataFrame(columns=OUTPUT_COLUMNS)
-        merged = pd.concat([old_df, new_df], ignore_index=True)
+        if self.output_path.exists():
+            old_df = pd.read_parquet(self.output_path)
+            merged = pd.concat([old_df, new_df], ignore_index=True)
+        else:
+            merged = new_df
         merged = (
             merged.drop_duplicates(subset=DEDUP_COLUMNS, keep="last")
             .sort_values(["ts_event_ns", "instrument_id", "trade_id"])
             .reset_index(drop=True)
         )
+        merged = merged.reindex(columns=OUTPUT_COLUMNS)
         tmp = self.output_path.with_name(self.output_path.name + ".tmp.parquet")
         merged.to_parquet(tmp, index=False)
         os.replace(tmp, self.output_path)
@@ -182,8 +231,14 @@ class PolyTestStrategy(Strategy):
     # 构造成交 tick 的落盘行。
     def _row(self, tick: TradeTick, instrument: BinaryOption) -> dict[str, object]:
         condition_id, token_id = self._condition_token(tick.instrument_id)
+        window = self._window(tick.instrument_id)
         return {
             "北京时间": self._local_time(tick.ts_event),
+            "event_start_utc": self._utc_time(window["event_start_ns"]) if window else "",
+            "event_end_utc": self._utc_time(window["event_end_ns"]) if window else "",
+            "btc_spot_price": self.btc_spot_price,
+            "btc_spot_ts_event_ns": self.btc_spot_ts_event_ns,
+            "btc_spot_age_ms": self._btc_spot_age_ms(tick.ts_event),
             "ts_event_ns": int(tick.ts_event),
             "ts_init_ns": int(tick.ts_init),
             "instrument_id": str(tick.instrument_id),
@@ -206,6 +261,23 @@ class PolyTestStrategy(Strategy):
     def _local_time(self, timestamp_ns: int) -> str:
         timestamp = datetime.fromtimestamp(timestamp_ns / 1_000_000_000, tz=timezone.utc)
         return timestamp.astimezone(LOCAL_TZ).strftime("%Y-%m-%d %H:%M:%S.%f")
+
+    # 把纳秒时间戳转成 UTC 字符串。
+    def _utc_time(self, timestamp_ns: int | str) -> str:
+        timestamp = datetime.fromtimestamp(int(timestamp_ns) / 1_000_000_000, tz=timezone.utc)
+        return timestamp.isoformat()
+
+    def _window(self, instrument_id: InstrumentId) -> dict[str, int | str] | None:
+        return self.event_windows.get(str(instrument_id))
+
+    def _window_open(self, instrument_id: InstrumentId, now_ns: int) -> bool:
+        window = self._window(instrument_id)
+        return window is not None and now_ns < int(window["event_end_ns"])
+
+    def _btc_spot_age_ms(self, ts_event_ns: int) -> int | None:
+        if self.btc_spot_ts_event_ns is None:
+            return None
+        return int((int(ts_event_ns) - self.btc_spot_ts_event_ns) / 1_000_000)
 
     # 把 NT aggressor side 转成人读中文。
     def _side_label(self, side) -> str:
@@ -243,6 +315,8 @@ class PolyTestStrategy(Strategy):
 
     # 停止时取消订阅，并强制落盘尚未到期的 buffer。
     def on_stop(self) -> None:
+        if self.btc_spot_subscribed:
+            self.unsubscribe_trade_ticks(self.btc_spot_instrument_id)
         for instrument_id in self.subscribed:
             self.unsubscribe_trade_ticks(instrument_id)
         for instrument_id in list(self.buffers):

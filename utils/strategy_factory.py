@@ -16,9 +16,12 @@ def build_strategy(settings: dict[str, Any], run_type: str = "backtest"):
     config_cls = getattr(module, strategy["config_class"])
     instruments = InstrumentFactory(settings, run_type)
     params = strategy_params(settings, config_cls, run_type, instruments)
+    instrument_ids = [instruments.instrument_id(market) for market in instruments.markets]
+    if not instrument_ids:
+        instrument_ids = settings.get("runtime", {}).get("instrument_ids", [])
 
     config = config_cls(
-        instrument_ids=[instruments.instrument_id(market) for market in instruments.markets],
+        instrument_ids=instrument_ids,
         bar_types=instruments.bar_types(),
         **params,
     )
@@ -46,4 +49,6 @@ def strategy_params(
         params["event_log_path"] = str(run_reports_dir(settings, run_type) / "strategy_events.csv")
     if "tick_log_path" in fields and params.get("tick_log_path", "auto") == "auto":
         params["tick_log_path"] = str(run_reports_dir(settings, run_type) / "poly_ticks.csv")
+    if "event_windows" in fields:
+        params["event_windows"] = settings.get("runtime", {}).get("event_windows", {})
     return params
