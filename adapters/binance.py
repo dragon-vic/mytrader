@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 import os
 from typing import Any
 
@@ -15,13 +14,9 @@ from nautilus_trader.adapters.binance.factories import BinanceLiveDataClientFact
 from nautilus_trader.adapters.binance.factories import BinanceLiveExecClientFactory
 from nautilus_trader.adapters.binance.futures.enums import BinanceFuturesMarginType
 from nautilus_trader.config import RoutingConfig
+from nautilus_trader.model.identifiers import Venue
 
-from adapters.bundle import ClientBundle
-from adapters.common import cache_config
-from utils.arguments import BINANCE_CLIENT_NAME
 from utils.config_loader import ROOT
-from utils.config_loader import market_configs
-from utils.config_loader import markets_all
 from utils.config_loader import proxy_url
 from utils.instrument_factory import InstrumentFactory
 
@@ -41,102 +36,71 @@ BINANCE_ENVS = {
 
 # 根据运行模式推导 Binance 环境。
 def environment(settings: dict[str, Any]) -> BinanceEnvironment:
-    mode = settings["mode"]
-    return getattr(BinanceEnvironment, BINANCE_ENVS[mode]["environment"])
+    return getattr(BinanceEnvironment, BINANCE_ENVS[settings["mode"]]["environment"])
 
 
-# 根据运行模式从 .env 读取 Binance API 凭证。
+# 根据运行模式从 .env 读取 Binance 执行凭证。
 def credentials(settings: dict[str, Any]) -> tuple[str, str]:
     envs = BINANCE_ENVS[settings["mode"]]
     return os.environ[envs["api_key"]], os.environ[envs["api_secret"]]
 
 
-# 构建 Binance live/testnet node 需要的 client 配置。
-class BinanceBuilder:
-    def __init__(self, settings: dict[str, Any]) -> None:
-        self.settings = settings
-        self.factory = InstrumentFactory(settings)
-        self.venues = (
-            frozenset({settings["exchange"]["venue"]})
-            if markets_all(settings)
-            else frozenset(market["venue"] for market in self.factory.markets)
-        )
-
-    # 构建 Binance data/exec client 共用的 instrument provider 配置。
-    def instrument_provider(self) -> BinanceInstrumentProviderConfig:
-        if markets_all(self.settings):
-            return BinanceInstrumentProviderConfig(load_all=True)
-        return BinanceInstrumentProviderConfig(
-            load_all=False,
-            load_ids=frozenset(
-                self.factory.instrument_id(market)
-                for market in self.factory.markets
-            ),
-        )
-
-    # 从当前 set 的 live.margin_type 构建 Binance 合约全仓/逐仓设置。
-    def futures_margin_types(self) -> dict[BinanceSymbol, BinanceFuturesMarginType] | None:
-        margin_type = self.settings["live"]["margin_type"]
-        if margin_type is None or markets_all(self.settings):
-            return None
-        return {
-            BinanceSymbol(market["raw_symbol"]): getattr(BinanceFuturesMarginType, margin_type)
-            for market in market_configs(self.settings)
-        }
-
-    # 构建 Binance live data client 配置。
-    def data_config(self) -> BinanceDataClientConfig:
-        return BinanceDataClientConfig(
-            account_type=getattr(BinanceAccountType, self.settings["live"]["account_type"]),
-            environment=environment(self.settings),
-            proxy_url=proxy_url(self.settings),
-            instrument_provider=self.instrument_provider(),
-            routing=RoutingConfig(default=True, venues=self.venues),
-        )
-
-    # 构建 Binance live exec client 配置。
-    def exec_config(self) -> BinanceExecClientConfig:
-        load_dotenv(ROOT / ".env")
-        api_key, api_secret = credentials(self.settings)
-        return BinanceExecClientConfig(
-            api_key=api_key,
-            api_secret=api_secret,
-            account_type=getattr(BinanceAccountType, self.settings["live"]["account_type"]),
-            environment=environment(self.settings),
-            proxy_url=proxy_url(self.settings),
-            futures_margin_types=self.futures_margin_types(),
-            instrument_provider=self.instrument_provider(),
-            routing=RoutingConfig(default=True, venues=self.venues),
-        )
-
-
-# 构建 Binance live data/exec client 注册包。
-def build_client_bundle(settings: dict) -> ClientBundle:
-    binance = BinanceBuilder(settings)
-    return ClientBundle(
-        name=BINANCE_CLIENT_NAME,
-        cache=cache_config(settings),
-        data_config=binance.data_config(),
-        exec_config=binance.exec_config(),
-        data_factory=BinanceLiveDataClientFactory,
-        exec_factory=BinanceLiveExecClientFactory,
+# 构建 Binance instrument provider 配置。
+def instrument_provider(cfg: dict[str, Any]) -> BinanceInstrumentProviderConfig:
+    if cfg["markets_all"]:
+        return BinanceInstrumentProviderConfig(load_all=True)
+    factory = InstrumentFactory.from_client(cfg)
+    return BinanceInstrumentProviderConfig(
+        load_all=False,
+        load_ids=frozenset(factory.instrument_id(market) for market in factory.markets),
     )
 
 
-# 构建只用于行情的 Binance data client，不读取执行凭证。
-def build_data_client(settings: dict, config: dict[str, Any]) -> tuple[BinanceDataClientConfig, type[BinanceLiveDataClientFactory]]:
-    client_settings = deepcopy(settings)
-    client_settings["exchange"] = {"name": "binance", "venue": BINANCE_CLIENT_NAME}
-    client_settings["instrument"] = {
-        **client_settings.get("instrument", {}),
-        **config["instrument"],
+# 从 client 配置构建合约全仓/逐仓设置。
+def futures_margin_types(cfg: dict[str, Any]) -> dict[BinanceSymbol, BinanceFuturesMarginType] | None:
+    margin_type = cfg.get("margin_type")
+    if margin_type is None or cfg["markets_all"]:
+        return None
+    return {
+        BinanceSymbol(market["raw_symbol"]): getattr(BinanceFuturesMarginType, margin_type)
+        for market in cfg["markets"]
     }
-    client_settings["live"] = {
-        **client_settings["live"],
-        "account_type": config["account_type"],
-    }
-    client_settings["markets"] = config["markets"]
-    client_settings["markets_all"] = False
 
-    binance = BinanceBuilder(client_settings)
-    return binance.data_config(), BinanceLiveDataClientFactory
+
+def routing(cfg: dict[str, Any]) -> RoutingConfig:
+    return RoutingConfig(default=True, venues=frozenset({Venue(cfg["venue"])}))
+
+
+# 构建 Binance live data client 配置。
+def build_data_client(settings: dict[str, Any], cfg: dict[str, Any]):
+    return (
+        cfg["client_id"],
+        BinanceDataClientConfig(
+            account_type=getattr(BinanceAccountType, cfg["account_type"]),
+            environment=environment(settings),
+            proxy_url=proxy_url(settings),
+            instrument_provider=instrument_provider(cfg),
+            routing=routing(cfg),
+        ),
+        BinanceLiveDataClientFactory,
+    )
+
+
+# 构建 Binance live exec client 配置。
+def build_exec_client(settings: dict[str, Any], cfg: dict[str, Any]):
+    load_dotenv(ROOT / ".env")
+    api_key, api_secret = credentials(settings)
+    return (
+        cfg["client_id"],
+        BinanceExecClientConfig(
+            api_key=api_key,
+            api_secret=api_secret,
+            account_type=getattr(BinanceAccountType, cfg["account_type"]),
+            environment=environment(settings),
+            proxy_url=proxy_url(settings),
+            futures_margin_types=futures_margin_types(cfg),
+            instrument_provider=instrument_provider(cfg),
+            routing=routing(cfg),
+        ),
+        BinanceLiveExecClientFactory,
+    )

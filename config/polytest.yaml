@@ -4,32 +4,31 @@ strategy:
     max_ticks: 0
     timeout_sec: 0
     scan_sec: 5
-    tick_log_path: data/polymarket/BTC-5m-tick.parquet
+    tick_log_path: auto
     btc_spot_instrument_id: BTCUSDT.BINANCE
 
-exchange:
-  name: polymarket
+data:
+  clients:
+    polymarket:
+      enabled: true
+      markets: all
+      instrument_provider:
+        event_slug_builder: utils.polymarket_btc5m:build_event_slugs
 
-instrument:
-  kind: binary_option
+    binance_spot:
+      enabled: true
+      markets: [BTC]
 
-live:
-  modules: []
-  markets: all
-  reports: false
-  reconciliation_scope: configured_markets
-  binance_spot_data:
-    enabled: true
-    account_type: SPOT
-    instrument:
-      kind: spot
-    markets:
-      - instrument_symbol: BTCUSDT
-        raw_symbol: BTCUSDT
-        venue: BINANCE
-        base_currency: BTC
-        quote_currency: USDT
+exec:
+  engine:
+    reconciliation_scope: configured_markets
 
-polymarket:
-  instrument_provider:
-    event_slug_builder: utils.polymarket_btc5m:build_event_slugs
+  clients:
+    polymarket:
+      enabled: true
+      markets: all
+      instrument_provider:
+        event_slug_builder: utils.polymarket_btc5m:build_event_slugs
+
+reports:
+  enabled: true

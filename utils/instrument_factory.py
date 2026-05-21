@@ -16,7 +16,6 @@ from nautilus_trader.model.objects import Price
 from nautilus_trader.model.objects import Quantity
 
 from utils.arguments import TIMEFRAME_UNITS
-from utils.config_loader import market_configs
 
 
 # 把 1s/1m/1h/1d 这种周期转成 NT BarType 需要的 bar spec。
@@ -37,12 +36,26 @@ def optional_money(value: Any, currency: Currency) -> Money | None:
 class InstrumentFactory:
     def __init__(self, settings: dict[str, Any], run_type: str = "live") -> None:
         self.settings = settings
-        self.markets = market_configs(settings)
+        self.markets = settings["markets"]
         if run_type == "backtest":
             self.cfg = dict(settings.get("backtest", {}).get("instrument", {}))
-            self.cfg.update(settings.get("instrument", {}))
+            self.cfg["kind"] = settings["backtest"]["instrument_kind"]
         else:
-            self.cfg = dict(settings.get("instrument", {}))
+            client = settings["strategy"]["params"]["instrument_client"]
+            source = settings["data"]["clients"].get(client)
+            if source is None:
+                source = settings["exec"]["clients"][client]
+            self.cfg = dict(source.get("instrument", {}))
+            self.cfg["kind"] = source["instrument_kind"]
+
+    @classmethod
+    def from_client(cls, cfg: dict[str, Any]) -> "InstrumentFactory":
+        factory = cls.__new__(cls)
+        factory.settings = {}
+        factory.markets = cfg["markets"]
+        factory.cfg = dict(cfg.get("instrument", {}))
+        factory.cfg["kind"] = cfg["instrument_kind"]
+        return factory
 
     # 返回 Binance 原生 symbol，文件名和 NT symbol 可以不同。
     def raw_symbol(self, market: dict[str, Any]) -> str:
@@ -127,6 +140,8 @@ class InstrumentFactory:
 
     # 构建指定市场对应的 NT BarType。
     def bar_type(self, market: dict[str, Any]) -> BarType:
+        if "timeframe" not in market:
+            raise KeyError("market.timeframe is required to build bar_types")
         spec = timeframe_to_bar_spec(market["timeframe"])
         aggregation_source = "INTERNAL" if market["timeframe"].endswith("s") else "EXTERNAL"
         return BarType.from_str(f"{market['instrument_symbol']}.{market['venue']}-{spec}-LAST-{aggregation_source}")

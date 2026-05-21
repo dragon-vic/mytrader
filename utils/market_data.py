@@ -47,9 +47,18 @@ class MarketDataStore:
         filename = f"{market['exchange']}_{instrument}_{market['timeframe']}_ohlcv.csv"
         return ROOT / self.settings["project"]["data_dir"] / "raw" / filename
 
+    def account_type(self) -> BinanceAccountType:
+        if self.settings["mode"] == "backtest":
+            value = self.settings["backtest"]["venue_account"]["account_type"]
+        else:
+            client = self.settings["strategy"]["params"]["instrument_client"]
+            source = self.settings["data"]["clients"][client]
+            value = source["account_type"]
+        return getattr(BinanceAccountType, value)
+
     # 通过 NT 的 Binance adapter 异步拉取某个市场的 kline。
     async def fetch_ohlcv_async(self, market: dict[str, Any]) -> pd.DataFrame:
-        account_type = getattr(BinanceAccountType, self.settings["live"]["account_type"])
+        account_type = self.account_type()
         client = BinanceHttpClient(
             clock=LiveClock(),
             api_key=None,

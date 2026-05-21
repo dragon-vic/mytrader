@@ -11,23 +11,20 @@ from typing import Any
 from urllib.parse import urlencode
 
 import requests
-import yaml
 from dotenv import load_dotenv
 
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
 BASE_URL = "https://fapi.binance.com"
 REQUEST_DELAY_SEC = 0.35
 TARGET_QUOTES = ("USDT", "USDC", "BTC")
 
 
-# 读取 global.yaml 里的 Windows 代理。
+# 读取 .env 里的 Windows 代理。
 def load_proxy() -> dict[str, str] | None:
     if platform.system() != "Windows":
         return None
-    with (ROOT / "config" / "global.yaml").open("r", encoding="utf-8") as f:
-        settings = yaml.safe_load(f)
-    proxy_url = settings["exchange"].get("proxy_url")
+    proxy_url = os.environ.get("PROXY_URL")
     if not proxy_url:
         return None
     return {"http": proxy_url, "https": proxy_url}

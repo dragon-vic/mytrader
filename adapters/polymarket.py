@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from typing import Any
 
 from dotenv import load_dotenv
 from nautilus_trader.adapters.polymarket.config import PolymarketDataClientConfig
@@ -11,14 +12,9 @@ from nautilus_trader.adapters.polymarket.providers import PolymarketInstrumentPr
 from nautilus_trader.config import RoutingConfig
 from nautilus_trader.model.identifiers import Venue
 
-from adapters.bundle import ClientBundle
-from adapters.common import cache_config
 from utils.config_loader import ROOT
-from utils.config_loader import markets_all
 from utils.config_loader import proxy_url
 from utils.instrument_factory import InstrumentFactory
-
-POLYMARKET_CLIENT_NAME = "POLYMARKET"
 
 
 # 从 .env 读取 Polymarket 固定凭证变量。
@@ -33,51 +29,59 @@ def credentials() -> dict[str, str]:
 
 
 # 构建 Polymarket instrument provider 配置。
-def instrument_config(settings: dict) -> PolymarketInstrumentProviderConfig:
-    cfg = settings["polymarket"]["instrument_provider"]
-    load_all = bool(cfg["load_all"]) or markets_all(settings)
+def instrument_config(cfg: dict[str, Any]) -> PolymarketInstrumentProviderConfig:
+    provider = cfg["instrument_provider"]
     load_ids = None
-    if not load_all:
-        factory = InstrumentFactory(settings)
+    if not cfg["markets_all"]:
+        factory = InstrumentFactory.from_client(cfg)
         load_ids = frozenset(factory.instrument_id(market) for market in factory.markets)
     return PolymarketInstrumentProviderConfig(
-        load_all=load_all,
+        load_all=bool(provider["load_all"]) or cfg["markets_all"],
         load_ids=load_ids,
-        use_gamma_markets=bool(cfg["use_gamma_markets"]),
-        event_slug_builder=cfg["event_slug_builder"],
+        use_gamma_markets=bool(provider["use_gamma_markets"]),
+        event_slug_builder=provider["event_slug_builder"],
     )
 
 
-# 构建 Polymarket live data/exec client 注册包。
-def build_client_bundle(settings: dict) -> ClientBundle:
+def routing(cfg: dict[str, Any]) -> RoutingConfig:
+    return RoutingConfig(default=True, venues=frozenset({Venue(cfg["venue"])}))
+
+
+# 构建 Polymarket live data client 配置。
+def build_data_client(settings: dict[str, Any], cfg: dict[str, Any]):
     load_dotenv(ROOT / ".env")
-    venue = Venue(settings["exchange"]["venue"])
-    routing = RoutingConfig(default=True, venues=frozenset({venue}))
-    provider = instrument_config(settings)
-    signature_type = int(settings["polymarket"]["signature_type"])
+    provider = instrument_config(cfg)
+    venue = Venue(cfg["venue"])
     creds = credentials()
+    return (
+        cfg["client_id"],
+        PolymarketDataClientConfig(
+            instrument_config=provider,
+            venue=venue,
+            signature_type=int(cfg["signature_type"]),
+            **creds,
+            proxy_url=proxy_url(settings),
+            routing=routing(cfg),
+        ),
+        PolymarketLiveDataClientFactory,
+    )
 
-    data_config = PolymarketDataClientConfig(
-        instrument_config=provider,
-        venue=venue,
-        signature_type=signature_type,
-        **creds,
-        proxy_url=proxy_url(settings),
-        routing=routing,
-    )
-    exec_config = PolymarketExecClientConfig(
-        instrument_config=provider,
-        venue=venue,
-        signature_type=signature_type,
-        **creds,
-        proxy_url=proxy_url(settings),
-        routing=routing,
-    )
-    return ClientBundle(
-        name=POLYMARKET_CLIENT_NAME,
-        cache=cache_config(settings),
-        data_config=data_config,
-        exec_config=exec_config,
-        data_factory=PolymarketLiveDataClientFactory,
-        exec_factory=PolymarketLiveExecClientFactory,
+
+# 构建 Polymarket live exec client 配置。
+def build_exec_client(settings: dict[str, Any], cfg: dict[str, Any]):
+    load_dotenv(ROOT / ".env")
+    provider = instrument_config(cfg)
+    venue = Venue(cfg["venue"])
+    creds = credentials()
+    return (
+        cfg["client_id"],
+        PolymarketExecClientConfig(
+            instrument_config=provider,
+            venue=venue,
+            signature_type=int(cfg["signature_type"]),
+            **creds,
+            proxy_url=proxy_url(settings),
+            routing=routing(cfg),
+        ),
+        PolymarketLiveExecClientFactory,
     )

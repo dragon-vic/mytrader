@@ -10,7 +10,6 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 from nautilus_trader.common.events import TimeEvent
 from nautilus_trader.config import StrategyConfig
-from nautilus_trader.model.data import BarType
 from nautilus_trader.model.data import TradeTick
 from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.model.identifiers import Venue
@@ -46,8 +45,6 @@ DEDUP_COLUMNS = ["instrument_id", "trade_id", "ts_event_ns"]
 
 
 class PolyTestConfig(StrategyConfig, frozen=True):
-    instrument_ids: list[InstrumentId]
-    bar_types: list[BarType]
     max_ticks: int
     timeout_sec: int
     scan_sec: int
@@ -78,7 +75,7 @@ class PolyTestStrategy(Strategy):
         self._log_account()
         self.subscribe_trade_ticks(self.btc_spot_instrument_id)
         self.btc_spot_subscribed = True
-        self._subscribe_ids(self.config.instrument_ids)
+        self._subscribe_ids(InstrumentId.from_str(instrument_id) for instrument_id in self.event_windows)
         self._refresh_subscriptions()
         self._flush_expired_buffers()
         self._schedule_scan()

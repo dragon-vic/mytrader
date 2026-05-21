@@ -1,6 +1,7 @@
 strategy:
   name: backtest_funding
   params:
+    instrument_client: binance_futures
     trade_notional: "1000"
     min_rate_bps: "50"
     trade_symbols: all
@@ -11,12 +12,15 @@ strategy:
 
 backtest:
   markets: all
-  tick_data_path: data/ticks/ALL-PERP-FundingEventTicks-20250101.parquet
-  starting_balance: "1000 USDT"
-  account_type: MARGIN
-  oms_type: NETTING
-  log_level: WARNING
-  log_bypass: true
+  data:
+    tick_data_path: data/ticks/ALL-PERP-FundingEventTicks-20250101.parquet
+  venue_account:
+    starting_balance: "1000 USDT"
+    account_type: MARGIN
+    oms_type: NETTING
+  logging:
+    log_level: WARNING
+    bypass: true
   instrument:
     settlement_currency: USDT
     is_inverse: false

@@ -14,7 +14,6 @@ from rich.table import Table
 
 from utils.arguments import LIVE_LOG_START_MARKER
 from utils.arguments import LIVE_LOG_STOP_MARKER
-from utils.arguments import LOGS_DIR
 from utils.arguments import POSITIONS_FILE
 from utils.arguments import REPORT_COLUMNS
 from utils.arguments import REPORT_FILES
@@ -29,37 +28,28 @@ LOG_UTC_PREFIX = re.compile(r"^(?P<ts>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d
 
 # 返回当前运行的报告目录。
 def run_reports_dir(settings: dict[str, Any], run_type: str) -> Path:
+    report_dir_name = settings.get("runtime", {}).get("report_dir_name")
+    if report_dir_name:
+        return ROOT / settings["reports"]["root"] / report_dir_name
     run_name = settings.get("runtime", {}).get("run_name")
     if run_name:
-        return ROOT / settings["project"]["reports_dir"] / run_name
-    return ROOT / settings["project"]["reports_dir"] / f"{settings['project']['config_name']}-{run_type}"
-
-
-# 返回 live 日志目录。
-def live_logs_dir() -> Path:
-    return ROOT / LOGS_DIR
+        return ROOT / settings["reports"]["root"] / run_name
+    return ROOT / settings["reports"]["root"] / f"{settings['project']['config_name']}-{run_type}"
 
 
 # 返回本次运行的 NT 原始日志文件名，不带后缀。
 def live_raw_log_name(settings: dict[str, Any]) -> str:
-    run_name = settings.get("runtime", {}).get("run_name")
-    if run_name:
-        return f"{run_name}-running"
-    return f"{settings['project']['config_name']}-{settings['mode']}-running"
+    return "nt"
 
 
 # 返回本次运行的 NT 原始日志路径。
 def live_raw_log_path(settings: dict[str, Any]) -> Path:
-    return live_logs_dir() / f"{live_raw_log_name(settings)}.log"
+    return run_reports_dir(settings, "live") / f"{live_raw_log_name(settings)}.log"
 
 
 # 返回最终清洗日志路径，避免同一分钟重复运行时覆盖旧日志。
 def final_live_log_path(settings: dict[str, Any]) -> Path:
-    run_name = settings.get("runtime", {}).get("run_name")
-    if run_name:
-        return live_logs_dir() / f"{run_name}.log"
-    end_time = datetime.now(LOCAL_TZ).strftime("%Y%m%d-%H%M")
-    return live_logs_dir() / f"{settings['project']['config_name']}-{settings['mode']}-{end_time}.log"
+    return run_reports_dir(settings, "live") / "live.log"
 
 
 # 把 NT 原始日志行首 UTC 时间改成北京时间，保存后的 live 日志更方便直接阅读。
@@ -102,7 +92,7 @@ def write_clean_live_log(
 
 # 创建当前运行的报告目录；每次运行使用新目录，不再清理旧文件。
 def prepare_report_dir(settings: dict[str, Any], run_type: str) -> Path:
-    reports_root = (ROOT / settings["project"]["reports_dir"]).resolve()
+    reports_root = (ROOT / settings["reports"]["root"]).resolve()
     output_dir = run_reports_dir(settings, run_type).resolve()
     output_dir.relative_to(reports_root)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -381,7 +371,7 @@ def backtest_overview_rows(payload: dict[str, Any], settings: dict[str, Any]) ->
         ("回测开始", format_timestamp_ns(payload.get("backtest_start"))),
         ("回测结束", format_timestamp_ns(payload.get("backtest_end"))),
         ("回测天数", format_number(float(payload.get("elapsed_time") or 0) / 86400)),
-        ("初始资金", settings["backtest"]["starting_balance"]),
+        ("初始资金", settings["backtest"]["venue_account"]["starting_balance"]),
         ("总收益", format_number(pnl_stats.get("PnL (total)"), currency)),
         ("总收益率", format_number(pnl_stats.get("PnL% (total)"), "%")),
         ("盈利因子", format_number(return_stats.get("Profit Factor"))),
@@ -421,7 +411,7 @@ def live_overview_rows(settings: dict[str, Any], output_dir: Path) -> list[tuple
 
 # 总览里按 yaml 写法显示标的；markets: all 不展开成长列表。
 def market_symbols(settings: dict[str, Any], run_type: str) -> str:
-    if settings.get("mode_markets") == "all" or settings.get(run_type, {}).get("markets") == "all" or settings.get("markets_all"):
+    if settings.get(run_type, {}).get("markets_all") or settings.get("markets_all"):
         return "all"
     return ", ".join(market["instrument_symbol"] for market in settings["markets"])
 

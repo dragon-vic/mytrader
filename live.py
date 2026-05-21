@@ -1,92 +1,120 @@
 from __future__ import annotations
 
+import importlib
 import sys
 from threading import Thread
+from typing import Any
 
 from nautilus_trader.common.enums import LogColor
 from nautilus_trader.config import LoggingConfig
 from nautilus_trader.config import TradingNodeConfig
+from nautilus_trader.live.config import LiveDataEngineConfig
 from nautilus_trader.live.config import LiveExecEngineConfig
 from nautilus_trader.live.node import TradingNode
 from nautilus_trader.model.identifiers import InstrumentId
 
-from adapters.binance import build_data_client as build_binance_data_client
-from adapters.registry import build_client_bundle
 from actors.data_recorder import DataRecorder
 from actors.data_recorder import DataRecorderConfig
-from utils.arguments import BINANCE_CLIENT_NAME
-from utils.arguments import NODE_STOP_TOPIC
-from external.data_engine import EXTERNAL_SIGNAL_CLIENT_NAME
+from adapters.common import cache_config
 from external.data_engine import ExternalSignalDataClientConfig
 from external.data_engine import ExternalSignalLiveDataClientFactory
+from utils.arguments import NODE_STOP_TOPIC
 from utils.config_loader import load_settings
-from utils.config_loader import markets_all
 from utils.config_loader import proxy_url
 from utils.instrument_factory import InstrumentFactory
 from utils.polymarket_btc5m import up_instrument_windows
-from utils.report_writer import live_logs_dir
 from utils.report_writer import live_raw_log_name
 from utils.report_writer import prepare_report_dir
 from utils.report_writer import print_live_summary
 from utils.report_writer import TraderReportWriter
 from utils.report_writer import write_clean_live_log
 from utils.runtime_ids import claim_run
+from utils.runtime_ids import finalize_run_dir
 from utils.runtime_ids import release_run
 from utils.strategy_factory import build_strategy
 
 
-DATA_RECORDER_MODULE = "data_recorder"
-EXTERNAL_SIGNAL_MODULE = "external_signal"
-LIVE_MODULES = {DATA_RECORDER_MODULE, EXTERNAL_SIGNAL_MODULE}
-
-
-# live.modules 显式声明需要挂进 node 的可选组件。
-def enabled_modules(settings: dict) -> set[str]:
-    modules = settings["live"]["modules"]
-    if not isinstance(modules, list):
-        raise TypeError("live.modules must be a list")
-    unknown = set(modules) - LIVE_MODULES
-    if unknown:
-        raise ValueError(f"Unsupported live.modules: {sorted(unknown)}")
-    return set(modules)
+def adapter_module(name: str):
+    return importlib.import_module(f"adapters.{name}")
 
 
 # 当前 live 是否输出交易报告。
-def reports_enabled(settings: dict) -> bool:
-    return bool(settings["live"].get("reports", True))
-
-
-# Polymarket 采集时可选挂 Binance spot 行情，不注册 Binance 执行客户端。
-def binance_spot_data(settings: dict):
-    config = settings["live"].get("binance_spot_data")
-    if not config or not bool(config["enabled"]):
-        return None
-    if settings["exchange"]["name"] != "polymarket":
-        raise ValueError("live.binance_spot_data is only supported with exchange.name=polymarket")
-    return build_binance_data_client(settings, config)
+def reports_enabled(settings: dict[str, Any]) -> bool:
+    return bool(settings["reports"]["enabled"])
 
 
 # 为 exec reconciliation 限定当前策略关心的 instrument。
-def reconciliation_instrument_ids(settings: dict):
-    if settings["live"].get("reconciliation_scope") != "configured_markets":
+def reconciliation_instrument_ids(settings: dict[str, Any]):
+    scope = settings["exec"]["engine"]["reconciliation_scope"]
+    if scope != "configured_markets":
         return None
-    if settings["exchange"]["name"] == "polymarket":
+
+    exec_clients = [cfg for cfg in settings["exec"]["clients"].values() if cfg.get("enabled")]
+    if len(exec_clients) != 1:
+        raise ValueError("exec.engine.reconciliation_scope=configured_markets requires exactly one enabled exec client")
+
+    source = exec_clients[0]
+    if source["adapter"] == "polymarket":
         windows = up_instrument_windows(proxy_url(settings))
         instrument_ids = [InstrumentId.from_str(instrument_id) for instrument_id in windows]
         settings["runtime"]["instrument_ids"] = instrument_ids
         settings["runtime"]["event_windows"] = windows
         return instrument_ids
-    if markets_all(settings):
+
+    if settings["markets_all"]:
         return None
+
     factory = InstrumentFactory(settings)
     return [factory.instrument_id(market) for market in factory.markets]
 
 
+# 构建 NT data engine 配置。
+def data_engine_config(settings: dict[str, Any]) -> LiveDataEngineConfig:
+    return LiveDataEngineConfig(**settings["data"]["engine"])
+
+
 # 构建 live exec engine 配置。
-def exec_engine_config(settings: dict) -> LiveExecEngineConfig:
+def exec_engine_config(settings: dict[str, Any]) -> LiveExecEngineConfig:
+    cfg = dict(settings["exec"]["engine"])
+    cfg.pop("reconciliation_scope")
     return LiveExecEngineConfig(
+        **cfg,
         reconciliation_instrument_ids=reconciliation_instrument_ids(settings),
     )
+
+
+# 构建所有启用的行情客户端。
+def build_data_clients(settings: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    configs = {}
+    factories = {}
+    for cfg in settings["data"]["clients"].values():
+        if not cfg["enabled"]:
+            continue
+        if cfg["adapter"] == "external_signal":
+            client_id = cfg["client_id"]
+            configs[client_id] = ExternalSignalDataClientConfig(
+                host=cfg["host"],
+                port=int(cfg["port"]),
+            )
+            factories[client_id] = ExternalSignalLiveDataClientFactory
+            continue
+        client_id, config, factory = adapter_module(cfg["adapter"]).build_data_client(settings, cfg)
+        configs[client_id] = config
+        factories[client_id] = factory
+    return configs, factories
+
+
+# 构建所有启用的执行客户端。
+def build_exec_clients(settings: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    configs = {}
+    factories = {}
+    for cfg in settings["exec"]["clients"].values():
+        if not cfg["enabled"]:
+            continue
+        client_id, config, factory = adapter_module(cfg["adapter"]).build_exec_client(settings, cfg)
+        configs[client_id] = config
+        factories[client_id] = factory
+    return configs, factories
 
 
 # 在 node 自己的事件循环里请求停止。
@@ -106,54 +134,42 @@ def attach_node_stop_handler(node: TradingNode) -> None:
 
 
 # 为当前 set 构建 live/testnet node。
-def build_live_node(settings: dict) -> TradingNode:
-    bundle = build_client_bundle(settings)
-    if reports_enabled(settings):
-        prepare_report_dir(settings, "live")
-    log_dir = live_logs_dir()
-    log_dir.mkdir(parents=True, exist_ok=True)
-    modules = enabled_modules(settings)
-    data_clients = {bundle.name: bundle.data_config}
-    binance_spot = binance_spot_data(settings)
-    if binance_spot is not None:
-        data_clients[BINANCE_CLIENT_NAME] = binance_spot[0]
-    if EXTERNAL_SIGNAL_MODULE in modules:
-        data_clients[EXTERNAL_SIGNAL_CLIENT_NAME] = ExternalSignalDataClientConfig(
-            host=settings["external_signal"]["host"],
-            port=int(settings["external_signal"]["port"]),
-        )
+def build_live_node(settings: dict[str, Any]) -> TradingNode:
+    log_dir = prepare_report_dir(settings, "live")
+    data_clients, data_factories = build_data_clients(settings)
+    exec_clients, exec_factories = build_exec_clients(settings)
+    logging = settings["logging"]
+
     trade_config = TradingNodeConfig(
         trader_id=settings["runtime"]["trader_id"],
-        cache=bundle.cache,
+        cache=cache_config(settings),
         logging=LoggingConfig(
-            log_level=settings["live"]["log_level"],
-            log_level_file=settings["live"]["log_level_file"],
+            log_level=logging["log_level"],
+            log_level_file=logging["log_level_file"],
             log_directory=str(log_dir),
             log_file_name=live_raw_log_name(settings),
-            log_colors=bool(settings["live"]["log_colors"]),
+            log_colors=bool(logging["log_colors"]),
             log_component_levels={
-                **settings["live"]["log_component_levels"],
-                settings["strategy"]["class"]: settings["live"]["strategy_log_level"],
+                **logging["component_levels"],
+                settings["strategy"]["class"]: logging["strategy_log_level"],
             },
-            clear_log_file=bool(settings["live"]["clear_log_file"]),
+            clear_log_file=bool(logging["clear_log_file"]),
         ),
+        data_engine=data_engine_config(settings),
         data_clients=data_clients,
-        exec_clients={bundle.name: bundle.exec_config},
+        exec_clients=exec_clients,
         exec_engine=exec_engine_config(settings),
     )
 
     node = TradingNode(config=trade_config)
-    node.add_data_client_factory(bundle.name, bundle.data_factory)
-    if binance_spot is not None:
-        node.add_data_client_factory(BINANCE_CLIENT_NAME, binance_spot[1])
-    if EXTERNAL_SIGNAL_MODULE in modules:
-        node.add_data_client_factory(EXTERNAL_SIGNAL_CLIENT_NAME, ExternalSignalLiveDataClientFactory)
-    node.add_exec_client_factory(bundle.name, bundle.exec_factory)
+    for client_id, factory in data_factories.items():
+        node.add_data_client_factory(client_id, factory)
+    for client_id, factory in exec_factories.items():
+        node.add_exec_client_factory(client_id, factory)
 
-    strategy = build_strategy(settings, "live")
-    node.trader.add_strategy(strategy)
+    node.trader.add_strategy(build_strategy(settings, "live"))
 
-    if DATA_RECORDER_MODULE in modules:
+    if settings["actors"]["data_recorder"]["enabled"]:
         node.trader.add_actor(DataRecorder(DataRecorderConfig()))
     attach_node_stop_handler(node)
 
@@ -177,7 +193,6 @@ def run_live_node(node: TradingNode) -> None:
 # 运行 live/testnet，由 run.py 负责传入配置名和模式。
 def main(config_name: str, mode: str | None = None) -> None:
     settings = load_settings(config_name, mode=mode)
-    settings["mode"] = mode
     settings = claim_run(settings)
     node = None
     report_writer = TraderReportWriter.from_settings(settings, "live") if reports_enabled(settings) else None
@@ -191,6 +206,7 @@ def main(config_name: str, mode: str | None = None) -> None:
         if node is not None:
             node.dispose()
         write_clean_live_log(settings)
+        finalize_run_dir(settings)
         if report_writer is not None:
             print_live_summary(settings)
         release_run(settings)

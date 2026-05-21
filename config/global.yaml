@@ -1,77 +1,123 @@
-# 全局：简写 markets 时共用的市场默认值。
-market_defaults:
-  timeframe: 1s                      # 未单独声明时默认周期；支持 1s/1m/1h/1d 这类写法
+# node 本身只保留身份名；运行时会追加 node 序号生成 trader_id。
+node:
+  name: trader
 
-# 常改：live 运行参数。
-live:
-  markets: all                       # live 加载市场；all 表示全市场，也可在策略 yaml 覆盖成列表
-  modules: [data_recorder]           # 加入 live node 的可选组件；可选 data_recorder/external_signal
-  reports: true                      # 是否生成交易报告；Polymarket 行情采集可关闭
-  reconciliation_scope: null         # 可填 configured_markets，把启动对账限定到配置标的
-  account_type: USDT_FUTURES         # Binance 账户类型；当前 live 使用 USDT_FUTURES
-  log_level: INFO                    # 终端日志级别；常用 DEBUG/INFO/WARNING/ERROR
-  log_level_file: INFO               # 原始日志文件级别；常用 DEBUG/INFO/WARNING/ERROR
-  log_colors: true                   # 终端日志是否带颜色；true/false
-  clear_log_file: true               # 启动时是否清空同名运行中日志；true/false
-  strategy_log_level: INFO           # 当前策略组件日志级别；常用 DEBUG/INFO/WARNING/ERROR
-  log_component_levels:              # 共享组件日志级别
-    Portfolio: INFO               # 组合组件日志级别
-    ExecClient-BINANCE: WARNING      # Binance 执行客户端日志级别
-    BinanceFuturesInstrumentProvider: WARNING # instrument 刷新日志级别
-    DataRecorder: INFO               # 通用 live 落盘 actor 日志级别
-  margin_type: CROSS                 # U 本位保证金模式；CROSS 或 ISOLATED
-  leverage: 1                        # 杠杆倍数；正整数，策略 yaml 可覆盖
+# NT cache 容量。
+cache:
+  tick_capacity: 1000
+  bar_capacity: 1000
 
-# 低频：live 只需要市场类型来推导 NT symbol。
-instrument:
-  kind: perpetual                    # instrument 类型；当前支持 spot/perpetual
+# NT logging 默认值；策略 set 只覆盖有差异的叶子。
+logging:
+  log_level: INFO
+  log_level_file: INFO
+  strategy_log_level: INFO
+  log_colors: true
+  clear_log_file: true
+  component_levels:
+    Portfolio: INFO
+    DataRecorder: INFO
+    ExecClient-BINANCE: WARNING
+    BinanceFuturesInstrumentProvider: WARNING
 
-# 全局：node 运行时共享参数。
-runtime:
-  cache_capacity: 1000               # cache 中 tick/bar 保留条数；正整数
+# NT data engine 和所有可选 data client。
+data:
+  engine:
+    validate_data_sequence: false
+    qsize: 100000
 
-# 全局：回测/拉数据默认参数。live 缺少这些字段不应受影响。
-backtest:
-  data:
-    limit: 1000                       # 每批拉取 kline 数量；受交易所接口限制
-    batches: 3                        # 连续向前补多少批历史 kline
-  instrument:
-    settlement_currency: USDT        # 结算币；U 本位合约通常为 USDT
-    is_inverse: false                # 是否反向合约；U 本位正向合约写 false
-    price_precision: 2               # 价格小数位；按回测 instrument 规格填写
-    size_precision: 3                # 数量小数位；按回测 instrument 规格填写
-    price_increment: "0.01"          # 最小价格跳动；字符串避免浮点误差
-    size_increment: "0.001"          # 最小数量跳动；字符串避免浮点误差
-    multiplier: "1"                  # 合约乘数；现有 U 本位永续通常为 1
-    min_quantity: "0.001"            # 最小下单数量
-    max_quantity: "10000"            # 最大下单数量
-    min_notional: "5"                # 最小名义金额
-    max_price: "10000000"            # 允许的最大价格
-    margin_init: "1"                 # 回测初始保证金比例
-    margin_maint: "1"                # 回测维持保证金比例
-    maker_fee: "0.0002"              # maker 手续费率
-    taker_fee: "0.0005"              # taker 手续费率
+  clients:
+    binance_spot:
+      enabled: false
+      markets: []
 
-# 全局：项目目录。
+    binance_futures:
+      enabled: false
+      markets: []
+
+    polymarket:
+      enabled: false
+      markets: []
+      signature_type: 1
+      instrument_provider:
+        load_all: false
+        use_gamma_markets: true
+        event_slug_builder: null
+
+    external_signal:
+      enabled: false
+      host: 127.0.0.1
+      port: 9001
+
+# NT exec engine 和所有可选 exec client。
+exec:
+  engine:
+    reconciliation: true
+    reconciliation_scope: null
+    qsize: 100000
+
+  clients:
+    binance_futures:
+      enabled: false
+      markets: []
+      margin_type: CROSS
+      leverage: 1
+
+    polymarket:
+      enabled: false
+      markets: []
+      signature_type: 1
+      instrument_provider:
+        load_all: false
+        use_gamma_markets: true
+        event_slug_builder: null
+
+# NT actor。
+actors:
+  data_recorder:
+    enabled: false
+
+# 报告输出。
+reports:
+  enabled: true
+  root: reports
+
+# 项目路径。
 project:
-  name: nt_quant                     # 项目名
-  data_dir: data                     # 数据目录
-  reports_dir: reports               # 报告目录
+  data_dir: data
 
-# 全局：交易所和代理，和具体策略无关。
-exchange:
-  name: binance                      # adapter 选择；支持 binance/polymarket
-  proxy_url: http://127.0.0.1:7890   # Windows 下 HTTP/WS 代理；Linux 运行时会忽略
+# 回测默认模块参数。
+backtest:
+  client: binance_futures
+  markets: []
+  venue_account:
+    starting_balance: "100000 USDT"
+    account_type: MARGIN
+    oms_type: NETTING
+  logging:
+    log_level: INFO
+    bypass: false
+  data:
+    timeframe: 1s
+    limit: 1000
+    batches: 3
+  instrument:
+    settlement_currency: USDT
+    is_inverse: false
+    price_precision: 2
+    size_precision: 3
+    price_increment: "0.01"
+    size_increment: "0.001"
+    multiplier: "1"
+    min_quantity: "0.001"
+    max_quantity: "10000"
+    min_notional: "5"
+    max_price: "10000000"
+    margin_init: "1"
+    margin_maint: "1"
+    maker_fee: "0.0002"
+    taker_fee: "0.0005"
 
-# 全局：Polymarket adapter 参数；只有 exchange.name=polymarket 时使用。
-polymarket:
-  signature_type: 1
-  instrument_provider:
-    load_all: false                  # live.markets=all 时仍会按全量加载
-    use_gamma_markets: true          # 通过 Gamma API 加载市场元数据
-    event_slug_builder: null         # 可填 "module:function"，动态返回 event slug 列表
-
-# 全局：本地外部信号 data client。
-external_signal:
-  host: 127.0.0.1                    # 外部信号监听地址；本机通常写 127.0.0.1
-  port: 9001                         # 外部信号监听端口；多 node 时运行期会按 node 序号偏移
+strategy:
+  name: max_funding
+  params: {}

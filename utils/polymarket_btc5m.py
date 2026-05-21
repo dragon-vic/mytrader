@@ -6,7 +6,6 @@ from datetime import timezone
 from typing import Any
 
 import requests
-from nautilus_trader.model.identifiers import InstrumentId
 
 
 GAMMA_EVENTS_URL = "https://gamma-api.polymarket.com/events"
@@ -26,11 +25,6 @@ def build_event_slugs() -> list[str]:
     future_windows = FUTURE_HOURS * 3600 // WINDOW_SECONDS
     starts = range(current - PAST_WINDOWS * WINDOW_SECONDS, current + future_windows * WINDOW_SECONDS + 1, WINDOW_SECONDS)
     return [f"{SLUG_PREFIX}-{start}" for start in starts]
-
-
-# 解析 Gamma event 里的 Up token instrument id。
-def up_instrument_ids(proxy_url: str | None = None) -> list[InstrumentId]:
-    return [InstrumentId.from_str(instrument_id) for instrument_id in up_instrument_windows(proxy_url)]
 
 
 # 解析 Gamma event 里的 Up token 和 5m 窗口时间。

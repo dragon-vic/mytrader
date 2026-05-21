@@ -5,6 +5,7 @@ from decimal import Decimal
 from typing import Any
 from typing import get_type_hints
 
+from utils.config_loader import proxy_url
 from utils.instrument_factory import InstrumentFactory
 from utils.report_writer import run_reports_dir
 
@@ -14,18 +15,21 @@ def build_strategy(settings: dict[str, Any], run_type: str = "backtest"):
     strategy = settings["strategy"]
     module = importlib.import_module(strategy["module"])
     config_cls = getattr(module, strategy["config_class"])
-    instruments = InstrumentFactory(settings, run_type)
-    params = strategy_params(settings, config_cls, run_type, instruments)
-    instrument_ids = [instruments.instrument_id(market) for market in instruments.markets]
-    if not instrument_ids:
-        instrument_ids = settings.get("runtime", {}).get("instrument_ids", [])
-
-    config = config_cls(
-        instrument_ids=instrument_ids,
-        bar_types=instruments.bar_types(),
-        **params,
-    )
+    params = strategy_params(settings, config_cls, run_type)
+    config = config_cls(**params)
     return getattr(module, strategy["class"])(config)
+
+
+def strategy_instruments(settings: dict[str, Any], run_type: str, params: dict[str, Any]) -> InstrumentFactory:
+    client = params.pop("instrument_client")
+    if run_type == "backtest":
+        if client != settings["backtest"]["key"]:
+            raise ValueError("backtest strategy.params.instrument_client must equal backtest.client")
+        return InstrumentFactory.from_client(settings["backtest"])
+    source = settings["data"]["clients"].get(client) or settings["exec"]["clients"].get(client)
+    if source is None:
+        raise ValueError(f"strategy.params.instrument_client not found: {client}")
+    return InstrumentFactory.from_client(source)
 
 
 # 按策略配置字段自动补充运行类型、报告路径和全局代理。
@@ -33,14 +37,22 @@ def strategy_params(
     settings: dict[str, Any],
     config_cls,
     run_type: str,
-    instruments: InstrumentFactory,
 ) -> dict[str, Any]:
     params = dict(settings["strategy"].get("params", {}))
     fields = get_type_hints(config_cls)
+    if "instrument_ids" in fields or "bar_types" in fields:
+        if "instrument_client" not in params:
+            raise KeyError("strategy.params.instrument_client is required")
+        instruments = strategy_instruments(settings, run_type, params)
+        if "instrument_ids" in fields:
+            params["instrument_ids"] = [instruments.instrument_id(market) for market in instruments.markets]
+        if "bar_types" in fields:
+            params["bar_types"] = instruments.bar_types()
     for key, value in list(params.items()):
         if fields.get(key) is Decimal:
             params[key] = Decimal(str(value))
     if params.get("external_order_claims") is True:
+        instruments = strategy_instruments(settings, run_type, params)
         params["external_order_claims"] = [
             instruments.instrument_id(market)
             for market in instruments.markets
@@ -48,7 +60,9 @@ def strategy_params(
     if "event_log_path" in fields and params.get("event_log_path", "auto") == "auto":
         params["event_log_path"] = str(run_reports_dir(settings, run_type) / "strategy_events.csv")
     if "tick_log_path" in fields and params.get("tick_log_path", "auto") == "auto":
-        params["tick_log_path"] = str(run_reports_dir(settings, run_type) / "poly_ticks.csv")
+        params["tick_log_path"] = str(run_reports_dir(settings, run_type) / "poly_ticks.parquet")
     if "event_windows" in fields:
         params["event_windows"] = settings.get("runtime", {}).get("event_windows", {})
+    if "proxy_url" in fields:
+        params["proxy_url"] = proxy_url(settings) or ""
     return params
