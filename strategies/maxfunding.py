@@ -1,21 +1,15 @@
 from __future__ import annotations
 
 import csv
-import hashlib
-import hmac
-import os
 import platform
-import time
 from time import perf_counter
 from datetime import UTC
 from datetime import datetime
 from decimal import Decimal
 from decimal import ROUND_CEILING
 from pathlib import Path
-from urllib.parse import urlencode
 
 import requests
-from dotenv import load_dotenv
 from nautilus_trader.common.events import TimeEvent
 from nautilus_trader.config import StrategyConfig
 from nautilus_trader.model.data import BarType
@@ -35,6 +29,7 @@ class MaxFundingConfig(StrategyConfig, frozen=True):
     trade_symbols: list[str] | str
     exclude_symbols: list[str]
     trade_notional: Decimal
+    max_trades: int
     min_rate_bps: Decimal
     pre_sec: float
     entry_sec: float
@@ -62,6 +57,7 @@ class MaxFundingStrategy(Strategy):
     def __init__(self, config: MaxFundingConfig) -> None:
         super().__init__(config)
         self.notional = Decimal(str(config.trade_notional))
+        self.max_trades = int(config.max_trades)
         self.min_rate = Decimal(str(config.min_rate_bps)) / Decimal("10000")
         self.exit_sec = float(config.exit_sec)
         self.trade = None if config.trade_symbols == "all" else {
@@ -83,14 +79,13 @@ class MaxFundingStrategy(Strategy):
         self.ins_map: dict[InstrumentId, dict[str, Decimal | OrderSide]] = {}
         self.open_ids: set[InstrumentId] = set()
         self.order_map: dict[ClientOrderId, InstrumentId] = {}
-        self.chosen_id: InstrumentId | None = None
         self.had_order = False
         self.close_count = 0
         self.trade_written = False
+        self.close_submit_ns: dict[InstrumentId, int] = {}
         self.log_path = Path(config.event_log_path)
         use_proxy = platform.system() == "Windows" and config.proxy_url
         self.proxies = {"http": config.proxy_url, "https": config.proxy_url} if use_proxy else None
-        self.root = Path(__file__).resolve().parent.parent
 
     # 启动时注册 NT 定时器，资金费和价格用 REST 观察列表快照。
     def on_start(self) -> None:
@@ -108,6 +103,8 @@ class MaxFundingStrategy(Strategy):
             raise RuntimeError("post_sec must be greater than exit_sec")
         if self.config.api_timeout <= 0:
             raise RuntimeError("api_timeout must be positive")
+        if self.config.max_trades <= 0:
+            raise RuntimeError("max_trades must be positive")
         if self.config.funding_income_delay_sec <= self.config.exit_sec:
             raise RuntimeError("funding_income_delay_sec must be greater than exit_sec")
         if self.config.post_sec < self.config.funding_income_delay_sec:
@@ -123,7 +120,8 @@ class MaxFundingStrategy(Strategy):
             f"资金费率交易启动，已加载{len(self.ins)}个，"
             f"可交易{len(self.trade_ids)}个，"
             f"排除{len(self.exclude)}个，"
-            f"阈值{self._bps(self.min_rate)}bps，单币名义{self.notional:.2f}USDT"
+            f"阈值{self._bps(self.min_rate)}bps，"
+            f"最多交易{self.max_trades}个，单币名义{self.notional:.2f}USDT"
         )
 
     # clock alert 负责 t-3/t-2/t-1/t/t+2/t+3 六个确定动作。
@@ -202,25 +200,30 @@ class MaxFundingStrategy(Strategy):
         if not rows:
             self.log.info(f"交易模式，候选{len(self.ins_map)}个，无可下单交易对")
         else:
-            ins_id, row = max(rows, key=lambda item: abs(item[1]["rate"]))
-            ins = self.ins[ins_id]
-            side = self._side(row["rate"])
-            row["side"] = side
-            qty = self._qty(ins, row["pre"])
-            order = self.order_factory.market(
-                instrument_id=ins_id,
-                order_side=side,
-                quantity=qty,
-                time_in_force=TimeInForce.GTC,
-            )
-            self.order_map[order.client_order_id] = ins_id
-            self.chosen_id = ins_id
-            self.submit_order(order)
-            self.had_order = True
+            selected = sorted(
+                rows,
+                key=lambda item: abs(item[1]["rate"]),
+                reverse=True,
+            )[:self.max_trades]
+            submitted = []
+            for ins_id, row in selected:
+                ins = self.ins[ins_id]
+                side = self._side(row["rate"])
+                row["side"] = side
+                qty = self._qty(ins, row["pre"])
+                order = self.order_factory.market(
+                    instrument_id=ins_id,
+                    order_side=side,
+                    quantity=qty,
+                    time_in_force=TimeInForce.GTC,
+                )
+                self.order_map[order.client_order_id] = ins_id
+                self.submit_order(order)
+                submitted.append(f"{self._base(ins_id)} {self._bps(row['rate'])}bps")
+            self.had_order = bool(submitted)
             self.log.info(
-                f"交易模式，候选{len(self.ins_map)}个，选择{self._base(ins_id)}，"
-                f"费率{self._bps(row['rate'])}bps"
-                f"名义{self.notional:.2f}USDT"
+                f"交易模式，候选{len(self.ins_map)}个，提交{len(submitted)}个，"
+                f"{'，'.join(submitted)}，单币名义{self.notional:.2f}USDT"
             )
 
         self.sent_done = True
@@ -230,6 +233,7 @@ class MaxFundingStrategy(Strategy):
         if not self.close_done:
             close_cnt = 0
             for ins_id in sorted(self.open_ids, key=str):
+                self.close_submit_ns[ins_id] = self.clock.timestamp_ns()
                 self.close_all_positions(ins_id)
                 close_cnt += 1
             self.close_done = True
@@ -263,59 +267,16 @@ class MaxFundingStrategy(Strategy):
         self._reset_closed_state()
         self._schedule_next()
 
-    # t+n 查询 Binance income，确认真实资金费到账后写本轮交易记录。
-    def _record_funding_income(self) -> None:
-        if self.chosen_id is None or self.trade_written:
+    # t+n 记录本轮选中 symbol 和平仓提交时间。
+    def _record_trade_event(self) -> None:
+        if self.trade_written:
             return
-        if self.close_count <= 0 and self.chosen_id not in self.open_ids:
+        if not self.close_submit_ns:
             return
-        income = self._funding_income(self.chosen_id)
-        self._write_trade(self.close_count, income)
+        if self.close_count <= 0:
+            return
+        self._write_trade()
         self.trade_written = True
-
-    # 查询当前轮选中 symbol 在 funding 时间附近的真实 FUNDING_FEE。
-    def _funding_income(self, ins_id: InstrumentId) -> dict[str, str]:
-        symbol = self.symbols[ins_id]
-        start_ms = self.fund_ns // 1_000_000 - 60_000
-        end_ms = self.fund_ns // 1_000_000 + int(self.config.funding_income_delay_sec * 1000)
-        try:
-            rows = self._signed_get(
-                "/fapi/v1/income",
-                {
-                    "symbol": symbol,
-                    "incomeType": "FUNDING_FEE",
-                    "startTime": start_ms,
-                    "endTime": end_ms,
-                    "limit": 20,
-                },
-            )
-        except (KeyError, requests.RequestException, RuntimeError, ValueError) as exc:
-            self.log.warning(f"资金费到账查询失败，交易对{self._base(ins_id)}，原因{exc}")
-            return {}
-        matches = []
-        for row in rows:
-            try:
-                if str(row.get("symbol")) == symbol and int(row["time"]) >= self.fund_ns // 1_000_000:
-                    matches.append(row)
-            except (KeyError, TypeError, ValueError):
-                continue
-        matches.sort(key=lambda row: int(row["time"]))
-        if not matches:
-            self.log.info(f"资金费到账查询无记录，交易对{self._base(ins_id)}")
-            return {}
-        row = matches[0]
-        income_time_ms = int(row["time"])
-        self.log.info(
-            f"资金费到账，交易对{self._base(ins_id)}，"
-            f"金额{row.get('income')} {row.get('asset')}，"
-            f"延迟{income_time_ms - self.fund_ns // 1_000_000}ms"
-        )
-        return {
-            "actual_funding_income": str(row.get("income", "")),
-            "funding_income_time": self._iso_ms(income_time_ms),
-            "funding_income_delta_ms": str(income_time_ms - self.fund_ns // 1_000_000),
-            "funding_tran_id": str(row.get("tranId", "")),
-        }
 
     # 成交后才记录待平仓 instrument。
     def on_order_filled(self, event: OrderFilled) -> None:
@@ -534,27 +495,6 @@ class MaxFundingStrategy(Strategy):
             return [data], 0
         return [], 1
 
-    # 发 Binance 签名 GET 请求，缺配置或请求失败直接暴露。
-    def _signed_get(self, path: str, params: dict[str, int | str]) -> list[dict]:
-        load_dotenv(self.root / ".env")
-        secret = os.environ["BINANCE_FUTURES_API_SECRET"].encode()
-        payload = dict(params)
-        payload["timestamp"] = int(time.time() * 1000)
-        payload["recvWindow"] = 10000
-        query = urlencode(payload)
-        signature = hmac.new(secret, query.encode(), hashlib.sha256).hexdigest()
-        response = requests.get(
-            f"{self.config.api_url}{path}?{query}&signature={signature}",
-            headers={"X-MBX-APIKEY": os.environ["BINANCE_FUTURES_API_KEY"]},
-            proxies=self.proxies,
-            timeout=float(self.config.api_timeout),
-        )
-        response.raise_for_status()
-        data = response.json()
-        if not isinstance(data, list):
-            raise RuntimeError(f"Unexpected Binance response: {data}")
-        return [row for row in data if isinstance(row, dict)]
-
     def _top_rates(self, rows: list[dict], symbols: set[str] | None = None) -> str:
         rated = []
         for item in rows:
@@ -614,54 +554,32 @@ class MaxFundingStrategy(Strategy):
             raw_qty = steps * step
         return ins.make_qty(raw_qty)
 
-    # 写本轮选中交易的资金费率和真实到账记录。
-    def _write_trade(self, close_cnt: int, income: dict[str, str]) -> None:
-        ins_id = self.chosen_id
-        if ins_id is None:
+    # 写本轮选中交易的整点和平仓提交偏移。
+    def _write_trade(self) -> None:
+        if not self.close_submit_ns:
             return
-        row = self.ins_map.get(ins_id)
-        if row is None:
-            return
-        rate = row.get("rate")
-        pre = row.get("pre", "")
-        side = row.get("side") or (self._side(rate) if isinstance(rate, Decimal) else "")
-        fund_gain = abs(rate) * self.notional if isinstance(rate, Decimal) else ""
         with self.log_path.open("a", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow(
-                [
-                    self._iso(self.fund_ns),
-                    ins_id,
-                    rate,
-                    ("BUY" if side == OrderSide.BUY else "SELL") if isinstance(side, OrderSide) else "",
-                    pre,
-                    self.notional,
-                    fund_gain,
-                    income.get("actual_funding_income", ""),
-                    income.get("funding_income_time", ""),
-                    income.get("funding_income_delta_ms", ""),
-                    income.get("funding_tran_id", ""),
-                    close_cnt,
-                ],
-            )
+            for ins_id, close_ns in sorted(
+                self.close_submit_ns.items(),
+                key=lambda item: str(item[0]),
+            ):
+                writer.writerow(
+                    [
+                        self.symbols[ins_id],
+                        self._iso(self.fund_ns),
+                        self._offset(close_ns - self.fund_ns),
+                    ],
+                )
 
     def _init_log(self) -> None:
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         with self.log_path.open("w", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(
                 [
+                    "symbol",
                     "funding_time",
-                    "instrument",
-                    "entry_rate",
-                    "side",
-                    "pre_px",
-                    "notional",
-                    "entry_funding_gain",
-                    "actual_funding_income",
-                    "funding_income_time",
-                    "funding_income_delta_ms",
-                    "funding_tran_id",
-                    "close_count",
+                    "close_order_submit_time",
                 ],
             )
 
@@ -670,24 +588,24 @@ class MaxFundingStrategy(Strategy):
         self.ins_map.clear()
         self.open_ids.clear()
         self.order_map.clear()
-        self.chosen_id = None
         self.had_order = False
         self.close_count = 0
         self.trade_written = False
+        self.close_submit_ns.clear()
         self.entry_done = False
         self.sent_done = False
         self.close_done = False
 
     def _reset_closed_state(self) -> None:
-        self._record_funding_income()
+        self._record_trade_event()
         self.obs_map.clear()
         self.ins_map.clear()
         self.order_map.clear()
         self.open_ids = {ins_id for ins_id in self.open_ids if not self.portfolio.is_flat(ins_id)}
-        self.chosen_id = next(iter(self.open_ids), None)
         self.had_order = False
         self.close_count = 0
         self.trade_written = False
+        self.close_submit_ns.clear()
         self.entry_done = False
         self.sent_done = False
         self.close_done = False
@@ -697,5 +615,7 @@ class MaxFundingStrategy(Strategy):
     def _iso(self, ts_ns: int) -> str:
         return datetime.fromtimestamp(ts_ns / 1_000_000_000, tz=UTC).isoformat()
 
-    def _iso_ms(self, ts_ms: int) -> str:
-        return datetime.fromtimestamp(ts_ms / 1_000, tz=UTC).isoformat()
+    def _offset(self, delta_ns: int) -> str:
+        delta_ms = delta_ns // 1_000_000
+        sign = "+" if delta_ms >= 0 else "-"
+        return f"T{sign}{abs(delta_ms)}ms"

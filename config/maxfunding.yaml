@@ -2,8 +2,9 @@ strategy:
   name: max_funding
   params:
     instrument_client: binance_futures
-    trade_notional: "8"
-    min_rate_bps: "50"
+    trade_notional: "6"
+    max_trades: 5
+    min_rate_bps: "30"
     trade_symbols: all
     exclude_symbols: [LYN, BEAT, PIPPIN, RAVE, SOON, SENT, ORCA]
     pre_sec: 2.5

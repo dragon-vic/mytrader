@@ -58,6 +58,7 @@ For this project, environment, Conda, system directories, global config, and net
 - Name reusable market data files with uppercase symbol/scope, market type, data type or interval, and start date, for example `BTCUSDT-PERP-1S-20250101.parquet` or `ALL-USDT-PERP-FUNDING-20250101.parquet`. Use `PERP` for perpetual futures.
 - Research analysis artifacts belong under `data/`, not `reports/`, unless the user explicitly asks for a report-style deliverable.
 - During data analysis, only persist reusable metadata/data and notes the user explicitly asks to keep. Do not save ad hoc summaries, result tables, plots, temporary scripts, intermediate files, or one-off analysis outputs unless the user explicitly asks for them.
+- For scripts under `tools/` and temporary test/check scripts, put user-tuned parameters in the bottom `main(...)` call with short inline comments instead of command-line arguments or top-level constants, so the user can edit them directly at the end of the file.
 - When explaining distributions, prefer a chart over percentile tables. Use concise text to explain how to read the chart, and avoid dumping 25/75 percentile tables unless the user asks for numeric detail.
 - In set files under `config/`, put frequently changed strategy, market, backtest, and live run parameters near the top; keep stable instrument and project plumbing near the bottom.
 - In YAML set files, parameters used only for backtesting belong under `backtest`, not top-level strategy/live/instrument sections.
