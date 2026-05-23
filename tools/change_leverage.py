@@ -129,12 +129,9 @@ def usage() -> None:
     raise SystemExit(2)
 
 
-def main() -> None:
-    if len(sys.argv) != 3:
-        usage()
-
-    target = sys.argv[1]
-    leverage = int(sys.argv[2])
+def main(leverage,target) -> None:
+    target = target
+    leverage = leverage
     if leverage < 1 or leverage > 125:
         raise ValueError("leverage must be between 1 and 125")
 
@@ -187,4 +184,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(leverage=2,
+         target="star")

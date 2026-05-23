@@ -118,7 +118,3 @@ backtest:
     margin_maint: "1"
     maker_fee: "0.0002"
     taker_fee: "0.0005"
-
-strategy:
-  name: max_funding
-  params: {}
