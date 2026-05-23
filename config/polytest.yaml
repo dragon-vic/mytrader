@@ -4,8 +4,12 @@ strategy:
     max_ticks: 0
     timeout_sec: 0
     scan_sec: 5
+    flush_sec: 15
     tick_log_path: auto
     btc_spot_instrument_id: BTCUSDT.BINANCE
+    binance_rest_url: https://api.binance.com
+    history_enabled: true
+    history_window_count: 2
 
 data:
   clients:

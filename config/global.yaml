@@ -18,6 +18,7 @@ logging:
     Portfolio: INFO
     DataRecorder: INFO
     ExecClient-BINANCE: WARNING
+    BinanceSpotInstrumentProvider: WARNING
     BinanceFuturesInstrumentProvider: WARNING
 
 # NT data engine 和所有可选 data client。

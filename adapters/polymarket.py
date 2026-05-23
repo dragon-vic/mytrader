@@ -17,14 +17,20 @@ from utils.config_loader import proxy_url
 from utils.instrument_factory import InstrumentFactory
 
 
+# py_clob_client_v2 会直接 urlsafe_b64decode(secret)，缺少 padding 会报 Incorrect padding。
+def padded_secret(value: str) -> str:
+    secret = value.strip()
+    return secret + ("=" * (-len(secret) % 4))
+
+
 # 从 .env 读取 Polymarket 固定凭证变量。
 def credentials() -> dict[str, str]:
     return {
-        "private_key": os.environ["POLYMARKET_PK"],
-        "funder": os.environ["POLYMARKET_FUNDER"],
-        "api_key": os.environ["POLYMARKET_API_KEY"],
-        "api_secret": os.environ["POLYMARKET_API_SECRET"],
-        "passphrase": os.environ["POLYMARKET_PASSPHRASE"],
+        "private_key": os.environ["POLYMARKET_PK"].strip(),
+        "funder": os.environ["POLYMARKET_FUNDER"].strip(),
+        "api_key": os.environ["POLYMARKET_API_KEY"].strip(),
+        "api_secret": padded_secret(os.environ["POLYMARKET_API_SECRET"]),
+        "passphrase": os.environ["POLYMARKET_PASSPHRASE"].strip(),
     }
 
 
