@@ -3,15 +3,21 @@ strategy:
   params:
     instrument_client: binance_futures
     trade_notional: "6"
-    max_trades: 5
+    max_trades: 1
     min_rate_bps: "30"
+    xgb_primary: node_2000_ensemble_live
+    xgb_models:
+      - name: node_2000_ensemble_live
+        path: models/node_select_outputs/node_select_2000ms_ensemble_live.joblib
+        kind: ensemble_node_select
+        score: ens_avg_adj20
     trade_symbols: all
     exclude_symbols: [LYN, BEAT, PIPPIN, RAVE, SOON, SENT, ORCA]
     pre_sec: 2.5
     entry_sec: 1.5
     pre_deadline: 1
     entry_before: 0.5
-    exit_sec: 0.12
+    exit_sec: 0.15
     post_sec: 10
     funding_income_delay_sec: 6
     api_url: https://fapi.binance.com

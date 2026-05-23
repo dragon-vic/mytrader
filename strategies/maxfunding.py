@@ -8,6 +8,7 @@ from datetime import datetime
 from decimal import Decimal
 from decimal import ROUND_CEILING
 from pathlib import Path
+from typing import Any
 
 import requests
 from nautilus_trader.common.events import TimeEvent
@@ -21,6 +22,8 @@ from nautilus_trader.model.identifiers import ClientOrderId
 from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.model.instruments import Instrument
 from nautilus_trader.trading.strategy import Strategy
+
+from models.maxfunding_xgb import MaxFundingXgbScorer
 
 
 class MaxFundingConfig(StrategyConfig, frozen=True):
@@ -42,6 +45,8 @@ class MaxFundingConfig(StrategyConfig, frozen=True):
     api_timeout: float
     proxy_url: str
     funding_income_delay_sec: float
+    xgb_models: list[dict[str, Any]]
+    xgb_primary: str
     event_log_path: str = "auto"
 
 
@@ -75,8 +80,8 @@ class MaxFundingStrategy(Strategy):
         self.ins: dict[InstrumentId, Instrument] = {}
         self.trade_ids: set[InstrumentId] = set()
         self.symbols: dict[InstrumentId, str] = {}
-        self.obs_map: dict[InstrumentId, dict[str, Decimal | OrderSide]] = {}
-        self.ins_map: dict[InstrumentId, dict[str, Decimal | OrderSide]] = {}
+        self.obs_map: dict[InstrumentId, dict[str, Any]] = {}
+        self.ins_map: dict[InstrumentId, dict[str, Any]] = {}
         self.open_ids: set[InstrumentId] = set()
         self.order_map: dict[ClientOrderId, InstrumentId] = {}
         self.had_order = False
@@ -86,6 +91,29 @@ class MaxFundingStrategy(Strategy):
         self.log_path = Path(config.event_log_path)
         use_proxy = platform.system() == "Windows" and config.proxy_url
         self.proxies = {"http": config.proxy_url, "https": config.proxy_url} if use_proxy else None
+        self.xgb = (
+            MaxFundingXgbScorer(
+                config.xgb_models,
+                config.xgb_primary,
+                api_url=config.api_url,
+                api_timeout=config.api_timeout,
+                proxies=self.proxies,
+            )
+            if config.xgb_models
+            else None
+        )
+        if config.xgb_primary and self.xgb is None:
+            raise RuntimeError("xgb_primary requires xgb_models")
+        self.xgb_columns = self.xgb.metric_columns if self.xgb is not None else []
+        self.event_columns = [
+            "symbol",
+            "funding_time",
+            "close_order_submit_time",
+            "xgb_primary_model",
+            "xgb_primary_score",
+            "xgb_primary_pass",
+            *self.xgb_columns,
+        ]
 
     # 启动时注册 NT 定时器，资金费和价格用 REST 观察列表快照。
     def on_start(self) -> None:
@@ -121,7 +149,8 @@ class MaxFundingStrategy(Strategy):
             f"可交易{len(self.trade_ids)}个，"
             f"排除{len(self.exclude)}个，"
             f"阈值{self._bps(self.min_rate)}bps，"
-            f"最多交易{self.max_trades}个，单币名义{self.notional:.2f}USDT"
+            f"最多交易{self.max_trades}个，单币名义{self.notional:.2f}USDT，"
+            f"XGB主模型{self.config.xgb_primary or '未启用'}"
         )
 
     # clock alert 负责 t-3/t-2/t-1/t/t+2/t+3 六个确定动作。
@@ -200,17 +229,22 @@ class MaxFundingStrategy(Strategy):
         if not rows:
             self.log.info(f"交易模式，候选{len(self.ins_map)}个，无可下单交易对")
         else:
-            selected = sorted(
-                rows,
-                key=lambda item: abs(item[1]["rate"]),
-                reverse=True,
-            )[:self.max_trades]
+            self._refresh_entry_prices(rows)
+            self._score_xgb(rows)
+            if self.config.xgb_primary:
+                rows = [
+                    (ins_id, row)
+                    for ins_id, row in rows
+                    if row.get("xgb_primary_pass") is True
+                ]
+            selected = sorted(rows, key=self._select_key, reverse=True)[:self.max_trades]
             submitted = []
             for ins_id, row in selected:
                 ins = self.ins[ins_id]
-                side = self._side(row["rate"])
+                rate = Decimal(str(row["rate"]))
+                side = self._side(rate)
                 row["side"] = side
-                qty = self._qty(ins, row["pre"])
+                qty = self._qty(ins, Decimal(str(row.get("entry", row["pre"]))))
                 order = self.order_factory.market(
                     instrument_id=ins_id,
                     order_side=side,
@@ -219,7 +253,7 @@ class MaxFundingStrategy(Strategy):
                 )
                 self.order_map[order.client_order_id] = ins_id
                 self.submit_order(order)
-                submitted.append(f"{self._base(ins_id)} {self._bps(row['rate'])}bps")
+                submitted.append(self._submit_label(ins_id, row))
             self.had_order = bool(submitted)
             self.log.info(
                 f"交易模式，候选{len(self.ins_map)}个，提交{len(submitted)}个，"
@@ -420,6 +454,72 @@ class MaxFundingStrategy(Strategy):
             raise RuntimeError("trade_symbols is empty after exclude_symbols")
         self.trade_ids = ids
 
+    # 候选已冻结后统一计算 XGB 指标；不额外拉 aggTrades。
+    def _score_xgb(self, rows: list[tuple[InstrumentId, dict[str, Any]]]) -> None:
+        if self.xgb is None:
+            return
+        candidates = [
+            {
+                "symbol": self.symbols[ins_id],
+                "rate": row["rate"],
+                "pre_cost_bps": row.get("pre_cost_bps"),
+            }
+            for ins_id, row in rows
+        ]
+        observed = [
+            {
+                "symbol": self.symbols[ins_id],
+                "rate": row["rate"],
+            }
+            for ins_id, row in self.obs_map.items()
+            if ins_id in self.symbols and "rate" in row
+        ]
+        scores = self.xgb.score(candidates, observed, self.fund_ns)
+        for ins_id, row in rows:
+            row.update(scores.get(self.symbols[ins_id], {}))
+
+    # 下单前再拉一次 mark price，估算 t 前价格挤压。
+    def _refresh_entry_prices(self, rows: list[tuple[InstrumentId, dict[str, Any]]]) -> None:
+        payload, errors = self._fetch_rates()
+        if errors and not payload:
+            return
+        by_symbol = {str(item.get("symbol", "")): item for item in payload}
+        for ins_id, row in rows:
+            item = by_symbol.get(self.symbols[ins_id])
+            if item is None or "markPrice" not in item or "pre" not in row or "rate" not in row:
+                continue
+            try:
+                pre = Decimal(str(row["pre"]))
+                entry = Decimal(str(item["markPrice"]))
+                if pre <= 0:
+                    continue
+                rate = Decimal(str(row["rate"]))
+                direction = Decimal("-1") if rate > 0 else Decimal("1")
+                ret_bps = direction * (entry - pre) / pre * Decimal("10000")
+                row["entry"] = entry
+                row["pre_cost_bps"] = float(-ret_bps)
+            except (ValueError, TypeError):
+                continue
+
+    def _select_key(self, item: tuple[InstrumentId, dict[str, Any]]) -> float:
+        row = item[1]
+        if self.config.xgb_primary:
+            score = row.get("xgb_primary_score")
+            try:
+                value = float(score)
+            except (TypeError, ValueError):
+                return float("-inf")
+            return value if value == value else float("-inf")
+        return abs(float(row["rate"]))
+
+    def _submit_label(self, ins_id: InstrumentId, row: dict[str, Any]) -> str:
+        rate = Decimal(str(row["rate"]))
+        if not self.config.xgb_primary:
+            return f"{self._base(ins_id)} {self._bps(rate)}bps"
+        score = self._fmt(row.get("xgb_primary_score"))
+        passed = row.get("xgb_primary_pass")
+        return f"{self._base(ins_id)} {self._bps(rate)}bps XGB={score} pass={passed}"
+
     # 为下一次 funding 注册一次性 clock alert。
     def _schedule_next(self) -> None:
         now_ns = self.clock.timestamp_ns()
@@ -516,7 +616,7 @@ class MaxFundingStrategy(Strategy):
         self,
         limit: int,
         key: str = "rate",
-        rows: dict[InstrumentId, dict[str, Decimal | OrderSide]] | None = None,
+        rows: dict[InstrumentId, dict[str, Any]] | None = None,
     ) -> str:
         rows = [
             (ins_id, row)
@@ -526,7 +626,7 @@ class MaxFundingStrategy(Strategy):
         rows.sort(key=lambda item: abs(item[1][key]), reverse=True)
         parts = []
         for ins_id, row in rows[:limit]:
-            parts.append(f"{self._base(ins_id)} {self._bps(row[key])}bps")
+            parts.append(f"{self._base(ins_id)} {self._bps(Decimal(str(row[key])))}bps")
         if not parts:
             return "无"
         return "，".join(parts)
@@ -569,19 +669,28 @@ class MaxFundingStrategy(Strategy):
                         self.symbols[ins_id],
                         self._iso(self.fund_ns),
                         self._offset(close_ns - self.fund_ns),
+                        *self._event_metrics(self.ins_map.get(ins_id, {})),
                     ],
                 )
 
     def _init_log(self) -> None:
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         with self.log_path.open("w", newline="", encoding="utf-8") as f:
-            csv.writer(f).writerow(
-                [
-                    "symbol",
-                    "funding_time",
-                    "close_order_submit_time",
-                ],
-            )
+            csv.writer(f).writerow(self.event_columns)
+
+    def _event_metrics(self, row: dict[str, Any]) -> list[Any]:
+        return [self._fmt(row.get(column)) for column in self.event_columns[3:]]
+
+    def _fmt(self, value: Any) -> Any:
+        if isinstance(value, bool):
+            return int(value)
+        if value is None:
+            return ""
+        if isinstance(value, float):
+            if value != value:
+                return ""
+            return f"{value:.4f}"
+        return value
 
     def _reset_state(self) -> None:
         self.obs_map.clear()

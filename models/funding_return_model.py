@@ -21,8 +21,8 @@ ROOT = Path(__file__).resolve().parents[1]
 FUNDING_PATH = ROOT / "data" / "funding" / "ALL-Funding-20250101.parquet"
 TICK_PATH = ROOT / "data" / "ticks" / "ALL-PERP-FundingEventTicks-20250101.parquet"
 OUT_DIR = ROOT / "models" / "funding_return_outputs"
-FEE_BPS = 8.0
-WINDOWS_MS = (500, 1000, 3000)
+FEE_BPS = 10.0
+WINDOWS_MS = (500, 1000, 2000, 3000)
 BAD_SYMBOLS = {"DODOX", "STORJ", "SIREN", "RIVER", "BARD", "PIPPIN", "ORCA"}
 
 
@@ -431,9 +431,17 @@ def save_md(path: Path, split: Split, events: pd.DataFrame, metrics: pd.DataFram
 def main() -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     events_path = OUT_DIR / "event_features.parquet"
+    need_cols = {
+        col
+        for ms in WINDOWS_MS
+        for col in (f"price_cost_{ms}ms", f"net_{ms}ms")
+    }
     if events_path.exists():
         events = pd.read_parquet(events_path)
         events["funding_utc"] = pd.to_datetime(events["funding_utc"], utc=True)
+        if not need_cols.issubset(events.columns):
+            events = build_funding_features(build_ticks())
+            events.to_parquet(events_path, index=False)
     else:
         events = build_funding_features(build_ticks())
         events.to_parquet(events_path, index=False)
