@@ -3,7 +3,7 @@ strategy:
   params:
     instrument_client: binance_futures
     trade_notional: "6"
-    max_trades: 1
+    max_trades: 3
     min_rate_bps: "30"
     xgb_primary: node_2000_ensemble_live
     xgb_models:

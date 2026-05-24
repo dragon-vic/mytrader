@@ -26,12 +26,35 @@ from nautilus_trader.trading.strategy import Strategy
 from models.maxfunding_xgb import MaxFundingXgbScorer
 
 
+def score_multiplier(
+    score: Decimal,
+    threshold: Decimal,
+    min_multiplier: Decimal,
+    base_score: Decimal,
+    max_score: Decimal,
+    max_multiplier: Decimal,
+) -> Decimal:
+    if score <= threshold:
+        return min_multiplier
+    if score < base_score:
+        span = max(base_score - threshold, Decimal("0.0001"))
+        weight = (score - threshold) / span
+        return min_multiplier + (Decimal("1") - min_multiplier) * weight
+    span = max(max_score - base_score, Decimal("0.0001"))
+    weight = min((score - base_score) / span, Decimal("1"))
+    return Decimal("1") + (max_multiplier - Decimal("1")) * weight
+
+
 class MaxFundingConfig(StrategyConfig, frozen=True):
     instrument_ids: list[InstrumentId]
     bar_types: list[BarType]
     trade_symbols: list[str] | str
     exclude_symbols: list[str]
     trade_notional: Decimal
+    notional_min_multiplier: Decimal
+    notional_base_score_bps: Decimal
+    notional_max_score_bps: Decimal
+    notional_max_multiplier: Decimal
     max_trades: int
     min_rate_bps: Decimal
     pre_sec: float
@@ -62,6 +85,10 @@ class MaxFundingStrategy(Strategy):
     def __init__(self, config: MaxFundingConfig) -> None:
         super().__init__(config)
         self.notional = Decimal(str(config.trade_notional))
+        self.min_mult = Decimal(str(config.notional_min_multiplier))
+        self.base_score = Decimal(str(config.notional_base_score_bps))
+        self.max_score = Decimal(str(config.notional_max_score_bps))
+        self.max_mult = Decimal(str(config.notional_max_multiplier))
         self.max_trades = int(config.max_trades)
         self.min_rate = Decimal(str(config.min_rate_bps)) / Decimal("10000")
         self.exit_sec = float(config.exit_sec)
@@ -112,6 +139,8 @@ class MaxFundingStrategy(Strategy):
             "xgb_primary_model",
             "xgb_primary_score",
             "xgb_primary_pass",
+            "notional_multiplier",
+            "order_notional",
             *self.xgb_columns,
         ]
 
@@ -133,6 +162,14 @@ class MaxFundingStrategy(Strategy):
             raise RuntimeError("api_timeout must be positive")
         if self.config.max_trades <= 0:
             raise RuntimeError("max_trades must be positive")
+        if self.notional <= 0:
+            raise RuntimeError("trade_notional must be positive")
+        if self.min_mult <= 0:
+            raise RuntimeError("notional_min_multiplier must be positive")
+        if self.max_mult < self.min_mult:
+            raise RuntimeError("notional_max_multiplier must be greater than or equal to notional_min_multiplier")
+        if self.max_score <= self.base_score:
+            raise RuntimeError("notional_max_score_bps must be greater than notional_base_score_bps")
         if self.config.funding_income_delay_sec <= self.config.exit_sec:
             raise RuntimeError("funding_income_delay_sec must be greater than exit_sec")
         if self.config.post_sec < self.config.funding_income_delay_sec:
@@ -149,7 +186,7 @@ class MaxFundingStrategy(Strategy):
             f"可交易{len(self.trade_ids)}个，"
             f"排除{len(self.exclude)}个，"
             f"阈值{self._bps(self.min_rate)}bps，"
-            f"最多交易{self.max_trades}个，单币名义{self.notional:.2f}USDT，"
+            f"最多交易{self.max_trades}个，基准名义{self.notional:.2f}USDT，"
             f"XGB主模型{self.config.xgb_primary or '未启用'}"
         )
 
@@ -244,7 +281,9 @@ class MaxFundingStrategy(Strategy):
                 rate = Decimal(str(row["rate"]))
                 side = self._side(rate)
                 row["side"] = side
-                qty = self._qty(ins, Decimal(str(row.get("entry", row["pre"]))))
+                order_notional = self._order_notional(row)
+                row["order_notional"] = order_notional
+                qty = self._qty(ins, Decimal(str(row.get("entry", row["pre"]))), order_notional)
                 order = self.order_factory.market(
                     instrument_id=ins_id,
                     order_side=side,
@@ -257,7 +296,7 @@ class MaxFundingStrategy(Strategy):
             self.had_order = bool(submitted)
             self.log.info(
                 f"交易模式，候选{len(self.ins_map)}个，提交{len(submitted)}个，"
-                f"{'，'.join(submitted)}，单币名义{self.notional:.2f}USDT"
+                f"{'，'.join(submitted)}，基准名义{self.notional:.2f}USDT"
             )
 
         self.sent_done = True
@@ -515,10 +554,12 @@ class MaxFundingStrategy(Strategy):
     def _submit_label(self, ins_id: InstrumentId, row: dict[str, Any]) -> str:
         rate = Decimal(str(row["rate"]))
         if not self.config.xgb_primary:
-            return f"{self._base(ins_id)} {self._bps(rate)}bps"
+            return f"{self._base(ins_id)} {self._bps(rate)}bps notional={self._fmt(row.get('order_notional'))}"
         score = self._fmt(row.get("xgb_primary_score"))
         passed = row.get("xgb_primary_pass")
-        return f"{self._base(ins_id)} {self._bps(rate)}bps XGB={score} pass={passed}"
+        mult = self._fmt(row.get("notional_multiplier"))
+        notional = self._fmt(row.get("order_notional"))
+        return f"{self._base(ins_id)} {self._bps(rate)}bps XGB={score} pass={passed} mult={mult} notional={notional}"
 
     # 为下一次 funding 注册一次性 clock alert。
     def _schedule_next(self) -> None:
@@ -646,8 +687,30 @@ class MaxFundingStrategy(Strategy):
     def _side(self, rate: Decimal) -> OrderSide:
         return OrderSide.SELL if rate > 0 else OrderSide.BUY
 
-    def _qty(self, ins: Instrument, price: Decimal):
-        raw_qty = self.notional / price
+    def _order_notional(self, row: dict[str, Any]) -> Decimal:
+        if not self.config.xgb_primary:
+            row["notional_multiplier"] = Decimal("1")
+            return self.notional
+        score = self._decimal(row.get("xgb_primary_score"))
+        threshold = self._decimal(row.get(f"xgb_{self.config.xgb_primary}_threshold_bps"))
+        if score is None or threshold is None:
+            row["notional_multiplier"] = Decimal("1")
+            return self.notional
+        mult = score_multiplier(score, threshold, self.min_mult, self.base_score, self.max_score, self.max_mult)
+        row["notional_multiplier"] = mult
+        return self.notional * mult
+
+    def _decimal(self, value: Any) -> Decimal | None:
+        if value is None:
+            return None
+        try:
+            result = Decimal(str(value))
+        except Exception:
+            return None
+        return result if result.is_finite() else None
+
+    def _qty(self, ins: Instrument, price: Decimal, notional: Decimal):
+        raw_qty = notional / price
         step = Decimal(str(ins.size_increment))
         if step > 0:
             steps = (raw_qty / step).to_integral_value(rounding=ROUND_CEILING)

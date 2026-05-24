@@ -16,8 +16,8 @@ from nautilus_trader.model.identifiers import InstrumentId
 from actors.data_recorder import DataRecorder
 from actors.data_recorder import DataRecorderConfig
 from adapters.common import cache_config
-from external.data_engine import ExternalSignalDataClientConfig
-from external.data_engine import ExternalSignalLiveDataClientFactory
+from external.external_signal_client import ExternalSignalDataClientConfig
+from external.external_signal_client import ExternalSignalLiveDataClientFactory
 from utils.arguments import NODE_STOP_TOPIC
 from utils.config_loader import load_settings
 from utils.config_loader import proxy_url
