@@ -1,4 +1,4 @@
-strategy:
+﻿strategy:
   name: backtest_funding
   params:
     instrument_client: binance_futures
@@ -6,14 +6,14 @@ strategy:
     min_rate_bps: "50"
     trade_symbols: all
     exclude_symbols: [LYN, BEAT, PIPPIN, RAVE, SOON, SENT, ORCA]
-    events_path: data/funding/ALL-Funding-20250101.parquet
+    events_path: strategies/maxfunding/data/ALL-Funding-20250101.parquet
     entry_before_ms: 500
     exit_after_ms: 1000
 
 backtest:
   markets: all
   data:
-    tick_data_path: data/ticks/ALL-PERP-FundingEventTicks-20250101.parquet
+    tick_data_path: strategies/maxfunding/data/ALL-PERP-FundingEventTicks-20250101.parquet
   venue_account:
     starting_balance: "1000 USDT"
     account_type: MARGIN

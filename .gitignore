@@ -5,6 +5,8 @@ __pycache__/
 *.pyd
 models/
 data/
+!strategies/maxfunding/data/
+!strategies/maxfunding/data/**
 reports/
 logs/
 .gitignore

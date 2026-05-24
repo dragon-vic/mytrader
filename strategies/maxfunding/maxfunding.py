@@ -246,7 +246,7 @@ class MaxFundingStrategy(Strategy):
                 f"通过数：{self._pass_count(self.active_data.rows)}，"
                 f"选中数：{len(self.active_data.selected)}，市场数据：BTC/ETH/SOL，"
                 f"耗时：{self._ms(self.active_data.elapsed_ms)}ms，"
-                f"选中：{self._decision_list(self.active_data.selected)}"
+                f"{self._decision_summary(self.active_data.selected, self.active_data.rows)}"
             )
         except Exception as exc:
             elapsed_ms = (perf_counter() - start) * 1000
@@ -602,14 +602,39 @@ class MaxFundingStrategy(Strategy):
             return float("-inf")
         return value if value == value else float("-inf")
 
+    def _decision_summary(
+        self,
+        selected: list[tuple[InstrumentId, dict[str, Any]]],
+        candidates: list[tuple[InstrumentId, dict[str, Any]]],
+    ) -> str:
+        if selected:
+            return f"下单：{self._decision_list(selected)}"
+        return f"无下单，maxfunding：{self._max_funding_info(candidates)}"
+
     def _decision_list(self, rows: list[tuple[InstrumentId, dict[str, Any]]]) -> str:
         parts = []
         for ins_id, row in rows:
             parts.append(
-                f"{self._base(ins_id)} 分数：{self._fmt(row.get('xgb_primary_score'))} "
+                f"{self._base(ins_id)} funding：{self._funding_bps(row)}bps "
+                f"分数：{self._fmt(row.get('xgb_primary_score'))} "
                 f"名义：{self._fmt(row.get('order_notional'))}"
             )
         return self._join_items(parts)
+
+    def _max_funding_info(self, rows: list[tuple[InstrumentId, dict[str, Any]]]) -> str:
+        if not rows:
+            return "无候选"
+        ins_id, row = max(rows, key=lambda item: abs(Decimal(str(item[1].get("rate", "0")))))
+        return (
+            f"{self._base(ins_id)} funding：{self._funding_bps(row)}bps "
+            f"分数：{self._fmt(row.get('xgb_primary_score'))}"
+        )
+
+    def _funding_bps(self, row: dict[str, Any]) -> str:
+        try:
+            return f"{Decimal(str(row.get('rate'))) * Decimal('10000'):.2f}"
+        except Exception:
+            return ""
 
     def _join_items(self, items) -> str:
         parts = [str(item) for item in items if str(item)]

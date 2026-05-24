@@ -10,10 +10,11 @@ import pandas as pd
 
 
 STRATEGY_DIR = Path(__file__).resolve().parent
+DATA_DIR = STRATEGY_DIR / "data"
 ROOT = STRATEGY_DIR.parents[1]
-EVENT_FEATURES_PATH = STRATEGY_DIR / "event_features.parquet"
-LIQUIDITY_PATH = STRATEGY_DIR / "liquidity_monthly.parquet"
-FUNDING_PATH = STRATEGY_DIR / "ALL-Funding-20250101.parquet"
+EVENT_FEATURES_PATH = DATA_DIR / "event_features.parquet"
+LIQUIDITY_PATH = DATA_DIR / "liquidity_monthly.parquet"
+FUNDING_PATH = DATA_DIR / "ALL-Funding-20250101.parquet"
 BAD_SYMBOLS = {"DODOX", "STORJ", "SIREN", "RIVER", "BARD", "PIPPIN", "ORCA"}
 RATE_BUCKET_ORD = {"30-50": 0, "50-75": 1, "75-100": 2, "100-150": 3, "150+": 4}
 LIQUIDITY_BUCKET_ORD = {"unknown": 0, "micro": 1, "small": 2, "mid": 3, "large": 4}
