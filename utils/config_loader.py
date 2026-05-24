@@ -76,12 +76,25 @@ def strategy_module_name(name: str) -> str:
     return name.replace("_", "").lower()
 
 
+def strategy_module_path(name: str) -> str:
+    module_name = strategy_module_name(name)
+    strategy_dir = ROOT / "strategies"
+    if (strategy_dir / f"{module_name}.py").exists():
+        return f"strategies.{module_name}"
+    nested = strategy_dir / module_name / f"{module_name}.py"
+    if nested.exists():
+        return f"strategies.{module_name}.{module_name}"
+    if (strategy_dir / module_name / "__init__.py").exists():
+        return f"strategies.{module_name}"
+    return f"strategies.{module_name}"
+
+
 # 补齐策略模块名、类名和配置类名。
 def normalize_strategy(settings: dict[str, Any]) -> None:
     strategy = settings["strategy"]
     name = strategy["name"]
     class_name = snake_to_pascal(name)
-    strategy.setdefault("module", f"strategies.{strategy_module_name(name)}")
+    strategy.setdefault("module", strategy_module_path(name))
     strategy.setdefault("class", f"{class_name}Strategy")
     strategy.setdefault("config_class", f"{class_name}Config")
 

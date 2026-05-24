@@ -10,11 +10,11 @@ import pandas as pd
 import requests
 
 
-ROOT = Path(__file__).resolve().parents[1]
-EVENT_FEATURES_PATH = ROOT / "models" / "funding_return_outputs" / "event_features.parquet"
-LIQUIDITY_PATH = ROOT / "models" / "funding_return_outputs" / "liquidity_monthly.parquet"
-FUNDING_PATH = ROOT / "data" / "funding" / "ALL-Funding-20250101.parquet"
-KLINE_DIR = ROOT / "data" / "klines"
+STRATEGY_DIR = Path(__file__).resolve().parent
+ROOT = STRATEGY_DIR.parents[1]
+EVENT_FEATURES_PATH = STRATEGY_DIR / "event_features.parquet"
+LIQUIDITY_PATH = STRATEGY_DIR / "liquidity_monthly.parquet"
+FUNDING_PATH = STRATEGY_DIR / "ALL-Funding-20250101.parquet"
 BAD_SYMBOLS = {"DODOX", "STORJ", "SIREN", "RIVER", "BARD", "PIPPIN", "ORCA"}
 RATE_BUCKET_ORD = {"30-50": 0, "50-75": 1, "75-100": 2, "100-150": 3, "150+": 4}
 LIQUIDITY_BUCKET_ORD = {"unknown": 0, "micro": 1, "small": 2, "mid": 3, "large": 4}
@@ -51,7 +51,6 @@ class MaxFundingXgbScorer:
         self.history = self._load_history()
         self.funding_history = self._load_funding_history()
         self.liquidity = self._load_liquidity()
-        self.market_history = self._load_market_history()
 
     @property
     def metric_columns(self) -> list[str]:
@@ -88,10 +87,26 @@ class MaxFundingXgbScorer:
         observed: list[dict[str, Any]],
         funding_ns: int,
     ) -> dict[str, dict[str, Any]]:
+        frame = self.prepare_frame(candidates, observed, funding_ns)
+        return self.score_frame(frame)
+
+    def prepare_frame(
+        self,
+        candidates: list[dict[str, Any]],
+        observed: list[dict[str, Any]],
+        funding_ns: int,
+    ) -> pd.DataFrame:
         if not candidates:
-            return {}
+            funding_utc = pd.Timestamp(funding_ns, unit="ns", tz="UTC")
+            for base in ("BTC", "ETH", "SOL"):
+                self._fetch_market_values(base, funding_utc)
+            return pd.DataFrame()
         frame = self._base_frame(candidates, observed, funding_ns)
-        frame = self._add_market_features(frame, funding_ns)
+        return self._add_market_features(frame, funding_ns)
+
+    def score_frame(self, frame: pd.DataFrame) -> dict[str, dict[str, Any]]:
+        if frame.empty:
+            return {}
         out = {symbol: {} for symbol in frame["symbol"].astype(str)}
         primary_scores: dict[str, float] = {}
         primary_pass: dict[str, bool] = {}
@@ -212,16 +227,6 @@ class MaxFundingXgbScorer:
             )
         return pd.DataFrame(rows).set_index("symbol") if rows else pd.DataFrame()
 
-    def _load_market_history(self) -> dict[str, dict[str, float]]:
-        out: dict[str, dict[str, float]] = {}
-        for base in ("BTC", "ETH", "SOL"):
-            path = KLINE_DIR / f"{base}USDT-SPOT-1M-20250101.parquet"
-            if not path.exists():
-                continue
-            df = pd.read_parquet(path).tail(90).reset_index(drop=True)
-            out[base] = self._market_values(base, df)
-        return out
-
     def _base_frame(
         self,
         candidates: list[dict[str, Any]],
@@ -276,33 +281,31 @@ class MaxFundingXgbScorer:
         return out
 
     def _fetch_market_values(self, base: str, funding_utc: pd.Timestamp) -> dict[str, float]:
-        if self.api_url:
-            try:
-                target = funding_utc - pd.Timedelta(minutes=1)
-                end_ms = int(target.timestamp() * 1000) + 59_999
-                path = "/fapi/v1/klines" if "fapi" in self.api_url else "/api/v3/klines"
-                resp = requests.get(
-                    f"{self.api_url}{path}",
-                    params={"symbol": f"{base}USDT", "interval": "1m", "limit": 90, "endTime": end_ms},
-                    timeout=self.api_timeout,
-                    proxies=self.proxies,
-                )
-                if resp.status_code == 404:
-                    resp = requests.get(
-                        f"{self.api_url}/fapi/v1/klines",
-                        params={"symbol": f"{base}USDT", "interval": "1m", "limit": 90, "endTime": end_ms},
-                        timeout=self.api_timeout,
-                        proxies=self.proxies,
-                    )
-                resp.raise_for_status()
-                rows = resp.json()
-                if rows:
-                    cols = ["open_time", "open", "high", "low", "close", "volume", "close_time", "quote_volume", "trade_count", "taker_buy_base_volume", "taker_buy_quote_volume", "ignore"]
-                    df = pd.DataFrame(rows, columns=cols[: len(rows[0])])
-                    return self._market_values(base, df)
-            except requests.RequestException:
-                pass
-        return self.market_history.get(base, {})
+        if not self.api_url:
+            raise RuntimeError("api_url is required for market features")
+        target = funding_utc - pd.Timedelta(minutes=1)
+        end_ms = int(target.timestamp() * 1000) + 59_999
+        path = "/fapi/v1/klines" if "fapi" in self.api_url else "/api/v3/klines"
+        resp = requests.get(
+            f"{self.api_url}{path}",
+            params={"symbol": f"{base}USDT", "interval": "1m", "limit": 90, "endTime": end_ms},
+            timeout=self.api_timeout,
+            proxies=self.proxies,
+        )
+        if resp.status_code == 404:
+            resp = requests.get(
+                f"{self.api_url}/fapi/v1/klines",
+                params={"symbol": f"{base}USDT", "interval": "1m", "limit": 90, "endTime": end_ms},
+                timeout=self.api_timeout,
+                proxies=self.proxies,
+            )
+        resp.raise_for_status()
+        rows = resp.json()
+        if not rows:
+            raise RuntimeError(f"empty market kline response: {base}USDT")
+        cols = ["open_time", "open", "high", "low", "close", "volume", "close_time", "quote_volume", "trade_count", "taker_buy_base_volume", "taker_buy_quote_volume", "ignore"]
+        df = pd.DataFrame(rows, columns=cols[: len(rows[0])])
+        return self._market_values(base, df)
 
     def _market_values(self, base: str, df: pd.DataFrame) -> dict[str, float]:
         close = pd.to_numeric(df["close"], errors="coerce").astype(float)
