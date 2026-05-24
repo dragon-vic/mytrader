@@ -13,3 +13,4 @@ logs/
 .env
 .venv/
 .ipynb_checkpoints/
+strategies/maxfunding/data/
