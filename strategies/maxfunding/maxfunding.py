@@ -31,6 +31,7 @@ from .maxfunding_xgb import MaxFundingXgbScorer
 class PreparedData:
     data_type: str
     rows: list[tuple[InstrumentId, dict[str, Any]]]
+    selected: list[tuple[InstrumentId, dict[str, Any]]]
     obs_map: dict[InstrumentId, dict[str, Any]]
     frame: Any
     created_ns: int
@@ -128,8 +129,7 @@ class MaxFundingStrategy(Strategy):
         self.close_count = 0
         self.trade_written = False
         self.close_submit_ns: dict[InstrumentId, int] = {}
-        self.backup_data: PreparedData | None = None
-        self.main_data: PreparedData | None = None
+        self.first_snapshot: dict[InstrumentId, dict[str, Any]] | None = None
         self.active_data: PreparedData | None = None
         self.log_path = Path(config.event_log_path)
         use_proxy = platform.system() == "Windows" and config.proxy_url
@@ -141,9 +141,6 @@ class MaxFundingStrategy(Strategy):
         self.xgb = MaxFundingXgbScorer(
             config.xgb_models,
             config.xgb_primary,
-            api_url=config.api_url,
-            api_timeout=config.api_timeout,
-            proxies=self.proxies,
         )
         self.xgb_columns = self.xgb.metric_columns
         self.event_columns = [
@@ -200,7 +197,7 @@ class MaxFundingStrategy(Strategy):
             f"XGB主模型{self.config.xgb_primary}"
         )
 
-    # clock alert 负责 t-3/t-2/t-1/t/t+2/t+3 六个确定动作。
+    # clock alert 负责第一快照、主数据和模型、下单、平仓、总结。
     def _on_time(self, event: TimeEvent) -> None:
         name = event.name.split(":", 1)[0]
         if name == self.WARMUP_TIMER:
@@ -216,52 +213,53 @@ class MaxFundingStrategy(Strategy):
         elif name == self.POST_TIMER:
             self._post_funding()
 
-    # t-3 准备备用模型数据，成功时不打 info。
+    # t-2.5 拉第一快照，成功时不打 info。
     def _warmup_funding(self) -> None:
         if self.sent_done:
             return
         start = perf_counter()
         try:
-            self.backup_data = self._prepare_model_data("备用")
+            obs_map, _ins_map, _stats = self._load_model_snapshot()
+            if not obs_map:
+                raise RuntimeError("第一快照为空")
+            self.first_snapshot = obs_map
         except Exception as exc:
+            self.first_snapshot = None
+            self.sent_done = True
             elapsed_ms = (perf_counter() - start) * 1000
-            self.log.warning(f"备用模型数据准备失败，原因：{exc}，耗时：{self._ms(elapsed_ms)}ms")
+            self.log.warning(f"第一快照准备失败，原因：{exc}，耗时：{self._ms(elapsed_ms)}ms")
 
-    # t-1.5 准备主用模型数据；失败时使用 t-3 备用。
+    # t-1 拉主数据和 kline，并完成模型判断。
     def _pre_funding(self) -> None:
         if self.sent_done:
             return
+        if self.first_snapshot is None:
+            self.sent_done = True
+            self.log.warning("跳过本轮，原因：第一快照未准备好")
+            return
         start = perf_counter()
         try:
-            self.main_data = self._prepare_model_data("主用", deadline_sec=float(self.config.pre_deadline))
-            self.active_data = self.main_data
+            self.active_data = self._prepare_model_data()
             self.entry_done = True
             self.log.info(
-                f"模型数据准备完成，数据类型：主用，候选数：{len(self.main_data.rows)}，"
-                f"市场数据：BTC/ETH/SOL，耗时：{self._ms(self.main_data.elapsed_ms)}ms"
+                f"模型数据和判断完成，候选数：{len(self.active_data.rows)}，"
+                f"通过数：{self._pass_count(self.active_data.rows)}，"
+                f"选中数：{len(self.active_data.selected)}，市场数据：BTC/ETH/SOL，"
+                f"耗时：{self._ms(self.active_data.elapsed_ms)}ms，"
+                f"选中：{self._decision_list(self.active_data.selected)}"
             )
         except Exception as exc:
             elapsed_ms = (perf_counter() - start) * 1000
-            if self.backup_data is not None:
-                self.active_data = self.backup_data
-                self.entry_done = True
-                age_ms = (self.clock.timestamp_ns() - self.backup_data.created_ns) // 1_000_000
-                self.log.warning(
-                    f"使用备用模型数据，原因：主用数据准备失败，候选数：{len(self.backup_data.rows)}，"
-                    f"备用数据年龄：{age_ms}ms"
-                )
-            else:
-                self.active_data = None
-                self.entry_done = False
-                self.log.warning(
-                    f"模型数据准备失败，原因：主用和备用数据都不可用，耗时：{self._ms(elapsed_ms)}ms"
-                )
+            self.active_data = None
+            self.entry_done = False
+            self.sent_done = True
+            self.log.warning(f"模型数据和判断失败，原因：{exc}，耗时：{self._ms(elapsed_ms)}ms")
         order_ns = self.fund_ns - int(self.config.entry_before * 1_000_000_000)
         if self.clock.timestamp_ns() >= order_ns:
             self.sent_done = True
             self.log.warning("跳过本轮，原因：模型数据准备太晚")
 
-    # t-0.5 使用已准备的数据完成模型判断并提交订单。
+    # t-0.3 使用已准备的模型结果提交订单。
     def _freeze_funding(self) -> None:
         if self.sent_done:
             return
@@ -269,35 +267,7 @@ class MaxFundingStrategy(Strategy):
             self.sent_done = True
             self.log.warning("跳过本轮，原因：模型数据未准备好")
             return
-        rows = [(ins_id, dict(row)) for ins_id, row in self.active_data.rows]
-        self.ins_map = {ins_id: row for ins_id, row in rows}
-        self.obs_map = {ins_id: dict(row) for ins_id, row in self.active_data.obs_map.items()}
-        model_start = perf_counter()
-        try:
-            scores = self.xgb.score_frame(self.active_data.frame)
-            for ins_id, row in rows:
-                row.update(scores.get(self.symbols[ins_id], {}))
-            rows = [
-                (ins_id, row)
-                for ins_id, row in rows
-                if row.get("xgb_primary_pass") is True
-            ]
-            selected = sorted(rows, key=self._select_key, reverse=True)[:self.max_trades]
-            for _ins_id, row in selected:
-                rate = Decimal(str(row["rate"]))
-                row["side"] = self._side(rate)
-                row["order_notional"] = self._order_notional(row)
-            model_elapsed_ms = (perf_counter() - model_start) * 1000
-            self.log.info(
-                f"模型判断完成，候选数：{len(self.active_data.rows)}，通过数：{len(rows)}，"
-                f"选中数：{len(selected)}，耗时：{self._ms(model_elapsed_ms)}ms，"
-                f"选中：{self._decision_list(selected)}"
-            )
-        except Exception as exc:
-            model_elapsed_ms = (perf_counter() - model_start) * 1000
-            self.log.warning(f"模型判断失败，原因：{exc}，耗时：{self._ms(model_elapsed_ms)}ms")
-            raise
-
+        selected = [(ins_id, dict(row)) for ins_id, row in self.active_data.selected]
         order_start = perf_counter()
         submitted = []
         for ins_id, row in selected:
@@ -425,19 +395,18 @@ class MaxFundingStrategy(Strategy):
         if missing:
             raise RuntimeError(f"Missing instruments in cache: {','.join(sorted(map(str, missing)))}")
 
-    # 拉已加载 instrument 的 premiumIndex；只有可交易集合超过阈值才进入候选。
-    def _prepare_model_data(self, data_type: str, deadline_sec: float | None = None) -> PreparedData:
+    # 拉主快照和 kline，补齐模型输入并完成打分。
+    def _prepare_model_data(self) -> PreparedData:
         start = perf_counter()
-        obs_map, ins_map, stats = self._load_model_snapshot(deadline_sec=deadline_sec)
-        if stats["deadline_hit"]:
-            raise RuntimeError("premiumIndex 拉取超过截止时间")
+        obs_map, ins_map, _stats = self._load_model_snapshot()
+        market_klines = self._fetch_market_klines()
         rows = [
             (ins_id, row)
             for ins_id, row in ins_map.items()
             if ins_id in self.ins and "rate" in row and "pre" in row
         ]
         if rows:
-            self._refresh_entry_prices(rows)
+            self._apply_pre_cost(rows)
         candidates = [
             {
                 "symbol": self.symbols[ins_id],
@@ -454,11 +423,27 @@ class MaxFundingStrategy(Strategy):
             for ins_id, row in obs_map.items()
             if ins_id in self.symbols and "rate" in row
         ]
-        frame = self.xgb.prepare_frame(candidates, observed, self.fund_ns)
+        frame = self.xgb.prepare_frame(candidates, observed, self.fund_ns, market_klines)
+        scores = self.xgb.score_frame(frame)
+        for ins_id, row in rows:
+            row.update(scores.get(self.symbols[ins_id], {}))
+        passed = [
+            (ins_id, row)
+            for ins_id, row in rows
+            if row.get("xgb_primary_pass") is True
+        ]
+        selected = sorted(passed, key=self._select_key, reverse=True)[:self.max_trades]
+        for _ins_id, row in selected:
+            rate = Decimal(str(row["rate"]))
+            row["side"] = self._side(rate)
+            row["order_notional"] = self._order_notional(row)
         elapsed_ms = (perf_counter() - start) * 1000
+        self.ins_map = {ins_id: row for ins_id, row in rows}
+        self.obs_map = {ins_id: dict(row) for ins_id, row in obs_map.items()}
         return PreparedData(
-            data_type=data_type,
+            data_type="主用",
             rows=[(ins_id, dict(row)) for ins_id, row in rows],
+            selected=[(ins_id, dict(row)) for ins_id, row in selected],
             obs_map={ins_id: dict(row) for ins_id, row in obs_map.items()},
             frame=frame,
             created_ns=self.clock.timestamp_ns(),
@@ -555,28 +540,58 @@ class MaxFundingStrategy(Strategy):
             raise RuntimeError("trade_symbols is empty after exclude_symbols")
         self.trade_ids = ids
 
-    # 下单前再拉一次 mark price，估算 t 前价格挤压。
-    def _refresh_entry_prices(self, rows: list[tuple[InstrumentId, dict[str, Any]]]) -> None:
-        payload, errors = self._fetch_rates()
-        if errors and not payload:
-            raise RuntimeError("刷新入场价格失败")
-        by_symbol = {str(item.get("symbol", "")): item for item in payload}
+    # 用两次 premiumIndex 快照估算 t 前价格挤压。
+    def _apply_pre_cost(self, rows: list[tuple[InstrumentId, dict[str, Any]]]) -> None:
+        if self.first_snapshot is None:
+            raise RuntimeError("第一快照未准备好")
+        valid = []
         for ins_id, row in rows:
-            item = by_symbol.get(self.symbols[ins_id])
-            if item is None or "markPrice" not in item or "pre" not in row or "rate" not in row:
+            first = self.first_snapshot.get(ins_id)
+            if first is None or "pre" not in first or "pre" not in row or "rate" not in row:
                 continue
             try:
-                pre = Decimal(str(row["pre"]))
-                entry = Decimal(str(item["markPrice"]))
+                pre = Decimal(str(first["pre"]))
+                entry = Decimal(str(row["pre"]))
                 if pre <= 0:
                     continue
                 rate = Decimal(str(row["rate"]))
                 direction = Decimal("-1") if rate > 0 else Decimal("1")
                 ret_bps = direction * (entry - pre) / pre * Decimal("10000")
+                row["pre"] = pre
                 row["entry"] = entry
                 row["pre_cost_bps"] = float(-ret_bps)
+                valid.append((ins_id, row))
             except (ValueError, TypeError):
                 continue
+        rows[:] = valid
+
+    # 策略层拉 BTC/ETH/SOL kline，模型层只做特征计算。
+    def _fetch_market_klines(self) -> dict[str, list]:
+        funding_utc = datetime.fromtimestamp(self.fund_ns / 1_000_000_000, tz=UTC)
+        end_ms = int(funding_utc.timestamp() * 1000) - 1
+        out: dict[str, list] = {}
+        for base in ("BTC", "ETH", "SOL"):
+            out[base] = self._fetch_kline(base, end_ms)
+        return out
+
+    def _fetch_kline(self, base: str, end_ms: int) -> list:
+        try:
+            response = requests.get(
+                f"{self.config.api_url}/fapi/v1/klines",
+                params={"symbol": f"{base}USDT", "interval": "1m", "limit": 90, "endTime": end_ms},
+                proxies=self.proxies,
+                timeout=float(self.config.api_timeout),
+            )
+            response.raise_for_status()
+            data = response.json()
+        except (requests.RequestException, ValueError) as exc:
+            raise RuntimeError(f"{base}USDT kline REST 失败") from exc
+        if not isinstance(data, list) or not data:
+            raise RuntimeError(f"{base}USDT kline REST 为空")
+        return data
+
+    def _pass_count(self, rows: list[tuple[InstrumentId, dict[str, Any]]]) -> int:
+        return sum(1 for _ins_id, row in rows if row.get("xgb_primary_pass") is True)
 
     def _select_key(self, item: tuple[InstrumentId, dict[str, Any]]) -> float:
         row = item[1]
@@ -612,7 +627,7 @@ class MaxFundingStrategy(Strategy):
         close_ns = self.fund_ns + int(self.exit_sec * 1_000_000_000)
         post_sec = max(float(self.config.post_sec), self.exit_sec + 1.0)
         post_ns = self.fund_ns + int(post_sec * 1_000_000_000)
-        if now_ns >= pre_ns:
+        if now_ns >= warmup_ns:
             self.fund_ns += hour_ns
             warmup_ns += hour_ns
             pre_ns += hour_ns
@@ -755,8 +770,7 @@ class MaxFundingStrategy(Strategy):
         self.close_count = 0
         self.trade_written = False
         self.close_submit_ns.clear()
-        self.backup_data = None
-        self.main_data = None
+        self.first_snapshot = None
         self.active_data = None
         self.entry_done = False
         self.sent_done = False
@@ -771,8 +785,7 @@ class MaxFundingStrategy(Strategy):
         self.close_count = 0
         self.trade_written = False
         self.close_submit_ns.clear()
-        self.backup_data = None
-        self.main_data = None
+        self.first_snapshot = None
         self.active_data = None
         self.entry_done = False
         self.sent_done = False

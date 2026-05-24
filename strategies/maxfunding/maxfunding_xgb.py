@@ -7,7 +7,6 @@ from typing import Any
 import joblib
 import numpy as np
 import pandas as pd
-import requests
 
 
 STRATEGY_DIR = Path(__file__).resolve().parent
@@ -33,9 +32,6 @@ class MaxFundingXgbScorer:
         self,
         specs: list[dict[str, Any]],
         primary: str = "",
-        api_url: str = "",
-        api_timeout: float = 0.8,
-        proxies: dict[str, str] | None = None,
     ) -> None:
         self.specs = [self._parse_spec(row) for row in specs]
         names = [spec.name for spec in self.specs]
@@ -44,9 +40,6 @@ class MaxFundingXgbScorer:
         if primary and primary not in names:
             raise RuntimeError(f"xgb_primary not found in xgb_models: {primary}")
         self.primary = primary
-        self.api_url = api_url.rstrip("/")
-        self.api_timeout = float(api_timeout)
-        self.proxies = proxies
         self.models = {spec.name: joblib.load(spec.path) for spec in self.specs}
         self.history = self._load_history()
         self.funding_history = self._load_funding_history()
@@ -86,8 +79,9 @@ class MaxFundingXgbScorer:
         candidates: list[dict[str, Any]],
         observed: list[dict[str, Any]],
         funding_ns: int,
+        market_klines: dict[str, Any],
     ) -> dict[str, dict[str, Any]]:
-        frame = self.prepare_frame(candidates, observed, funding_ns)
+        frame = self.prepare_frame(candidates, observed, funding_ns, market_klines)
         return self.score_frame(frame)
 
     def prepare_frame(
@@ -95,14 +89,12 @@ class MaxFundingXgbScorer:
         candidates: list[dict[str, Any]],
         observed: list[dict[str, Any]],
         funding_ns: int,
+        market_klines: dict[str, Any],
     ) -> pd.DataFrame:
         if not candidates:
-            funding_utc = pd.Timestamp(funding_ns, unit="ns", tz="UTC")
-            for base in ("BTC", "ETH", "SOL"):
-                self._fetch_market_values(base, funding_utc)
             return pd.DataFrame()
         frame = self._base_frame(candidates, observed, funding_ns)
-        return self._add_market_features(frame, funding_ns)
+        return self._add_market_features(frame, market_klines)
 
     def score_frame(self, frame: pd.DataFrame) -> dict[str, dict[str, Any]]:
         if frame.empty:
@@ -271,43 +263,26 @@ class MaxFundingXgbScorer:
         frame = pd.DataFrame(rows)
         return self._add_node_ranks(frame)
 
-    def _add_market_features(self, frame: pd.DataFrame, funding_ns: int) -> pd.DataFrame:
+    def _add_market_features(self, frame: pd.DataFrame, market_klines: dict[str, Any]) -> pd.DataFrame:
         out = frame.copy()
-        funding_utc = pd.Timestamp(funding_ns, unit="ns", tz="UTC")
         for base in ("BTC", "ETH", "SOL"):
-            values = self._fetch_market_values(base, funding_utc)
+            if base not in market_klines:
+                raise RuntimeError(f"missing market kline data: {base}USDT")
+            values = self._market_values(base, market_klines[base])
             for key, value in values.items():
                 out[key] = value
         return out
 
-    def _fetch_market_values(self, base: str, funding_utc: pd.Timestamp) -> dict[str, float]:
-        if not self.api_url:
-            raise RuntimeError("api_url is required for market features")
-        target = funding_utc - pd.Timedelta(minutes=1)
-        end_ms = int(target.timestamp() * 1000) + 59_999
-        path = "/fapi/v1/klines" if "fapi" in self.api_url else "/api/v3/klines"
-        resp = requests.get(
-            f"{self.api_url}{path}",
-            params={"symbol": f"{base}USDT", "interval": "1m", "limit": 90, "endTime": end_ms},
-            timeout=self.api_timeout,
-            proxies=self.proxies,
-        )
-        if resp.status_code == 404:
-            resp = requests.get(
-                f"{self.api_url}/fapi/v1/klines",
-                params={"symbol": f"{base}USDT", "interval": "1m", "limit": 90, "endTime": end_ms},
-                timeout=self.api_timeout,
-                proxies=self.proxies,
-            )
-        resp.raise_for_status()
-        rows = resp.json()
-        if not rows:
-            raise RuntimeError(f"empty market kline response: {base}USDT")
+    def _market_values(self, base: str, rows: Any) -> dict[str, float]:
         cols = ["open_time", "open", "high", "low", "close", "volume", "close_time", "quote_volume", "trade_count", "taker_buy_base_volume", "taker_buy_quote_volume", "ignore"]
-        df = pd.DataFrame(rows, columns=cols[: len(rows[0])])
-        return self._market_values(base, df)
-
-    def _market_values(self, base: str, df: pd.DataFrame) -> dict[str, float]:
+        if isinstance(rows, pd.DataFrame):
+            df = rows.copy()
+        else:
+            if not rows:
+                raise RuntimeError(f"empty market kline response: {base}USDT")
+            df = pd.DataFrame(rows, columns=cols[: len(rows[0])])
+        if df.empty:
+            raise RuntimeError(f"empty market kline response: {base}USDT")
         close = pd.to_numeric(df["close"], errors="coerce").astype(float)
         quote = pd.to_numeric(df["quote_volume"], errors="coerce").astype(float)
         buy_quote = pd.to_numeric(df["taker_buy_quote_volume"], errors="coerce").astype(float)
