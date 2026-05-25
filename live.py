@@ -16,8 +16,6 @@ from nautilus_trader.model.identifiers import InstrumentId
 from actors.data_recorder import DataRecorder
 from actors.data_recorder import DataRecorderConfig
 from adapters.common import cache_config
-from external.external_signal_client import ExternalSignalDataClientConfig
-from external.external_signal_client import ExternalSignalLiveDataClientFactory
 from utils.arguments import NODE_STOP_TOPIC
 from utils.config_loader import load_settings
 from utils.config_loader import proxy_url
@@ -89,14 +87,6 @@ def build_data_clients(settings: dict[str, Any]) -> tuple[dict[str, Any], dict[s
     factories = {}
     for cfg in settings["data"]["clients"].values():
         if not cfg["enabled"]:
-            continue
-        if cfg["adapter"] == "external_signal":
-            client_id = cfg["client_id"]
-            configs[client_id] = ExternalSignalDataClientConfig(
-                host=cfg["host"],
-                port=int(cfg["port"]),
-            )
-            factories[client_id] = ExternalSignalLiveDataClientFactory
             continue
         client_id, config, factory = adapter_module(cfg["adapter"]).build_data_client(settings, cfg)
         configs[client_id] = config

@@ -7,3 +7,4 @@ python-dotenv
 rich
 openai
 pyarrow
+nautilus-ibapi>=10.43.2

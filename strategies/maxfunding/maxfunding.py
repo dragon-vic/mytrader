@@ -40,23 +40,19 @@ class PreparedData:
 
 def score_multiplier(
     score: Decimal,
-    threshold: Decimal,
-    min_multiplier: Decimal,
     base_score: Decimal,
     max_score: Decimal,
+    min_notional: Decimal,
     max_notional: Decimal,
-    base_notional: Decimal,
 ) -> Decimal:
-    max_multiplier = max_notional / base_notional
-    if score <= threshold:
-        return min_multiplier
     if score < base_score:
-        span = max(base_score - threshold, Decimal("0.0001"))
-        weight = (score - threshold) / span
-        return min_multiplier + (Decimal("1") - min_multiplier) * weight
+        return min_notional
     span = max(max_score - base_score, Decimal("0.0001"))
-    weight = min((score - base_score) / span, Decimal("1"))
-    return Decimal("1") + (max_multiplier - Decimal("1")) * weight
+    # 指数曲线：base_score 起步，max_score 附近约到最大仓位的 90%，之后继续缓慢靠近上限。
+    scale = span / Decimal("2.302585092994046")
+    weight = Decimal("1") - (-(score - base_score) / scale).exp()
+    weight = max(Decimal("0"), min(weight, Decimal("1")))
+    return min_notional + (max_notional - min_notional) * weight
 
 
 class MaxFundingConfig(StrategyConfig, frozen=True):
@@ -64,11 +60,9 @@ class MaxFundingConfig(StrategyConfig, frozen=True):
     bar_types: list[BarType]
     trade_symbols: list[str] | str
     exclude_symbols: list[str]
-    trade_notional: Decimal
-    notional_min_multiplier: Decimal
-    notional_base_score_bps: Decimal
-    notional_max_score_bps: Decimal
+    notional_min: Decimal
     notional_max: Decimal
+    notional_base_score_bps: Decimal
     max_trades: int
     min_rate_bps: Decimal
     pre_sec: float
@@ -84,6 +78,8 @@ class MaxFundingConfig(StrategyConfig, frozen=True):
     funding_income_delay_sec: float
     xgb_models: list[dict[str, Any]]
     xgb_primary: str
+    aggressive_mode: bool = False
+    aggressive_pass_score_bps: Decimal = Decimal("5")
     event_log_path: str = "auto"
 
 
@@ -98,11 +94,11 @@ class MaxFundingStrategy(Strategy):
 
     def __init__(self, config: MaxFundingConfig) -> None:
         super().__init__(config)
-        self.notional = Decimal(str(config.trade_notional))
-        self.min_mult = Decimal(str(config.notional_min_multiplier))
-        self.base_score = Decimal(str(config.notional_base_score_bps))
-        self.max_score = Decimal(str(config.notional_max_score_bps))
+        self.min_notional = Decimal(str(config.notional_min))
         self.max_notional = Decimal(str(config.notional_max))
+        self.base_score = Decimal(str(config.notional_base_score_bps))
+        self.max_score = Decimal("45")
+        self.aggressive_pass_score = Decimal(str(config.aggressive_pass_score_bps))
         self.max_trades = int(config.max_trades)
         self.min_rate = Decimal(str(config.min_rate_bps)) / Decimal("10000")
         self.exit_sec = float(config.exit_sec)
@@ -167,16 +163,14 @@ class MaxFundingStrategy(Strategy):
             raise RuntimeError("api_timeout must be positive")
         if self.config.max_trades <= 0:
             raise RuntimeError("max_trades must be positive")
-        if self.notional <= 0:
-            raise RuntimeError("trade_notional must be positive")
-        if self.min_mult <= 0:
-            raise RuntimeError("notional_min_multiplier must be positive")
-        if self.max_notional < self.notional:
-            raise RuntimeError("notional_max must be greater than or equal to trade_notional")
-        if self.min_mult > self.max_notional / self.notional:
-            raise RuntimeError("notional_min_multiplier is above the max notional multiplier")
+        if self.min_notional <= 0:
+            raise RuntimeError("notional_min must be positive")
+        if self.max_notional < self.min_notional:
+            raise RuntimeError("notional_max must be greater than or equal to notional_min")
         if self.max_score <= self.base_score:
-            raise RuntimeError("notional_max_score_bps must be greater than notional_base_score_bps")
+            raise RuntimeError("notional_base_score_bps must be lower than 45")
+        if self.aggressive_pass_score >= self.max_score:
+            raise RuntimeError("aggressive_pass_score_bps must be lower than 45")
         if self.config.funding_income_delay_sec <= self.config.exit_sec:
             raise RuntimeError("funding_income_delay_sec must be greater than exit_sec")
         if self.config.post_sec < self.config.funding_income_delay_sec:
@@ -193,7 +187,7 @@ class MaxFundingStrategy(Strategy):
             f"可交易{len(self.trade_ids)}个，"
             f"排除{len(self.exclude)}个，"
             f"阈值{self._bps(self.min_rate)}bps，"
-            f"最多交易{self.max_trades}个，基准名义{self.notional:.2f}USDT，"
+            f"最多交易{self.max_trades}个，名义{self.min_notional:.2f}-{self.max_notional:.2f}USDT，"
             f"XGB主模型{self.config.xgb_primary}"
         )
 
@@ -244,7 +238,7 @@ class MaxFundingStrategy(Strategy):
             self.log.info(
                 f"模型数据和判断完成，候选数：{len(self.active_data.rows)}，"
                 f"通过数：{self._pass_count(self.active_data.rows)}，"
-                f"选中数：{len(self.active_data.selected)}，市场数据：BTC/ETH/SOL，"
+                f"市场数据：BTC/ETH/SOL，"
                 f"耗时：{self._ms(self.active_data.elapsed_ms)}ms，"
                 f"{self._decision_summary(self.active_data.selected, self.active_data.rows, self.active_data.obs_map)}"
             )
@@ -268,6 +262,12 @@ class MaxFundingStrategy(Strategy):
             self.log.warning("跳过本轮，原因：模型数据未准备好")
             return
         selected = [(ins_id, dict(row)) for ins_id, row in self.active_data.selected]
+        if not selected:
+            self.sent_done = True
+            self._cancel_current_finish_timers()
+            self._reset_closed_state()
+            self._schedule_next()
+            return
         order_start = perf_counter()
         submitted = []
         for ins_id, row in selected:
@@ -297,6 +297,8 @@ class MaxFundingStrategy(Strategy):
 
     # t+0.15 提交本轮已开仓仓位的平仓。
     def _close_funding(self) -> None:
+        if not self.had_order and not self.open_ids and not self.order_map:
+            return
         if not self.close_done:
             start = perf_counter()
             close_cnt = 0
@@ -316,6 +318,8 @@ class MaxFundingStrategy(Strategy):
 
     # t+10 总结本轮仓位状态并落盘事件。
     def _post_funding(self) -> None:
+        if not self.had_order and not self.open_ids and not self.order_map and self.close_count <= 0:
+            return
         start = perf_counter()
         event_written = self._record_trade_event()
         opened_count = len(self.open_ids)
@@ -430,7 +434,7 @@ class MaxFundingStrategy(Strategy):
         passed = [
             (ins_id, row)
             for ins_id, row in rows
-            if row.get("xgb_primary_pass") is True
+            if self._is_pass(row)
         ]
         selected = sorted(passed, key=self._select_key, reverse=True)[:self.max_trades]
         for _ins_id, row in selected:
@@ -591,7 +595,17 @@ class MaxFundingStrategy(Strategy):
         return data
 
     def _pass_count(self, rows: list[tuple[InstrumentId, dict[str, Any]]]) -> int:
-        return sum(1 for _ins_id, row in rows if row.get("xgb_primary_pass") is True)
+        return sum(1 for _ins_id, row in rows if self._is_pass(row))
+
+    def _is_pass(self, row: dict[str, Any]) -> bool:
+        if row.get("xgb_history_pass") is False:
+            return False
+        if row.get("xgb_primary_pass") is True:
+            return True
+        if not self.config.aggressive_mode:
+            return False
+        score = self._decimal(row.get("xgb_primary_score"))
+        return score is not None and score > self.aggressive_pass_score
 
     def _select_key(self, item: tuple[InstrumentId, dict[str, Any]]) -> float:
         row = item[1]
@@ -693,6 +707,14 @@ class MaxFundingStrategy(Strategy):
     def _timer_name(self, kind: str) -> str:
         return f"{kind}:{self.fund_ns}"
 
+    # 空选中时取消本轮收尾定时器，避免 0 订单/0 仓位日志。
+    def _cancel_current_finish_timers(self) -> None:
+        names = set(self.clock.timer_names)
+        for kind in (self.RATE_TIMER, self.CLOSE_TIMER, self.POST_TIMER):
+            name = self._timer_name(kind)
+            if name in names:
+                self.clock.cancel_timer(name)
+
     def _fetch_rates(self, timeout: float | None = None) -> tuple[list[dict], int]:
         try:
             response = requests.get(
@@ -727,21 +749,18 @@ class MaxFundingStrategy(Strategy):
 
     def _order_notional(self, row: dict[str, Any]) -> Decimal:
         score = self._decimal(row.get("xgb_primary_score"))
-        threshold = self._decimal(row.get(f"xgb_{self.config.xgb_primary}_threshold_bps"))
-        if score is None or threshold is None:
+        if score is None:
             row["notional_multiplier"] = Decimal("1")
-            return self.notional
-        mult = score_multiplier(
+            return self.min_notional
+        order_notional = score_multiplier(
             score,
-            threshold,
-            self.min_mult,
             self.base_score,
             self.max_score,
+            self.min_notional,
             self.max_notional,
-            self.notional,
         )
-        row["notional_multiplier"] = mult
-        return self.notional * mult
+        row["notional_multiplier"] = order_notional / self.min_notional
+        return order_notional
 
     def _decimal(self, value: Any) -> Decimal | None:
         if value is None:

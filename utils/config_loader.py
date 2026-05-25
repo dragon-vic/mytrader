@@ -33,6 +33,12 @@ CLIENTS = {
         "instrument_kind": "binary_option",
         "client_id": "POLYMARKET",
     },
+    "ibkr": {
+        "venue": "INTERACTIVE_BROKERS",
+        "adapter": "ibkr",
+        "instrument_kind": "ibkr",
+        "client_id": "INTERACTIVE_BROKERS",
+    },
     "external_signal": {
         "venue": "EXTERNAL_SIGNAL",
         "adapter": "external_signal",
@@ -169,6 +175,25 @@ def normalize_poly_market(market: dict[str, Any], key: str) -> dict[str, Any]:
     }
 
 
+# 补齐一个 IBKR InstrumentId 市场。
+def normalize_ibkr_market(value: str, key: str) -> dict[str, Any]:
+    meta = client_meta(key)
+    if not isinstance(value, str):
+        raise TypeError(f"{key}.markets[] must be an InstrumentId string")
+    if "." not in value:
+        raise ValueError(f"{key}.markets[] must be an InstrumentId like AAPL.XNAS")
+    symbol, venue = value.rsplit(".", 1)
+    return {
+        "client_key": key,
+        "exchange": "ibkr",
+        "venue": venue,
+        "instrument_kind": meta["instrument_kind"],
+        "raw_symbol": symbol,
+        "instrument_symbol": symbol,
+        "instrument_id": value,
+    }
+
+
 # 按 client key 补齐 markets，并记录 all 语义。
 def normalize_client_markets(
     key: str,
@@ -190,20 +215,25 @@ def normalize_client_markets(
 
     markets = cfg["markets"]
     if markets == "all":
+        if meta["adapter"] == "ibkr":
+            raise ValueError("ibkr.markets does not support all; use explicit InstrumentId strings")
         cfg["markets_all"] = True
         cfg["markets"] = []
         return
 
     cfg["markets_all"] = False
     data_defaults = settings.get("backtest", {}).get("data", {})
-    rows = [market_dict(market, meta.get("quote_currency", "USDT")) for market in markets]
     if meta["adapter"] == "binance":
+        rows = [market_dict(market, meta.get("quote_currency", "USDT")) for market in markets]
         cfg["markets"] = [
             normalize_binance_market(row, key, cfg, data_defaults)
             for row in rows
         ]
     elif meta["adapter"] == "polymarket":
+        rows = [market_dict(market, meta.get("quote_currency", "USDT")) for market in markets]
         cfg["markets"] = [normalize_poly_market(row, key) for row in rows]
+    elif meta["adapter"] == "ibkr":
+        cfg["markets"] = [normalize_ibkr_market(market, key) for market in markets]
 
 
 # 补齐从短写可推导的字段。
@@ -218,6 +248,8 @@ def normalize_settings(settings: dict[str, Any], mode: str | None) -> None:
     if mode == "backtest":
         backtest = settings["backtest"]
         key = backtest["client"]
+        if key == "ibkr":
+            raise ValueError("IBKR backtest is not supported; use IBKR only for live/testnet")
         for cfg in settings["data"]["clients"].values():
             cfg["enabled"] = False
         for cfg in settings["exec"]["clients"].values():

@@ -1,5 +1,6 @@
 import asyncio
 import json
+from typing import Any
 
 from nautilus_trader.config import LiveDataClientConfig
 from nautilus_trader.core.data import Data
@@ -110,3 +111,15 @@ class ExternalSignalLiveDataClientFactory(LiveDataClientFactory):
             config=config,
             name=name,
         )
+
+
+# 构建外部信号 live data client 配置。
+def build_data_client(settings: dict[str, Any], cfg: dict[str, Any]):
+    return (
+        cfg["client_id"],
+        ExternalSignalDataClientConfig(
+            host=cfg["host"],
+            port=int(cfg["port"]),
+        ),
+        ExternalSignalLiveDataClientFactory,
+    )
