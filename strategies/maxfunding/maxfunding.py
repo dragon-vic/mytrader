@@ -632,6 +632,12 @@ class MaxFundingStrategy(Strategy):
         score = self._fmt(row.get("xgb_primary_score"))
         if score != "":
             text += f" 分数：{score}"
+        hist_count = self._fmt(row.get("xgb_funding_hist_count"))
+        if hist_count != "":
+            text += f" 历史：{hist_count}条"
+        reason = row.get("xgb_filter_reason")
+        if reason:
+            text += f" 原因：{reason}"
         return text
 
     def _funding_bps(self, row: dict[str, Any]) -> str:

@@ -16,6 +16,7 @@ EVENT_FEATURES_PATH = DATA_DIR / "event_features.parquet"
 LIQUIDITY_PATH = DATA_DIR / "liquidity_monthly.parquet"
 FUNDING_PATH = DATA_DIR / "ALL-Funding-20250101.parquet"
 BAD_SYMBOLS = {"DODOX", "STORJ", "SIREN", "RIVER", "BARD", "PIPPIN", "ORCA"}
+MIN_FUNDING_HISTORY = 10
 RATE_BUCKET_ORD = {"30-50": 0, "50-75": 1, "75-100": 2, "100-150": 3, "150+": 4}
 LIQUIDITY_BUCKET_ORD = {"unknown": 0, "micro": 1, "small": 2, "mid": 3, "large": 4}
 
@@ -164,10 +165,15 @@ class MaxFundingXgbScorer:
                 raise RuntimeError(f"unsupported xgb model kind: {spec.kind}")
 
         for symbol, item in out.items():
+            hist_count = int(frame.loc[frame["symbol"].astype(str).eq(symbol), "funding_hist_count"].iloc[0])
+            item["xgb_funding_hist_count"] = hist_count
+            item["xgb_history_pass"] = hist_count >= MIN_FUNDING_HISTORY
+            if hist_count < MIN_FUNDING_HISTORY:
+                item["xgb_filter_reason"] = f"历史funding少于{MIN_FUNDING_HISTORY}条"
             if self.primary:
                 item["xgb_primary_model"] = self.primary
                 item["xgb_primary_score"] = primary_scores.get(symbol, np.nan)
-                item["xgb_primary_pass"] = primary_pass.get(symbol, False)
+                item["xgb_primary_pass"] = primary_pass.get(symbol, False) and hist_count >= MIN_FUNDING_HISTORY
         return out
 
     def _parse_spec(self, row: dict[str, Any]) -> XgbModelSpec:
