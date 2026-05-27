@@ -20,7 +20,7 @@ from utils.arguments import NODE_STOP_TOPIC
 from utils.config_loader import load_settings
 from utils.config_loader import proxy_url
 from utils.instrument_factory import InstrumentFactory
-from utils.polymarket_btc5m import up_instrument_windows
+from utils.polymarket_btc5m import up_down_instrument_windows
 from utils.report_writer import live_raw_log_name
 from utils.report_writer import prepare_report_dir
 from utils.report_writer import print_live_summary
@@ -53,7 +53,7 @@ def reconciliation_instrument_ids(settings: dict[str, Any]):
 
     source = exec_clients[0]
     if source["adapter"] == "polymarket":
-        windows = up_instrument_windows(proxy_url(settings))
+        windows = up_down_instrument_windows(proxy_url(settings))
         instrument_ids = [InstrumentId.from_str(instrument_id) for instrument_id in windows]
         settings["runtime"]["instrument_ids"] = instrument_ids
         settings["runtime"]["event_windows"] = windows

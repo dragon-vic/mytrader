@@ -20,6 +20,7 @@ logging:
     ExecClient-BINANCE: WARNING
     BinanceSpotInstrumentProvider: WARNING
     BinanceFuturesInstrumentProvider: WARNING
+    DataClient-POLYMARKET: ERROR
 
 # NT data engine 和所有可选 data client。
 data:

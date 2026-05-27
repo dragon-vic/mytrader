@@ -13,7 +13,7 @@ SLUG_PREFIX = "btc-updown-5m"
 WINDOW_SECONDS = 300
 PAST_WINDOWS = 2
 FUTURE_HOURS = 12
-OUTCOME = "Up"
+OUTCOMES = ("Up", "Down")
 REQUEST_TIMEOUT_SECONDS = 15
 SSL_RETRIES = 2
 
@@ -27,8 +27,8 @@ def build_event_slugs() -> list[str]:
     return [f"{SLUG_PREFIX}-{start}" for start in starts]
 
 
-# 解析 Gamma event 里的 Up token 和 5m 窗口时间。
-def up_instrument_windows(proxy_url: str | None = None) -> dict[str, dict[str, int | str]]:
+# 解析 Gamma event 里的 Up/Down token 和 5m 窗口时间。
+def up_down_instrument_windows(proxy_url: str | None = None) -> dict[str, dict[str, int | str]]:
     session = requests.Session()
     if proxy_url:
         session.proxies.update({"http": proxy_url, "https": proxy_url})
@@ -42,15 +42,25 @@ def up_instrument_windows(proxy_url: str | None = None) -> dict[str, dict[str, i
             continue
         for market in event.get("markets", []):
             condition_id = market.get("conditionId")
-            token_id = up_token_id(market)
-            if condition_id and token_id:
+            for outcome, token_id in outcome_token_ids(market).items():
+                if not condition_id or not token_id:
+                    continue
                 instrument_id = f"{condition_id}-{token_id}.POLYMARKET"
                 windows[instrument_id] = {
                     "slug": slug,
+                    "outcome": outcome,
                     "event_start_ns": start * 1_000_000_000,
                     "event_end_ns": end * 1_000_000_000,
                 }
     return windows
+
+
+def up_instrument_windows(proxy_url: str | None = None) -> dict[str, dict[str, int | str]]:
+    return {
+        instrument_id: window
+        for instrument_id, window in up_down_instrument_windows(proxy_url).items()
+        if str(window["outcome"]).lower() == "up"
+    }
 
 
 # BTC 5m slug 末尾就是窗口开始秒级时间戳。
@@ -74,13 +84,15 @@ def fetch_event(session: requests.Session, slug: str) -> dict[str, Any] | None:
 
 
 # Gamma market 中 outcomes 和 clobTokenIds 是 JSON 字符串或列表。
-def up_token_id(market: dict[str, Any]) -> str | None:
+def outcome_token_ids(market: dict[str, Any]) -> dict[str, str]:
     outcomes = parse_list(market.get("outcomes"))
     token_ids = parse_list(market.get("clobTokenIds"))
+    tokens: dict[str, str] = {}
     for outcome, token_id in zip(outcomes, token_ids, strict=False):
-        if str(outcome).lower() == OUTCOME.lower():
-            return str(token_id)
-    return None
+        text = str(outcome)
+        if text in OUTCOMES:
+            tokens[text] = str(token_id)
+    return tokens
 
 
 def parse_list(value: Any) -> list[Any]:

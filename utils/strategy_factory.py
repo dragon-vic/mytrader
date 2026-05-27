@@ -61,6 +61,12 @@ def strategy_params(
         params["event_log_path"] = str(run_reports_dir(settings, run_type) / "strategy_events.csv")
     if "tick_log_path" in fields and params.get("tick_log_path", "auto") == "auto":
         params["tick_log_path"] = str(run_reports_dir(settings, run_type) / "poly_ticks.parquet")
+    if "poly_trade_path" in fields and params.get("poly_trade_path", "auto") == "auto":
+        params["poly_trade_path"] = str(run_reports_dir(settings, run_type) / "poly_trades.parquet")
+    if "poly_quote_path" in fields and params.get("poly_quote_path", "auto") == "auto":
+        params["poly_quote_path"] = str(run_reports_dir(settings, run_type) / "poly_quotes.parquet")
+    if "binance_tick_path" in fields and params.get("binance_tick_path", "auto") == "auto":
+        params["binance_tick_path"] = str(run_reports_dir(settings, run_type) / "binance_btc_ticks.parquet")
     if "event_windows" in fields:
         params["event_windows"] = settings.get("runtime", {}).get("event_windows", {})
     if "proxy_url" in fields:
