@@ -4,6 +4,7 @@
     instrument_client: binance_futures
     notional_min: "6"
     notional_max: "30"
+    notional_scale: "1"
     notional_base_score_bps: "10"
     max_trades: 3
     min_rate_bps: "30"
@@ -21,7 +22,8 @@
     entry_sec: 1.0
     pre_deadline: 0.4
     entry_before: 0.3
-    exit_sec: 0.2
+    exit_sec: 0.25
+    protect_giveback_bps: "30"
     post_sec: 10
     funding_income_delay_sec: 6
     api_url: https://fapi.binance.com

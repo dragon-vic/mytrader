@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import os
 import sys
 from threading import Thread
 from typing import Any
@@ -167,7 +168,7 @@ def build_live_node(settings: dict[str, Any]) -> TradingNode:
     return node
 
 
-# 挂上回车停止监听，然后按 NT 标准方式运行 node。
+# Windows 保留回车停止；Linux/tmux 用 Ctrl+C 停止。
 def run_live_node(node: TradingNode) -> None:
     loop = node.get_event_loop()
 
@@ -175,7 +176,7 @@ def run_live_node(node: TradingNode) -> None:
         input()
         loop.call_soon_threadsafe(lambda: stop_node(node, "回车"))
 
-    if sys.stdin.isatty():
+    if os.name == "nt" and sys.stdin.isatty():
         Thread(target=wait_enter, daemon=True).start()
     node.run()
 

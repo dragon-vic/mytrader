@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import platform
 from dataclasses import dataclass
+from datetime import timedelta
 from datetime import UTC
 from datetime import datetime
 from decimal import Decimal
@@ -14,14 +15,20 @@ from typing import Any
 import requests
 from nautilus_trader.common.events import TimeEvent
 from nautilus_trader.config import StrategyConfig
+from nautilus_trader.core.message import Event
 from nautilus_trader.model.data import BarType
 from nautilus_trader.model.enums import OrderSide
 from nautilus_trader.model.enums import TimeInForce
+from nautilus_trader.model.enums import TriggerType
 from nautilus_trader.model.events import OrderFilled
 from nautilus_trader.model.events import OrderRejected
+from nautilus_trader.model.events import PositionChanged
+from nautilus_trader.model.events import PositionClosed
+from nautilus_trader.model.events import PositionOpened
 from nautilus_trader.model.identifiers import ClientOrderId
 from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.model.instruments import Instrument
+from nautilus_trader.model.orders import StopMarketOrder
 from nautilus_trader.trading.strategy import Strategy
 
 from .maxfunding_xgb import MaxFundingXgbScorer
@@ -62,6 +69,7 @@ class MaxFundingConfig(StrategyConfig, frozen=True):
     exclude_symbols: list[str]
     notional_min: Decimal
     notional_max: Decimal
+    notional_scale: Decimal
     notional_base_score_bps: Decimal
     max_trades: int
     min_rate_bps: Decimal
@@ -72,6 +80,7 @@ class MaxFundingConfig(StrategyConfig, frozen=True):
     exit_sec: float
     post_sec: float
     stop_close: bool
+    protect_giveback_bps: Decimal
     api_url: str
     api_timeout: float
     proxy_url: str
@@ -96,11 +105,13 @@ class MaxFundingStrategy(Strategy):
         super().__init__(config)
         self.min_notional = Decimal(str(config.notional_min))
         self.max_notional = Decimal(str(config.notional_max))
+        self.notional_scale = Decimal(str(config.notional_scale))
         self.base_score = Decimal(str(config.notional_base_score_bps))
-        self.max_score = Decimal("45")
+        self.max_score = Decimal("60")
         self.aggressive_pass_score = Decimal(str(config.aggressive_pass_score_bps))
         self.max_trades = int(config.max_trades)
         self.min_rate = Decimal(str(config.min_rate_bps)) / Decimal("10000")
+        self.protect_giveback_bps = Decimal(str(config.protect_giveback_bps))
         self.exit_sec = float(config.exit_sec)
         self.trade = None if config.trade_symbols == "all" else {
             symbol.upper().replace("-PERP.BINANCE", "").replace("USDT", "").replace("/", "")
@@ -121,13 +132,18 @@ class MaxFundingStrategy(Strategy):
         self.ins_map: dict[InstrumentId, dict[str, Any]] = {}
         self.open_ids: set[InstrumentId] = set()
         self.order_map: dict[ClientOrderId, InstrumentId] = {}
+        self.protect_orders: dict[InstrumentId, StopMarketOrder] = {}
+        self.protect_map: dict[ClientOrderId, InstrumentId] = {}
         self.had_order = False
         self.close_count = 0
         self.trade_written = False
         self.close_submit_ns: dict[InstrumentId, int] = {}
+        self.open_fill_ns: dict[InstrumentId, int] = {}
+        self.close_fill_ns: dict[InstrumentId, int] = {}
+        self.closed_events: dict[InstrumentId, PositionClosed] = {}
         self.first_snapshot: dict[InstrumentId, dict[str, Any]] | None = None
         self.active_data: PreparedData | None = None
-        self.log_path = Path(config.event_log_path)
+        self.log_path = Path(__file__).resolve().parent / "strategy_events.csv"
         use_proxy = platform.system() == "Windows" and config.proxy_url
         self.proxies = {"http": config.proxy_url, "https": config.proxy_url} if use_proxy else None
         if not config.xgb_primary:
@@ -141,8 +157,15 @@ class MaxFundingStrategy(Strategy):
         self.xgb_columns = self.xgb.metric_columns
         self.event_columns = [
             "symbol",
-            "funding_time",
+            "funding_time_bj",
+            "funding_bps",
+            "xgb_primary_score",
+            "open_fill_time",
             "close_order_submit_time",
+            "close_fill_time",
+            "avg_px_open",
+            "avg_px_close",
+            "return_bps",
         ]
 
     # 启动时注册 NT 定时器，资金费和价格用 REST 观察列表快照。
@@ -167,10 +190,12 @@ class MaxFundingStrategy(Strategy):
             raise RuntimeError("notional_min must be positive")
         if self.max_notional < self.min_notional:
             raise RuntimeError("notional_max must be greater than or equal to notional_min")
+        if self.notional_scale <= 0:
+            raise RuntimeError("notional_scale must be positive")
         if self.max_score <= self.base_score:
-            raise RuntimeError("notional_base_score_bps must be lower than 45")
+            raise RuntimeError("notional_base_score_bps must be lower than 60")
         if self.aggressive_pass_score >= self.max_score:
-            raise RuntimeError("aggressive_pass_score_bps must be lower than 45")
+            raise RuntimeError("aggressive_pass_score_bps must be lower than 60")
         if self.config.funding_income_delay_sec <= self.config.exit_sec:
             raise RuntimeError("funding_income_delay_sec must be greater than exit_sec")
         if self.config.post_sec < self.config.funding_income_delay_sec:
@@ -201,7 +226,10 @@ class MaxFundingStrategy(Strategy):
         elif name == self.FREEZE_TIMER:
             self._freeze_funding()
         elif name == self.RATE_TIMER:
-            self._close_funding()
+            if self.exit_sec == 0:
+                self._close_funding()
+            else:
+                self._protect_funding()
         elif name == self.CLOSE_TIMER:
             self._close_funding()
         elif name == self.POST_TIMER:
@@ -295,6 +323,66 @@ class MaxFundingStrategy(Strategy):
 
         self.sent_done = True
 
+    # T 点按实际持仓挂 reduce-only 条件保护单。
+    def _protect_funding(self) -> None:
+        if not self.had_order or not self.open_ids or self.active_data is None:
+            return
+        rows = {ins_id: row for ins_id, row in self.active_data.selected}
+        start = perf_counter()
+        submitted = []
+        skipped = []
+        for ins_id in sorted(self.open_ids, key=str):
+            row = rows.get(ins_id)
+            if row is None:
+                skipped.append(f"{self._base(ins_id)} 无本轮数据")
+                continue
+            rate = self._decimal(row.get("rate"))
+            if rate is None:
+                skipped.append(f"{self._base(ins_id)} 无funding")
+                continue
+            protect_bps = abs(rate * Decimal("10000")) - self.protect_giveback_bps
+            if protect_bps <= 0:
+                skipped.append(f"{self._base(ins_id)} 阈值<=0")
+                continue
+            positions = list(self.cache.positions_open(instrument_id=ins_id, strategy_id=self.id))
+            if not positions:
+                skipped.append(f"{self._base(ins_id)} 无持仓")
+                continue
+            if len(positions) > 1:
+                skipped.append(f"{self._base(ins_id)} 多持仓")
+                continue
+            pos = positions[0]
+            avg_open = Decimal(str(pos.avg_px_open))
+            move = protect_bps / Decimal("10000")
+            if pos.is_long:
+                side = OrderSide.SELL
+                trigger = avg_open * (Decimal("1") - move)
+            else:
+                side = OrderSide.BUY
+                trigger = avg_open * (Decimal("1") + move)
+            order = self.order_factory.stop_market(
+                instrument_id=ins_id,
+                order_side=side,
+                quantity=pos.quantity,
+                trigger_price=self.ins[ins_id].make_price(trigger),
+                trigger_type=TriggerType.LAST_PRICE,
+                time_in_force=TimeInForce.GTC,
+                reduce_only=True,
+            )
+            self.protect_orders[ins_id] = order
+            self.protect_map[order.client_order_id] = ins_id
+            self.submit_order(order)
+            submitted.append(
+                f"{self._base(ins_id)} {self._side_cn(side)} 触发价：{order.trigger_price} "
+                f"数量：{pos.quantity} 阈值：{protect_bps:.2f}bps"
+            )
+        elapsed_ms = (perf_counter() - start) * 1000
+        if submitted or skipped:
+            self.log.info(
+                f"保护单提交完成，提交数：{len(submitted)}，保护：{self._join_items(submitted)}，"
+                f"跳过：{self._join_items(skipped)}，耗时：{self._ms(elapsed_ms)}ms"
+            )
+
     # t+0.15 提交本轮已开仓仓位的平仓。
     def _close_funding(self) -> None:
         if not self.had_order and not self.open_ids and not self.order_map:
@@ -350,15 +438,45 @@ class MaxFundingStrategy(Strategy):
 
     # 成交后才记录待平仓 instrument。
     def on_order_filled(self, event: OrderFilled) -> None:
+        protect_ins_id = self.protect_map.pop(event.client_order_id, None)
+        if protect_ins_id is not None:
+            self.protect_orders.pop(protect_ins_id, None)
+            self.close_fill_ns[protect_ins_id] = event.ts_event
+            self.log.info(f"保护单成交，交易对：{self._base(protect_ins_id)}")
+            return
         ins_id = self.order_map.pop(event.client_order_id, None)
         if ins_id is not None:
             self.open_ids.add(ins_id)
+            self.open_fill_ns[ins_id] = event.ts_event
+            return
+        if event.instrument_id not in self.open_ids:
+            return
+        row = self._active_row(event.instrument_id)
+        if row is None:
+            return
+        if event.order_side != self._opposite_side(row["side"]):
+            return
+        self.close_fill_ns[event.instrument_id] = event.ts_event
 
     # 拒单后清理本地订单映射。
     def on_order_rejected(self, event: OrderRejected) -> None:
+        protect_ins_id = self.protect_map.pop(event.client_order_id, None)
+        if protect_ins_id is not None:
+            self.protect_orders.pop(protect_ins_id, None)
+            self.log.warning(f"保护单被拒，交易对：{self._base(protect_ins_id)}，原因：{event.reason}")
+            return
         ins_id = self.order_map.pop(event.client_order_id, None)
         if ins_id is not None:
             self.log.warning(f"订单被拒，交易对：{self._base(ins_id)}，原因：{event.reason}")
+
+    def on_event(self, event: Event) -> None:
+        if isinstance(event, PositionOpened | PositionChanged):
+            if event.instrument_id in self.open_ids and event.closing_order_id is None:
+                self.open_fill_ns[event.instrument_id] = event.ts_last
+        elif isinstance(event, PositionClosed):
+            self.closed_events[event.instrument_id] = event
+            self.close_fill_ns[event.instrument_id] = event.ts_closed
+            self._cancel_protect_order(event.instrument_id)
 
     def on_stop(self) -> None:
         names = set(self.clock.timer_names)
@@ -693,6 +811,7 @@ class MaxFundingStrategy(Strategy):
         if self.exit_sec == 0:
             timers.append((self.RATE_TIMER, rate_ns))
         else:
+            timers.append((self.RATE_TIMER, rate_ns))
             timers.append((self.CLOSE_TIMER, close_ns))
         for name, ts_ns in timers:
             if name == self.WARMUP_TIMER and now_ns >= ts_ns:
@@ -747,11 +866,24 @@ class MaxFundingStrategy(Strategy):
     def _side(self, rate: Decimal) -> OrderSide:
         return OrderSide.SELL if rate > 0 else OrderSide.BUY
 
+    def _opposite_side(self, side: OrderSide) -> OrderSide:
+        return OrderSide.SELL if side == OrderSide.BUY else OrderSide.BUY
+
+    def _active_row(self, ins_id: InstrumentId) -> dict[str, Any] | None:
+        if self.active_data is None:
+            return None
+        for active_ins_id, row in self.active_data.selected:
+            if active_ins_id == ins_id:
+                return row
+        return None
+
     def _order_notional(self, row: dict[str, Any]) -> Decimal:
         score = self._decimal(row.get("xgb_primary_score"))
         if score is None:
-            row["notional_multiplier"] = Decimal("1")
-            return self.min_notional
+            order_notional = self.min_notional
+            scaled_notional = order_notional * self.notional_scale
+            row["notional_multiplier"] = scaled_notional / self.min_notional
+            return scaled_notional
         order_notional = score_multiplier(
             score,
             self.base_score,
@@ -759,8 +891,9 @@ class MaxFundingStrategy(Strategy):
             self.min_notional,
             self.max_notional,
         )
-        row["notional_multiplier"] = order_notional / self.min_notional
-        return order_notional
+        scaled_notional = order_notional * self.notional_scale
+        row["notional_multiplier"] = scaled_notional / self.min_notional
+        return scaled_notional
 
     def _decimal(self, value: Any) -> Decimal | None:
         if value is None:
@@ -779,6 +912,15 @@ class MaxFundingStrategy(Strategy):
             raw_qty = steps * step
         return ins.make_qty(raw_qty)
 
+    # 仓位已关闭时取消还没触发的保护单。
+    def _cancel_protect_order(self, ins_id: InstrumentId) -> None:
+        order = self.protect_orders.pop(ins_id, None)
+        if order is None:
+            return
+        self.protect_map.pop(order.client_order_id, None)
+        self.cancel_order(order)
+        self.log.info(f"取消保护单，交易对：{self._base(ins_id)}")
+
     # 写本轮选中交易的整点和平仓提交偏移。
     def _write_trade(self) -> None:
         if not self.close_submit_ns:
@@ -789,11 +931,20 @@ class MaxFundingStrategy(Strategy):
                 self.close_submit_ns.items(),
                 key=lambda item: str(item[0]),
             ):
+                row = self._active_row(ins_id) or {}
+                closed = self.closed_events.get(ins_id)
                 writer.writerow(
                     [
                         self.symbols[ins_id],
-                        self._iso(self.fund_ns),
+                        self._bj_hour(self.fund_ns),
+                        self._funding_bps(row),
+                        self._fmt(row.get("xgb_primary_score")),
+                        self._event_offset(self.open_fill_ns.get(ins_id)),
                         self._offset(close_ns - self.fund_ns),
+                        self._event_offset(self.close_fill_ns.get(ins_id)),
+                        self._fmt(closed.avg_px_open if closed is not None else None),
+                        self._fmt(closed.avg_px_close if closed is not None else None),
+                        self._return_bps(closed.realized_return if closed is not None else None),
                     ],
                 )
 
@@ -820,6 +971,11 @@ class MaxFundingStrategy(Strategy):
         self.ins_map.clear()
         self.open_ids.clear()
         self.order_map.clear()
+        self.protect_orders.clear()
+        self.protect_map.clear()
+        self.open_fill_ns.clear()
+        self.close_fill_ns.clear()
+        self.closed_events.clear()
         self.had_order = False
         self.close_count = 0
         self.trade_written = False
@@ -834,6 +990,11 @@ class MaxFundingStrategy(Strategy):
         self.obs_map.clear()
         self.ins_map.clear()
         self.order_map.clear()
+        self.protect_orders.clear()
+        self.protect_map.clear()
+        self.open_fill_ns.clear()
+        self.close_fill_ns.clear()
+        self.closed_events.clear()
         self.open_ids = {ins_id for ins_id in self.open_ids if not self.portfolio.is_flat(ins_id)}
         self.had_order = False
         self.close_count = 0
@@ -847,6 +1008,20 @@ class MaxFundingStrategy(Strategy):
 
     def _iso(self, ts_ns: int) -> str:
         return datetime.fromtimestamp(ts_ns / 1_000_000_000, tz=UTC).isoformat()
+
+    def _bj_hour(self, ts_ns: int) -> str:
+        return (datetime.fromtimestamp(ts_ns / 1_000_000_000, tz=UTC) + timedelta(hours=8)).strftime("%Y-%m-%d %H:00:00")
+
+    def _event_offset(self, ts_ns: int | None) -> str:
+        if ts_ns is None:
+            return ""
+        return self._offset(ts_ns - self.fund_ns)
+
+    def _return_bps(self, value: Any) -> str:
+        result = self._decimal(value)
+        if result is None:
+            return ""
+        return f"{result * Decimal('10000'):.2f}"
 
     def _offset(self, delta_ns: int) -> str:
         delta_ms = delta_ns // 1_000_000

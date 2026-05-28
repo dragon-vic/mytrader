@@ -1,3 +1,1 @@
-symbol,funding_time,close_order_submit_time
-LITEUSDT,2026-05-25T00:00:00.001000+00:00,T+150ms
-HIVEUSDT,2026-05-25T04:00:00+00:00,T+150ms
+symbol,funding_time_bj,funding_bps,xgb_primary_score,open_fill_time,close_order_submit_time,close_fill_time,avg_px_open,avg_px_close,return_bps

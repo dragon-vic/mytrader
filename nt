@@ -98,6 +98,24 @@ config_names() {
   done | sort
 }
 
+running_options() {
+  local configs=()
+  local config
+  local session
+
+  command -v tmux >/dev/null 2>&1 || return 0
+  mapfile -t configs < <(config_names)
+
+  while IFS= read -r session; do
+    for config in "${configs[@]}"; do
+      if [ "$session" = "$config" ] || [[ "$session" == "$config"-* ]]; then
+        printf "运行中：%s\n" "$session"
+        break
+      fi
+    done
+  done < <(tmux list-sessions -F "#{session_name}" 2>/dev/null | sort)
+}
+
 mode_value() {
   case "$1" in
     "模拟盘")
@@ -141,7 +159,7 @@ run_background() {
   echo "PID：$pid"
   echo "重新打开：tmux attach -t $session_name"
   echo "临时退出：Ctrl+b 然后按 d"
-  echo "停止运行：重新打开后按回车"
+  echo "停止运行：重新打开后按 Ctrl+C"
 }
 
 if [ "$#" -gt 0 ]; then
@@ -154,7 +172,17 @@ if [ ! -t 0 ]; then
 fi
 
 mapfile -t CONFIGS < <(config_names)
+mapfile -t RUNNING < <(running_options)
+CONFIGS+=("${RUNNING[@]}")
 CONFIG_NAME="$(choose "请选择配置：" "${CONFIGS[@]}")"
+
+case "$CONFIG_NAME" in
+  运行中：*)
+    SESSION_NAME="${CONFIG_NAME#运行中：}"
+    exec tmux attach -t "$SESSION_NAME"
+    ;;
+esac
+
 MODE_LABEL="$(choose "请选择模式：" "模拟盘" "回测" "实盘")"
 MODE="$(mode_value "$MODE_LABEL")"
 RUN_STYLE="$(choose "请选择运行方式：" "前台运行" "后台运行")"
