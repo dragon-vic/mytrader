@@ -24,6 +24,7 @@ from utils.config_loader import ROOT
 
 LOCAL_TZ = ZoneInfo("Asia/Shanghai")
 POLYMARKET_VENUE = Venue("POLYMARKET")
+CLEANUP_LEAD_NS = 200_000_000
 POLY_TRADE_COLUMNS = [
     "window_start",
     "window_end",
@@ -81,6 +82,7 @@ class PolyTestStrategy(Strategy):
         self.btc_spot_subscribed = False
         self.trade_subs: set[InstrumentId] = set()
         self.quote_subs: set[InstrumentId] = set()
+        self.closed_ids: set[InstrumentId] = set()
         self.instruments: dict[InstrumentId, BinaryOption] = {}
         self.poly_trade_buffers: dict[InstrumentId, list[dict[str, object]]] = {}
         self.poly_quote_buffers: dict[InstrumentId, list[dict[str, object]]] = {}
@@ -97,7 +99,7 @@ class PolyTestStrategy(Strategy):
         self.subscribe_trade_ticks(self.btc_spot_instrument_id)
         self.btc_spot_subscribed = True
         self._sync_windows()
-        self._schedule_boundary()
+        self._schedule_window_alert()
         self._schedule_flush()
         if self.config.timeout_sec > 0:
             self.clock.set_time_alert_ns(
@@ -129,7 +131,7 @@ class PolyTestStrategy(Strategy):
             return
         if tick.instrument_id not in self.trade_subs:
             return
-        if not self._window_active(tick.instrument_id, self.clock.timestamp_ns()):
+        if not self._window_collecting(tick.instrument_id, self.clock.timestamp_ns()):
             return
         instrument = self._instrument(tick.instrument_id)
         if instrument is None:
@@ -144,7 +146,7 @@ class PolyTestStrategy(Strategy):
     def on_quote_tick(self, tick: QuoteTick) -> None:
         if tick.instrument_id not in self.quote_subs:
             return
-        if not self._window_active(tick.instrument_id, self.clock.timestamp_ns()):
+        if not self._window_collecting(tick.instrument_id, self.clock.timestamp_ns()):
             return
         instrument = self._instrument(tick.instrument_id)
         if instrument is None:
@@ -169,37 +171,39 @@ class PolyTestStrategy(Strategy):
                 f"balances={account.balances_total()}",
             )
 
-    # 在 5 分钟窗口边界准点切换订阅。
-    def _on_boundary(self, _event: TimeEvent) -> None:
+    # 窗口开始时订阅；窗口结束前 200ms 清理旧窗口。
+    def _on_window_alert(self, _event: TimeEvent) -> None:
         self._sync_windows()
-        self._schedule_boundary()
+        self._schedule_window_alert()
 
     def _sync_windows(self) -> None:
-        self._flush_expired_buffers()
+        self._cleanup_closing_windows()
         self._subscribe_ids(InstrumentId.from_str(instrument_id) for instrument_id in self.event_windows)
         self._refresh_subscriptions()
 
-    def _schedule_boundary(self) -> None:
+    def _schedule_window_alert(self) -> None:
         if self.stopped:
             return
-        next_ns = self._next_boundary_ns(self.clock.timestamp_ns())
+        next_ns = self._next_window_alert_ns(self.clock.timestamp_ns())
         if next_ns is None:
             return
         self.boundary_count += 1
         self.clock.set_time_alert_ns(
-            f"polytest_boundary_{self.boundary_count}",
+            f"polytest_window_{self.boundary_count}",
             next_ns,
-            callback=self._on_boundary,
+            callback=self._on_window_alert,
         )
 
-    def _next_boundary_ns(self, now_ns: int) -> int | None:
-        boundaries = []
+    def _next_window_alert_ns(self, now_ns: int) -> int | None:
+        alerts = []
         for window in self.event_windows.values():
-            for key in ("event_start_ns", "event_end_ns"):
-                value = int(window[key])
-                if value > now_ns:
-                    boundaries.append(value)
-        return min(boundaries) if boundaries else None
+            start_ns = int(window["event_start_ns"])
+            cleanup_ns = self._cleanup_ns(window)
+            if start_ns > now_ns:
+                alerts.append(start_ns)
+            if cleanup_ns > now_ns:
+                alerts.append(cleanup_ns)
+        return min(alerts) if alerts else None
 
     # 定时写出未到期 buffer，避免运行中数据只留在内存。
     def _on_flush(self, _event: TimeEvent) -> None:
@@ -227,18 +231,20 @@ class PolyTestStrategy(Strategy):
             if not self._window_known(instrument.id):
                 continue
             self.instruments[instrument.id] = instrument
-            if not self._window_active(instrument.id, now_ns):
+            if not self._window_collecting(instrument.id, now_ns):
                 continue
             self._subscribe_poly(instrument.id)
 
     def _subscribe_ids(self, instrument_ids: Iterable[InstrumentId]) -> None:
         now_ns = self.clock.timestamp_ns()
         for instrument_id in instrument_ids:
-            if not self._window_active(instrument_id, now_ns):
+            if not self._window_collecting(instrument_id, now_ns):
                 continue
             self._subscribe_poly(instrument_id)
 
     def _subscribe_poly(self, instrument_id: InstrumentId) -> int:
+        if instrument_id in self.closed_ids:
+            return 0
         added = 0
         if instrument_id not in self.trade_subs:
             self.subscribe_trade_ticks(instrument_id)
@@ -277,22 +283,23 @@ class PolyTestStrategy(Strategy):
                 self.instruments[instrument_id] = instrument
         return instrument
 
-    # 到期的 event buffer 统一落盘并取消订阅。
-    def _flush_expired_buffers(self) -> None:
+    # 窗口结束前 200ms 清理：先取消订阅，再落盘并清空旧窗口 buffer。
+    def _cleanup_closing_windows(self) -> None:
         now_ns = self.clock.timestamp_ns()
         instrument_ids = set(self.instruments) | self.trade_subs | self.quote_subs
-        expired_ids = []
+        closing_ids = []
         for instrument_id in list(instrument_ids):
             window = self._window(instrument_id)
-            if window and int(window["event_end_ns"]) <= now_ns:
-                expired_ids.append(instrument_id)
-        if not expired_ids:
+            if window and self._cleanup_ns(window) <= now_ns:
+                closing_ids.append(instrument_id)
+        if not closing_ids:
             return
-        trade_rows, quote_rows = self._drain_instruments(expired_ids)
-        for instrument_id in expired_ids:
+        for instrument_id in closing_ids:
             self._unsubscribe_poly(instrument_id)
+            self.closed_ids.add(instrument_id)
             self.instruments.pop(instrument_id, None)
-        self._write_poly_rows(trade_rows, quote_rows, "过期BTC 5m")
+        trade_rows, quote_rows = self._drain_instruments(closing_ids)
+        self._write_poly_rows(trade_rows, quote_rows, "清理BTC 5m")
 
     def _flush_all_buffers(self) -> None:
         binance_rows, trade_rows, quote_rows = self._drain_all_buffers()
@@ -431,12 +438,17 @@ class PolyTestStrategy(Strategy):
     def _window_known(self, instrument_id: InstrumentId) -> bool:
         return self._window(instrument_id) is not None
 
-    def _window_active(self, instrument_id: InstrumentId, now_ns: int) -> bool:
+    def _window_collecting(self, instrument_id: InstrumentId, now_ns: int) -> bool:
+        if instrument_id in self.closed_ids:
+            return False
         window = self._window(instrument_id)
         return (
             window is not None
-            and int(window["event_start_ns"]) <= now_ns < int(window["event_end_ns"])
+            and int(window["event_start_ns"]) <= now_ns < self._cleanup_ns(window)
         )
+
+    def _cleanup_ns(self, window: dict[str, int | str]) -> int:
+        return int(window["event_end_ns"]) - CLEANUP_LEAD_NS
 
     # 把 NT aggressor side 转成人读中文。
     def _side_label(self, side) -> str:

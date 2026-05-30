@@ -11,9 +11,6 @@ RUN_MODES = ("backtest", "testnet", "live")
 
 # 项目默认入口参数。
 DEFAULT_CONFIG_NAME = "maxfunding"
-DEFAULT_LIVE_LOG_FILE = "live_raw"
-LIVE_LOG_START_MARKER = "TradingNode: RUNNING"
-LIVE_LOG_STOP_MARKER = "TradingNode: STOPPING"
 
 # NT msgbus topic。
 NODE_STOP_TOPIC = "controls.node.stop"

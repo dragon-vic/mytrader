@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
@@ -12,8 +11,6 @@ from rich.columns import Columns
 from rich.console import Console
 from rich.table import Table
 
-from utils.arguments import LIVE_LOG_START_MARKER
-from utils.arguments import LIVE_LOG_STOP_MARKER
 from utils.arguments import POSITIONS_FILE
 from utils.arguments import REPORT_COLUMNS
 from utils.arguments import REPORT_FILES
@@ -23,7 +20,6 @@ from utils.report_labels import to_chinese_columns
 
 
 LOCAL_TZ = ZoneInfo("Asia/Shanghai")
-LOG_UTC_PREFIX = re.compile(r"^(?P<ts>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)(?P<rest>\s.*)$")
 
 
 # 返回当前运行的报告目录。
@@ -35,59 +31,6 @@ def run_reports_dir(settings: dict[str, Any], run_type: str) -> Path:
     if run_name:
         return ROOT / settings["reports"]["root"] / run_name
     return ROOT / settings["reports"]["root"] / f"{settings['project']['config_name']}-{run_type}"
-
-
-# 返回本次运行的 NT 原始日志文件名，不带后缀。
-def live_raw_log_name(settings: dict[str, Any]) -> str:
-    return "nt"
-
-
-# 返回本次运行的 NT 原始日志路径。
-def live_raw_log_path(settings: dict[str, Any]) -> Path:
-    return run_reports_dir(settings, "live") / f"{live_raw_log_name(settings)}.log"
-
-
-# 返回最终清洗日志路径，避免同一分钟重复运行时覆盖旧日志。
-def final_live_log_path(settings: dict[str, Any]) -> Path:
-    return run_reports_dir(settings, "live") / "live.log"
-
-
-# 把 NT 原始日志行首 UTC 时间改成北京时间，保存后的 live 日志更方便直接阅读。
-def localize_live_log_line(line: str) -> str:
-    match = LOG_UTC_PREFIX.match(line)
-    if match is None:
-        return line
-    timestamp = pd.Timestamp(match.group("ts")).tz_convert(LOCAL_TZ)
-    return f"{timestamp.isoformat()}{match.group('rest')}"
-
-
-# 保留 TradingNode RUNNING 到 STOPPING 之间的 live 日志。
-def write_clean_live_log(
-    settings: dict[str, Any],
-    start_marker: str = LIVE_LOG_START_MARKER,
-    stop_marker: str = LIVE_LOG_STOP_MARKER,
-) -> None:
-    source = live_raw_log_path(settings)
-    target = final_live_log_path(settings)
-    if not source.exists():
-        return
-
-    lines = source.read_text(encoding="utf-8", errors="replace").splitlines()
-    end = len(lines)
-    for index in range(len(lines) - 1, -1, -1):
-        if stop_marker in lines[index]:
-            end = index
-            break
-    start = None
-    for index in range(end - 1, -1, -1):
-        if start_marker in lines[index]:
-            start = index + 1
-            break
-    if start is None:
-        return
-    localized_lines = [localize_live_log_line(line) for line in lines[start:end]]
-    target.write_text("\n".join(localized_lines) + "\n", encoding="utf-8")
-    source.unlink()
 
 
 # 创建当前运行的报告目录；每次运行使用新目录，不再清理旧文件。
@@ -106,17 +49,20 @@ def report_columns(name: str, df: pd.DataFrame) -> pd.DataFrame:
 
 
 class TraderReportWriter:
-    def __init__(self, output_dir: Path) -> None:
+    def __init__(self, output_dir: Path, enabled: bool = True) -> None:
         self.output_dir = output_dir
+        self.enabled = enabled
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     # 从配置创建当前运行类型的报告整理器。
     @classmethod
     def from_settings(cls, settings: dict[str, Any], run_type: str):
-        return cls(run_reports_dir(settings, run_type))
+        return cls(run_reports_dir(settings, run_type), bool(settings["reports"]["enabled"]))
 
     # 保存 NT trader 在运行结束后生成的订单和持仓结果。
     def write_final_reports(self, trader, names=("orders", "positions")) -> None:
+        if not self.enabled:
+            return
         report_fns = {
             "orders": trader.generate_orders_report,
             "positions": trader.generate_positions_report,
@@ -204,10 +150,6 @@ class TraderReportWriter:
         if rows:
             self.write_csv(pd.DataFrame(rows), "position_events.csv")
 
-    # 把 NT 原始日志行首 UTC 时间改成北京时间，保存后的 live 日志更方便直接阅读。
-    def localize_live_log_line(self, line: str) -> str:
-        return localize_live_log_line(line)
-
     # 生成更容易看的 positions.csv 和中文 summary.md。
     def write_clean_reports(self, positions: pd.DataFrame) -> None:
         trades = self.build_trades(positions)
@@ -235,16 +177,6 @@ class TraderReportWriter:
                 "position_id": positions["position_id"],
             },
         )
-
-    # 保留 TradingNode RUNNING 到 STOPPING 之间的 live 日志。
-    def write_clean_live_log(
-        self,
-        settings: dict[str, Any],
-        start_marker: str = LIVE_LOG_START_MARKER,
-        stop_marker: str = LIVE_LOG_STOP_MARKER,
-    ) -> None:
-        write_clean_live_log(settings, start_marker, stop_marker)
-
 
 # 保存 NT trader 生成的订单、持仓报告。
 def write_trader_reports(trader, settings: dict[str, Any], run_type: str) -> None:
@@ -280,6 +212,8 @@ def print_backtest_summary(payload: dict[str, Any], settings: dict[str, Any]) ->
 
 # 打印 live/testnet 结束摘要。
 def print_live_summary(settings: dict[str, Any]) -> None:
+    if not settings["reports"]["enabled"]:
+        return
     output_dir = run_reports_dir(settings, "live")
     elapsed_days = report_elapsed_days(output_dir)
     write_summary_markdown(

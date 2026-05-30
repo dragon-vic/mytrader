@@ -10,10 +10,8 @@ cache:
 # NT logging 默认值；策略 set 只覆盖有差异的叶子。
 logging:
   log_level: INFO
-  log_level_file: INFO
   strategy_log_level: INFO 
   log_colors: true
-  clear_log_file: true
   component_levels:
     Portfolio: INFO
     DataRecorder: INFO

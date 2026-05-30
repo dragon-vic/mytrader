@@ -22,11 +22,8 @@ from utils.config_loader import load_settings
 from utils.config_loader import proxy_url
 from utils.instrument_factory import InstrumentFactory
 from utils.polymarket_btc5m import up_down_instrument_windows
-from utils.report_writer import live_raw_log_name
-from utils.report_writer import prepare_report_dir
 from utils.report_writer import print_live_summary
 from utils.report_writer import TraderReportWriter
-from utils.report_writer import write_clean_live_log
 from utils.runtime_ids import claim_run
 from utils.runtime_ids import finalize_run_dir
 from utils.runtime_ids import release_run
@@ -35,11 +32,6 @@ from utils.strategy_factory import build_strategy
 
 def adapter_module(name: str):
     return importlib.import_module(f"adapters.{name}")
-
-
-# 当前 live 是否输出交易报告。
-def reports_enabled(settings: dict[str, Any]) -> bool:
-    return bool(settings["reports"]["enabled"])
 
 
 # 为 exec reconciliation 限定当前策略关心的 instrument。
@@ -126,7 +118,6 @@ def attach_node_stop_handler(node: TradingNode) -> None:
 
 # 为当前 set 构建 live/testnet node。
 def build_live_node(settings: dict[str, Any]) -> TradingNode:
-    log_dir = prepare_report_dir(settings, "live")
     data_clients, data_factories = build_data_clients(settings)
     exec_clients, exec_factories = build_exec_clients(settings)
     logging = settings["logging"]
@@ -136,15 +127,11 @@ def build_live_node(settings: dict[str, Any]) -> TradingNode:
         cache=cache_config(settings),
         logging=LoggingConfig(
             log_level=logging["log_level"],
-            log_level_file=logging["log_level_file"],
-            log_directory=str(log_dir),
-            log_file_name=live_raw_log_name(settings),
             log_colors=bool(logging["log_colors"]),
             log_component_levels={
                 **logging["component_levels"],
                 settings["strategy"]["class"]: logging["strategy_log_level"],
             },
-            clear_log_file=bool(logging["clear_log_file"]),
         ),
         data_engine=data_engine_config(settings),
         data_clients=data_clients,
@@ -185,19 +172,14 @@ def run_live_node(node: TradingNode) -> None:
 def main(config_name: str, mode: str | None = None) -> None:
     settings = load_settings(config_name, mode=mode)
     settings = claim_run(settings)
-    node = None
-    report_writer = TraderReportWriter.from_settings(settings, "live") if reports_enabled(settings) else None
+    report_writer = TraderReportWriter.from_settings(settings, "live")
+    node = build_live_node(settings)
 
     try:
-        node = build_live_node(settings)
         run_live_node(node)
-        if report_writer is not None:
-            report_writer.write_final_reports(node.trader)
     finally:
-        if node is not None:
-            node.dispose()
-        write_clean_live_log(settings)
+        report_writer.write_final_reports(node.trader)
+        node.dispose()
         finalize_run_dir(settings)
-        if report_writer is not None:
-            print_live_summary(settings)
+        print_live_summary(settings)
         release_run(settings)

@@ -1,1 +1,7 @@
-symbol,funding_time_bj,funding_bps,xgb_primary_score,open_fill_time,close_order_submit_time,close_fill_time,avg_px_open,avg_px_close,return_bps
+symbol,funding_time_bj,funding_bps,xgb_primary_score,open_fill_time,close_order_submit_time,close_fill_time,avg_px_open,avg_px_close,return_bps,actual_return_bps
+DRIFTUSDT,2026-05-27 12:00:00.002,-155.80,24.33,T-252ms,T+250ms,T+3577ms,0.04,0.04,-132.14,-142.14
+ALTUSDT,2026-05-27 20:00:00.007,-119.72,14.92,T-278ms,T+250ms,T+3077ms,0.01,0.01,-146.28,-156.28
+GUAUSDT,2026-05-28 00:00:00.009,-200.00,56.66,T-279ms,T+250ms,T+302ms,0.95,0.94,-121.89,-131.89
+GUAUSDT,2026-05-28 01:00:00.000,-200.00,-19.42,T-272ms,T+250ms,T+272ms,0.71,0.70,-68.07,-78.07
+GUAUSDT,2026-05-28 02:00:00.000,-188.90,-0.92,T-270ms,T+250ms,T+271ms,0.71,0.71,33.71,23.71
+PRLUSDT,2026-05-28 16:00:00.000,-200.00,68.41,T-259ms,T+250ms,T+142957ms,0.19,0.18,-161.29,-171.29

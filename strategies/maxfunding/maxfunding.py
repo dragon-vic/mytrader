@@ -166,6 +166,7 @@ class MaxFundingStrategy(Strategy):
             "avg_px_open",
             "avg_px_close",
             "return_bps",
+            "actual_return_bps",
         ]
 
     # 启动时注册 NT 定时器，资金费和价格用 REST 观察列表快照。
@@ -205,8 +206,6 @@ class MaxFundingStrategy(Strategy):
         self._load_lists()
         self._init_log()
 
-        self._schedule_next()
-
         self.log.info(
             f"资金费率交易启动，已加载{len(self.ins)}个，"
             f"可交易{len(self.trade_ids)}个，"
@@ -215,6 +214,7 @@ class MaxFundingStrategy(Strategy):
             f"最多交易{self.max_trades}个，名义{self.min_notional:.2f}-{self.max_notional:.2f}USDT，"
             f"XGB主模型{self.config.xgb_primary}"
         )
+        self._schedule_next()
 
     # clock alert 负责第一快照、主数据和模型、下单、平仓、总结。
     def _on_time(self, event: TimeEvent) -> None:
@@ -239,17 +239,10 @@ class MaxFundingStrategy(Strategy):
     def _warmup_funding(self) -> None:
         if self.sent_done:
             return
-        start = perf_counter()
-        try:
-            obs_map, _ins_map, _stats = self._load_model_snapshot()
-            if not obs_map:
-                raise RuntimeError("第一快照为空")
-            self.first_snapshot = obs_map
-        except Exception as exc:
-            self.first_snapshot = None
-            self.sent_done = True
-            elapsed_ms = (perf_counter() - start) * 1000
-            self.log.warning(f"第一快照准备失败，原因：{exc}，耗时：{self._ms(elapsed_ms)}ms")
+        obs_map, _ins_map, _stats = self._load_model_snapshot()
+        if not obs_map:
+            raise RuntimeError("第一快照为空")
+        self.first_snapshot = obs_map
 
     # t-1 拉主数据和 kline，并完成模型判断。
     def _pre_funding(self) -> None:
@@ -259,23 +252,15 @@ class MaxFundingStrategy(Strategy):
             self.sent_done = True
             self.log.warning("跳过本轮，原因：第一快照未准备好")
             return
-        start = perf_counter()
-        try:
-            self.active_data = self._prepare_model_data()
-            self.entry_done = True
-            self.log.info(
-                f"模型数据和判断完成，候选数：{len(self.active_data.rows)}，"
-                f"通过数：{self._pass_count(self.active_data.rows)}，"
-                f"市场数据：BTC/ETH/SOL，"
-                f"耗时：{self._ms(self.active_data.elapsed_ms)}ms，"
-                f"{self._decision_summary(self.active_data.selected, self.active_data.rows, self.active_data.obs_map)}"
-            )
-        except Exception as exc:
-            elapsed_ms = (perf_counter() - start) * 1000
-            self.active_data = None
-            self.entry_done = False
-            self.sent_done = True
-            self.log.warning(f"模型数据和判断失败，原因：{exc}，耗时：{self._ms(elapsed_ms)}ms")
+        self.active_data = self._prepare_model_data()
+        self.entry_done = True
+        self.log.info(
+            f"模型数据和判断完成，候选数：{len(self.active_data.rows)}，"
+            f"通过数：{self._pass_count(self.active_data.rows)}，"
+            f"市场数据：BTC/ETH/SOL，"
+            f"耗时：{self._ms(self.active_data.elapsed_ms)}ms，"
+            f"{self._decision_summary(self.active_data.selected, self.active_data.rows, self.active_data.obs_map)}"
+        )
         order_ns = self.fund_ns - int(self.config.entry_before * 1_000_000_000)
         if self.clock.timestamp_ns() >= order_ns:
             self.sent_done = True
@@ -392,6 +377,7 @@ class MaxFundingStrategy(Strategy):
             close_cnt = 0
             symbols = []
             for ins_id in sorted(self.open_ids, key=str):
+                self._cancel_protect_order(ins_id)
                 self.close_submit_ns[ins_id] = self.clock.timestamp_ns()
                 self.close_all_positions(ins_id)
                 close_cnt += 1
@@ -468,9 +454,14 @@ class MaxFundingStrategy(Strategy):
         ins_id = self.order_map.pop(event.client_order_id, None)
         if ins_id is not None:
             self.log.warning(f"订单被拒，交易对：{self._base(ins_id)}，原因：{event.reason}")
+            return
+        self.log.warning(f"订单被拒，交易对：{self._base(event.instrument_id)}，原因：{event.reason}")
 
     def on_event(self, event: Event) -> None:
-        if isinstance(event, PositionOpened | PositionChanged):
+        if isinstance(event, PositionOpened):
+            if event.instrument_id in self.open_ids and event.closing_order_id is None:
+                self.open_fill_ns[event.instrument_id] = event.ts_opened
+        elif isinstance(event, PositionChanged):
             if event.instrument_id in self.open_ids and event.closing_order_id is None:
                 self.open_fill_ns[event.instrument_id] = event.ts_last
         elif isinstance(event, PositionClosed):
@@ -775,7 +766,7 @@ class MaxFundingStrategy(Strategy):
     def _funding_bps(self, row: dict[str, Any]) -> str:
         try:
             return f"{Decimal(str(row.get('rate'))) * Decimal('10000'):.2f}"
-        except Exception:
+        except (ArithmeticError, ValueError):
             return ""
 
     def _join_items(self, items) -> str:
@@ -900,7 +891,7 @@ class MaxFundingStrategy(Strategy):
             return None
         try:
             result = Decimal(str(value))
-        except Exception:
+        except (ArithmeticError, ValueError):
             return None
         return result if result.is_finite() else None
 
@@ -933,6 +924,7 @@ class MaxFundingStrategy(Strategy):
             ):
                 row = self._active_row(ins_id) or {}
                 closed = self.closed_events.get(ins_id)
+                return_bps = self._return_bps(closed.realized_return if closed is not None else None)
                 writer.writerow(
                     [
                         self.symbols[ins_id],
@@ -944,7 +936,8 @@ class MaxFundingStrategy(Strategy):
                         self._event_offset(self.close_fill_ns.get(ins_id)),
                         self._fmt(closed.avg_px_open if closed is not None else None),
                         self._fmt(closed.avg_px_close if closed is not None else None),
-                        self._return_bps(closed.realized_return if closed is not None else None),
+                        return_bps,
+                        self._actual_return_bps(return_bps),
                     ],
                 )
 
@@ -961,9 +954,9 @@ class MaxFundingStrategy(Strategy):
         if isinstance(value, float):
             if value != value:
                 return ""
-            return f"{value:.4f}"
+            return f"{value:.2f}"
         if isinstance(value, Decimal):
-            return f"{value:.4f}"
+            return f"{value:.2f}"
         return value
 
     def _reset_state(self) -> None:
@@ -1022,6 +1015,12 @@ class MaxFundingStrategy(Strategy):
         if result is None:
             return ""
         return f"{result * Decimal('10000'):.2f}"
+
+    def _actual_return_bps(self, return_bps: Any) -> str:
+        result = self._decimal(return_bps)
+        if result is None:
+            return ""
+        return f"{result - Decimal('10'):.2f}"
 
     def _offset(self, delta_ns: int) -> str:
         delta_ms = delta_ns // 1_000_000

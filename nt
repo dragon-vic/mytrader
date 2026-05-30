@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJECT_DIR="$HOME/mytrader"
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+PROJECT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 
 PYTHON_BIN="$HOME/miniconda/envs/nt/bin/python"
 if [ ! -x "$PYTHON_BIN" ]; then
@@ -137,8 +138,10 @@ mode_value() {
 run_background() {
   local config_name="$1"
   local mode="$2"
-  local session_name="$config_name"
+  local session_name
   local tmux_command
+  local log_dir
+  local log_path
   local pid
 
   if ! command -v tmux >/dev/null 2>&1; then
@@ -146,17 +149,20 @@ run_background() {
     exit 1
   fi
 
-  if tmux has-session -t "$session_name" 2>/dev/null; then
-    session_name="${session_name}-$(date +%Y%m%d%H%M%S)"
-  fi
+  session_name="${config_name}-$(date +%Y%m%d%H%M%S)"
 
-  printf -v tmux_command "exec %q run.py %q %q" "$PYTHON_BIN" "$config_name" "$mode"
-  tmux new-session -d -s "$session_name" -c "$PROJECT_DIR" "$tmux_command"
+  log_dir="$PROJECT_DIR/reports/tmux"
+  log_path="$log_dir/$session_name.log"
+  mkdir -p "$log_dir"
+
+  printf -v tmux_command "%q -u run.py %q %q 2>&1 | tee %q" "$PYTHON_BIN" "$config_name" "$mode" "$log_path"
+  tmux new-session -d -s "$session_name" -c "$PROJECT_DIR" "bash -lc '$tmux_command'"
   pid="$(tmux display-message -p -t "$session_name" "#{pane_pid}")"
 
   echo "后台进程已启动：$config_name $mode"
   echo "tmux会话：$session_name"
   echo "PID：$pid"
+  echo "日志：$log_path"
   echo "重新打开：tmux attach -t $session_name"
   echo "临时退出：Ctrl+b 然后按 d"
   echo "停止运行：重新打开后按 Ctrl+C"
