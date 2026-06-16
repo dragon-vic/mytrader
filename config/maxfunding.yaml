@@ -9,8 +9,6 @@
     max_trades: 3
     min_rate_bps: "30"
     xgb_primary: node_2000_ensemble_live
-    aggressive_mode: true
-    aggressive_pass_score_bps: "5"
     xgb_models:
       - name: node_2000_ensemble_live
         path: strategies/maxfunding/data/node_select_2000ms_ensemble_live.joblib

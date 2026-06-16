@@ -27,6 +27,41 @@ CLIENTS = {
         "client_id": "BINANCE_USDT_FUTURES",
         "quote_currency": "USDT",
     },
+    "okx_spot": {
+        "venue": "OKX",
+        "adapter": "okx",
+        "instrument_kind": "spot",
+        "client_id": "OKX_SPOT",
+        "quote_currency": "USDT",
+    },
+    "okx_swap": {
+        "venue": "OKX",
+        "adapter": "okx",
+        "instrument_kind": "perpetual",
+        "client_id": "OKX_SWAP",
+        "quote_currency": "USDT",
+    },
+    "kraken_spot": {
+        "venue": "KRAKEN",
+        "adapter": "kraken",
+        "instrument_kind": "spot",
+        "client_id": "KRAKEN_SPOT",
+        "quote_currency": "USD",
+    },
+    "kraken_futures": {
+        "venue": "KRAKEN",
+        "adapter": "kraken",
+        "instrument_kind": "perpetual",
+        "client_id": "KRAKEN_FUTURES",
+        "quote_currency": "USD",
+    },
+    "hyperliquid_perp": {
+        "venue": "HYPERLIQUID",
+        "adapter": "hyperliquid",
+        "instrument_kind": "perpetual",
+        "client_id": "HYPERLIQUID",
+        "quote_currency": "USD",
+    },
     "polymarket": {
         "venue": "POLYMARKET",
         "adapter": "polymarket",
@@ -175,6 +210,97 @@ def normalize_poly_market(market: dict[str, Any], key: str) -> dict[str, Any]:
     }
 
 
+# 补齐 OKX 现货和 U 本位永续市场字段。
+def normalize_okx_market(
+    market: dict[str, Any],
+    key: str,
+    cfg: dict[str, Any],
+    defaults: dict[str, Any],
+) -> dict[str, Any]:
+    meta = client_meta(key)
+    if "symbol" not in market:
+        raise KeyError(f"{key}.markets[] requires symbol")
+    base, quote = market["symbol"].split("/")
+    kind = cfg.get("instrument_kind", meta["instrument_kind"])
+    raw_symbol = market.get("raw_symbol") or (
+        f"{base}-{quote}" if kind == "spot" else f"{base}-{quote}-SWAP"
+    )
+    return {
+        **market,
+        "client_key": key,
+        "exchange": "okx",
+        "venue": meta["venue"],
+        "instrument_kind": kind,
+        "base_currency": market.get("base_currency", base),
+        "quote_currency": market.get("quote_currency", quote),
+        "settlement_currency": market.get("settlement_currency", quote),
+        "raw_symbol": raw_symbol,
+        "instrument_symbol": market.get("instrument_symbol", raw_symbol),
+        "timeframe": market.get("timeframe", defaults.get("timeframe")),
+        "limit": market.get("limit", defaults.get("limit")),
+        "batches": market.get("batches", defaults.get("batches")),
+    }
+
+
+# 补齐 Kraken 现货和永续市场字段，复杂 raw symbol 允许在 YAML 显式覆盖。
+def normalize_kraken_market(
+    market: dict[str, Any],
+    key: str,
+    cfg: dict[str, Any],
+    defaults: dict[str, Any],
+) -> dict[str, Any]:
+    meta = client_meta(key)
+    if "symbol" not in market:
+        raise KeyError(f"{key}.markets[] requires symbol")
+    base, quote = market["symbol"].split("/")
+    kind = cfg.get("instrument_kind", meta["instrument_kind"])
+    raw_symbol = market.get("raw_symbol") or f"{base}{quote}"
+    return {
+        **market,
+        "client_key": key,
+        "exchange": "kraken",
+        "venue": meta["venue"],
+        "instrument_kind": kind,
+        "base_currency": market.get("base_currency", base),
+        "quote_currency": market.get("quote_currency", quote),
+        "settlement_currency": market.get("settlement_currency", quote),
+        "raw_symbol": raw_symbol,
+        "instrument_symbol": market.get("instrument_symbol", raw_symbol),
+        "timeframe": market.get("timeframe", defaults.get("timeframe")),
+        "limit": market.get("limit", defaults.get("limit")),
+        "batches": market.get("batches", defaults.get("batches")),
+    }
+
+
+# 补齐 Hyperliquid 永续和 HIP-3 市场字段。
+def normalize_hyperliquid_market(
+    market: dict[str, Any],
+    key: str,
+    cfg: dict[str, Any],
+    defaults: dict[str, Any],
+) -> dict[str, Any]:
+    meta = client_meta(key)
+    if "symbol" not in market:
+        raise KeyError(f"{key}.markets[] requires symbol")
+    base, quote = market["symbol"].split("/")
+    raw_symbol = market.get("raw_symbol", base)
+    return {
+        **market,
+        "client_key": key,
+        "exchange": "hyperliquid",
+        "venue": meta["venue"],
+        "instrument_kind": cfg.get("instrument_kind", meta["instrument_kind"]),
+        "base_currency": market.get("base_currency", base),
+        "quote_currency": market.get("quote_currency", quote),
+        "settlement_currency": market.get("settlement_currency", quote),
+        "raw_symbol": raw_symbol,
+        "instrument_symbol": market.get("instrument_symbol", raw_symbol),
+        "timeframe": market.get("timeframe", defaults.get("timeframe")),
+        "limit": market.get("limit", defaults.get("limit")),
+        "batches": market.get("batches", defaults.get("batches")),
+    }
+
+
 # 补齐一个 IBKR InstrumentId 市场。
 def normalize_ibkr_market(value: str, key: str) -> dict[str, Any]:
     meta = client_meta(key)
@@ -227,6 +353,24 @@ def normalize_client_markets(
         rows = [market_dict(market, meta.get("quote_currency", "USDT")) for market in markets]
         cfg["markets"] = [
             normalize_binance_market(row, key, cfg, data_defaults)
+            for row in rows
+        ]
+    elif meta["adapter"] == "okx":
+        rows = [market_dict(market, meta.get("quote_currency", "USDT")) for market in markets]
+        cfg["markets"] = [
+            normalize_okx_market(row, key, cfg, data_defaults)
+            for row in rows
+        ]
+    elif meta["adapter"] == "kraken":
+        rows = [market_dict(market, meta.get("quote_currency", "USD")) for market in markets]
+        cfg["markets"] = [
+            normalize_kraken_market(row, key, cfg, data_defaults)
+            for row in rows
+        ]
+    elif meta["adapter"] == "hyperliquid":
+        rows = [market_dict(market, meta.get("quote_currency", "USD")) for market in markets]
+        cfg["markets"] = [
+            normalize_hyperliquid_market(row, key, cfg, data_defaults)
             for row in rows
         ]
     elif meta["adapter"] == "polymarket":

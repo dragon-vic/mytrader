@@ -16,8 +16,14 @@ logging:
     Portfolio: INFO
     DataRecorder: INFO
     ExecClient-BINANCE: WARNING
+    ExecClient-OKX: WARNING
+    ExecClient-KRAKEN: WARNING
+    ExecClient-HYPERLIQUID: WARNING
     BinanceSpotInstrumentProvider: WARNING
     BinanceFuturesInstrumentProvider: WARNING
+    OKXInstrumentProvider: WARNING
+    KrakenInstrumentProvider: WARNING
+    HyperliquidInstrumentProvider: WARNING
     DataClient-POLYMARKET: ERROR
 
 # NT data engine 和所有可选 data client。
@@ -34,6 +40,37 @@ data:
     binance_futures:
       enabled: false
       markets: []
+
+    okx_spot:
+      enabled: false
+      markets: []
+      instrument_types: [SPOT]
+      contract_types: null
+      instrument_families: null
+      is_demo: false
+
+    okx_swap:
+      enabled: false
+      markets: []
+      instrument_types: [SWAP]
+      contract_types: [LINEAR]
+      instrument_families: null
+      is_demo: false
+
+    kraken_spot:
+      enabled: false
+      markets: []
+      product_types: [SPOT]
+
+    kraken_futures:
+      enabled: false
+      markets: []
+      product_types: [FUTURES]
+
+    hyperliquid_perp:
+      enabled: false
+      markets: []
+      product_types: [PERP, PERP_HIP3]
 
     polymarket:
       enabled: false
@@ -101,6 +138,39 @@ exec:
       markets: []
       margin_type: CROSS
       leverage: 1
+
+    okx_spot:
+      enabled: false
+      markets: []
+      instrument_types: [SPOT]
+      contract_types: null
+      instrument_families: null
+      is_demo: false
+      margin_mode: NONE
+
+    okx_swap:
+      enabled: false
+      markets: []
+      instrument_types: [SWAP]
+      contract_types: [LINEAR]
+      instrument_families: null
+      is_demo: false
+      margin_mode: CROSS
+
+    kraken_spot:
+      enabled: false
+      markets: []
+      product_types: [SPOT]
+
+    kraken_futures:
+      enabled: false
+      markets: []
+      product_types: [FUTURES]
+
+    hyperliquid_perp:
+      enabled: false
+      markets: []
+      product_types: [PERP, PERP_HIP3]
 
     polymarket:
       enabled: false

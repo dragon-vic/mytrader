@@ -1,105 +1,105 @@
 ---
 name: karpathy-guidelines
-description: Use for this project when writing, reviewing, or refactoring code to keep changes simple, explicit, focused, and verifiable.
+description: 在本项目中编写、审阅或重构代码时使用，让改动保持简单、明确、聚焦、可验证。
 license: MIT
 source: https://github.com/forrestchang/andrej-karpathy-skills
 ---
 
-# Karpathy Guidelines
+# Karpathy 准则
 
-Project-local adaptation of the Karpathy-inspired coding-agent guidelines.
+这是本项目对 Karpathy 风格编码代理准则的本地化改写。
 
-Use these rules for all non-trivial work in this repository.
+本仓库内所有非平凡工作都遵循这些规则。
 
-## Think Before Coding
+## 编码前先思考
 
-- State important assumptions before acting.
-- If a request has multiple reasonable interpretations, surface the ambiguity.
-- Push back when a simpler or safer approach exists.
-- Stop and ask when the next action depends on unclear or permission-sensitive context.
+- 行动前说明关键假设。
+- 如果请求有多种合理解释，先指出歧义。
+- 当存在更简单或更安全的做法时，直接提出。
+- 如果下一步依赖不清楚或涉及权限敏感的上下文，停下来询问。
 
-For this project, environment, Conda, system directories, global config, and network install steps are permission-sensitive. Do not work around those silently.
+在本项目中，环境、Conda、系统目录、全局配置、网络安装都属于权限敏感事项。不要静默绕过这些问题。
 
-## Project-Specific Rules
+## 项目专用规则
 
-- Environment facts are part of the workflow. If a local permission, shell, runtime, or tooling issue forces a different method, add the durable workaround here so future turns do not rediscover it.
-- In this Windows workspace, `rg.exe` can fail with "Access denied". When that happens, use PowerShell-native discovery instead, for example `Get-ChildItem -Recurse -File -ErrorAction SilentlyContinue` and `Select-String`, scoped to the needed file types or directories.
-- Recursive PowerShell scans can hit access-denied paths such as `.pytest_cache`. Use `-ErrorAction SilentlyContinue` or narrow the search scope instead of treating that as repository corruption.
-- Git can report dubious ownership in this sandbox. For read-only git inspection, use `git -c safe.directory=D:/project/nt_quant ...` rather than changing global git config.
-- Windows PowerShell 5 does not accept `Select-Object -Index 40..80` directly. Wrap ranges in parentheses, for example `Select-Object -Index (40..80)`, or use `Select-Object -Skip 40 -First 40`.
-- When aligning a strategy design, surface implementation details and tradeoff points for user confirmation before coding.
-- Keep names short: variables should usually be at most two words, functions at most three words, and classes at most two words plus a suffix such as `Actor`, `Str`, or the framework-required type name.
-- Extract helper functions only for logic reused multiple times or genuinely clarifying a dense block. Prefer shallow call depth and direct local code for one-off logic.
-- Do not add broad fallback adapters for multiple user input formats unless explicitly requested. Prefer one short, documented config format over accepting many equivalent spellings.
-- For Binance U futures account events, use the exact topic `events.account.BINANCE-USDT_FUTURES-master` when account data is needed. Do not treat it as a funding-only signal; order activity can also publish account events.
-- Do not create duplicate folder names that confuse IDE indexing. The repository root is `nt_quant`; the Python package must not also be named `nt_quant`.
-- At the current early stage, avoid a package folder. Keep user-facing entry scripts in the repository root and put strategy files directly under the repository root `strategies/` directory.
-- Do not use an argparse task dispatcher for this project. Current entry scripts are `fetch_data.py`, `backtest.py`, and `live.py`.
-- Prefer NautilusTrader native components for strategy, backtesting, sandbox execution, and exchange adapters. Use CCXT only where NautilusTrader does not provide the needed generic data path.
-- Default exchange is Binance unless the user explicitly changes it.
-- Unless the user says otherwise, new live-oriented configs should target Binance USDT futures testnet.
-- Keep the first iteration minimal. Do not add extra framework layers until a real need appears.
-- Temporary checks should be run from shell, not kept as permanent scripts.
-- Keep `external/external_data.py`; it is a separate external signal sender process maintained by the user, even if the main NT process does not import it.
-- Do not update README unless the user explicitly asks. Explain usage in chat instead.
-- Use short Chinese comments around functions or non-obvious blocks when editing code, enough to state what the function does without verbose narration.
-- Function purpose comments should be placed on the line above the function definition so they remain visible when code is folded.
-- Strategy selection is config-driven. A set file under `config/` declares `strategy.name`; `runtime.py` derives `strategy.module`, `strategy.class`, and `strategy.config_class` unless they are explicitly overridden.
-- `backtest.py` and `live.py` must stay generic. Do not add branches for a specific strategy or a specific config set in these entry scripts.
-- Keep YAML config layered. Put environment-level values such as project paths, exchange name/venue, proxy, and external data-client host/port in `config/global.yaml`.
-- Put shared live/node defaults in `config/global.yaml`; strategy set YAML may override them explicitly. Keep strategy params, per-mode market selection, instrument precision/limits/fees, and backtest account settings in each strategy set YAML.
-- `runtime.py` loads `config/global.yaml` first, then recursively overlays the selected strategy set. Strategy set values override global values when keys overlap.
-- `live.py` may register shared data clients such as the external signal client for every node; strategies that need them subscribe, strategies that do not need them ignore them.
-- Reports are stored as `reports/{run_type}/{config_name}`. Backtest writes final reports after the run; live writes fills immediately from `OrderFilled` events and writes final order/position snapshots after the run.
-- Strategies must not import report-writing utilities. Live report writing belongs beside the node/trader setup and should subscribe to `events.order.{strategy_id}` through `Trader`.
-- Components outside a strategy must not depend on that strategy's private behavior, file schema, event schema, or internal lifecycle. Strategy-private outputs such as `strategy_events.csv` are owned by the strategy itself; generic writers, actors, factories, and runtime code must not read, transform, infer, or branch on their contents unless the project first defines an explicit shared contract for that output.
-- For research datasets, keep machine-consumed data in compact columnar formats such as parquet unless the user explicitly asks for CSV. Do not create duplicate CSV exports by default. Human-facing summaries should be plain text or Markdown, not JSON, unless the user explicitly requests a machine-readable metadata file.
-- Organize `data/` by data type. Current top-level data folders are `funding/`, `tick/`, `bar/` when needed, `signal/`, `notes/`, and `fetchers/` for data-fetching scripts unrelated to strategy runtime.
-- Name reusable market data files with uppercase symbol/scope, market type, data type or interval, and start date, for example `BTCUSDT-PERP-1S-20250101.parquet` or `ALL-USDT-PERP-FUNDING-20250101.parquet`. Use `PERP` for perpetual futures.
-- Research analysis artifacts belong under `data/`, not `reports/`, unless the user explicitly asks for a report-style deliverable.
-- During data analysis, only persist reusable metadata/data and notes the user explicitly asks to keep. Do not save ad hoc summaries, result tables, plots, temporary scripts, intermediate files, or one-off analysis outputs unless the user explicitly asks for them.
-- For scripts under `tools/` and temporary test/check scripts, put user-tuned parameters in the bottom `main(...)` call with short inline comments instead of command-line arguments or top-level constants, so the user can edit them directly at the end of the file.
-- When explaining distributions, prefer a chart over percentile tables. Use concise text to explain how to read the chart, and avoid dumping 25/75 percentile tables unless the user asks for numeric detail.
-- In set files under `config/`, put frequently changed strategy, market, backtest, and live run parameters near the top; keep stable instrument and project plumbing near the bottom.
-- In YAML set files, parameters used only for backtesting belong under `backtest`, not top-level strategy/live/instrument sections.
-- Live config loading must not require backtest-only fields. Keep live path dependent on symbols, venues, credentials, and runtime settings; put backtest data limits and synthetic instrument precision/fee/margin values under `backtest`.
-- Entry `main(config_name=None)` functions should let CLI config names override function arguments; function arguments are only the fallback for IDE runs without CLI args.
-- Do not add defensive guards or fallback checks that duplicate NautilusTrader's normal event guarantees. Keep strategy callbacks close to NT examples unless there is a specific observed failure.
-- Do not catch exceptions to hide or convert errors during normal development. Let errors surface, then fix the underlying cause.
-- Do not return `None` as an error state that forces callers to branch. For required config, credentials, and dependencies, access them directly and let missing values raise.
-- Do not design parameter fallbacks or silent defaults. Required runtime/trading parameters must be explicit in YAML and fail if missing. If a shared default is truly needed, put it in `config/global.yaml` and let the strategy set YAML override it through normal YAML layering. Strategy-specific values such as `trade_notional` belong in `strategy.params` and should only be passed when the strategy config declares them.
-- During node construction, do not introduce implicit defaults in Python code. Every node/runtime setting must come from the merged YAML settings so the effective configuration is inspectable; shared defaults belong in `config/global.yaml`, and strategy set YAML may override them explicitly.
-- This project uses the configured HTTP proxy on Windows only. On Linux, `proxy_url(settings)` should return `None` even if `config/global.yaml` contains a local Windows proxy address.
-- Confirm with the user before making functional behavior changes. Small formatting, comments, and documentation-like local cleanup can be done directly.
-- Do not change large framework or NautilusTrader lifecycle logic for a small local requirement such as report writing, formatting, or convenience output. Solve small requirements in the narrow module that owns them, and ask before touching core run/build/stop flows.
-- Before touching Conda, global config, system directories, or live-trading credentials, explain the action and wait for explicit confirmation.
-- On Windows PowerShell 5, bare `Get-Content` can display normal UTF-8 Chinese files as mojibake. When reading files that may contain Chinese text, use `Get-Content -Encoding UTF8` or Python `Path.read_text(encoding="utf-8")`. Do not treat display mojibake as file corruption, and do not add BOM or rewrite file encodings unless the user explicitly asks.
-- For this project, run Python with the nt conda environment executable directly: `D:\app\miniconda\envs\nt\python.exe`. Do not use base `python` or `conda run` unless the user explicitly asks.
-- If a task needs an uninstalled Python library, say the required package clearly or install it into the nt environment with `D:\app\miniconda\envs\nt\python.exe -m pip install ...` after user approval. Do not silently replace the requested or better-suited library with a weaker substitute.
-- Binance aggTrades REST has a low practical rate limit in this environment. Large historical tick pulls must be resumable and paced conservatively; after HTTP 429 or 418, stop immediately and resume later instead of retrying in a tight loop, otherwise the temporary ban can be extended.
+- 环境事实是工作流的一部分。如果本地权限、shell、运行时或工具问题迫使你换一种方法，把这个可复用的解决方式记录到这里，避免以后重复踩坑。
+- 在这个 Windows 工作区里，`rg.exe` 可能因为 `Access denied` 失败。发生时改用 PowerShell 原生命令，例如 `Get-ChildItem -Recurse -File -ErrorAction SilentlyContinue` 和 `Select-String`，并把范围限制在需要的文件类型或目录。
+- 递归 PowerShell 扫描可能遇到 `.pytest_cache` 等无权限路径。使用 `-ErrorAction SilentlyContinue` 或缩小搜索范围，不要把它误判为仓库损坏。
+- Git 可能在这个沙盒里报告 dubious ownership。只读检查时使用 `git -c safe.directory=D:/project/nt_quant ...`，不要改全局 git 配置。
+- Windows PowerShell 5 不能直接接受 `Select-Object -Index 40..80`。范围需要加括号，例如 `Select-Object -Index (40..80)`，或者使用 `Select-Object -Skip 40 -First 40`。
+- 对齐策略设计时，先把实现细节和取舍点说清楚，让用户确认后再写代码。
+- 命名保持短：变量通常不超过两个词，函数不超过三个词，类不超过两个词加一个后缀，例如 `Actor`、`Str` 或框架要求的类型名。
+- 只有在逻辑被多处复用，或确实能让一段密集代码更清楚时，才抽取辅助函数。一次性逻辑优先保持直接、局部、浅层。
+- 除非用户明确要求，不要为多种用户输入格式添加宽泛的 fallback adapter。优先使用一种短小、文档化的配置格式，而不是接受许多等价写法。
+- Binance U 本位合约账户事件需要使用精确 topic：`events.account.BINANCE-USDT_FUTURES-master`。不要把它当成只有资金费率信号；订单活动也可能发布账户事件。
+- 不要创建会混淆 IDE 索引的重复文件夹名。仓库根目录已经是 `nt_quant`，Python 包不能也命名为 `nt_quant`。
+- 当前仍处于早期阶段，避免创建 package 文件夹。面向用户的入口脚本放在仓库根目录，策略文件直接放在仓库根目录的 `strategies/` 目录下。
+- 本项目不要使用 argparse 任务分发器。当前入口脚本是 `fetch_data.py`、`backtest.py` 和 `live.py`。
+- 策略、回测、沙盒执行和交易所适配器优先使用 NautilusTrader 原生组件。只有 NautilusTrader 没有需要的通用数据路径时才使用 CCXT。
+- 默认交易所是 Binance，除非用户明确更改。
+- 除非用户另有说明，新的 live 相关配置默认面向 Binance USDT futures testnet。
+- 第一版保持最小化。不要在出现真实需求前添加额外框架层。
+- 临时检查从 shell 运行，不要保留成永久脚本。
+- 保留 `external/external_data.py`；它是用户维护的独立外部信号发送进程，即使主 NT 进程不 import 它。
+- 除非用户明确要求，不要更新 README。用聊天说明用法。
+- 编辑代码时，在函数或不明显代码块附近使用简短中文注释，说明函数做什么，不要啰嗦叙述。
+- 函数用途注释放在函数定义上一行，这样折叠代码时仍然可见。
+- 策略选择由配置驱动。`config/` 下的 set 文件声明 `strategy.name`；`runtime.py` 推导 `strategy.module`、`strategy.class` 和 `strategy.config_class`，除非这些值被显式覆盖。
+- `backtest.py` 和 `live.py` 必须保持通用。不要在这些入口脚本里为某个具体策略或具体配置集添加分支。
+- YAML 配置保持分层。项目路径、交易所名和 venue、代理、外部数据 client host/port 等环境级值放在 `config/global.yaml`。
+- 共享 live/node 默认值放在 `config/global.yaml`；策略 set YAML 可以显式覆盖。策略参数、各模式市场选择、instrument 精度/限制/费率、回测账户设置放在各自策略 set YAML 中。
+- `runtime.py` 先加载 `config/global.yaml`，再递归叠加所选策略 set。键冲突时，策略 set 的值覆盖 global。
+- `live.py` 可以为每个 node 注册外部信号 client 等共享 data client；需要它们的策略自行订阅，不需要的策略忽略。
+- 报告存放在 `reports/{run_type}/{config_name}`。回测在运行结束后写最终报告；live 在 `OrderFilled` 事件发生时立即写成交记录，并在运行结束后写最终订单和持仓快照。
+- 策略不能 import 报告写入工具。Live 报告写入属于 node/trader 设置层，应通过 `Trader` 订阅 `events.order.{strategy_id}`。
+- 策略外部组件不能依赖某个策略的私有行为、文件 schema、事件 schema 或内部生命周期。`strategy_events.csv` 这类策略私有输出归策略自己所有；通用 writer、actor、factory 和 runtime 代码不能读取、转换、推断或基于其内容分支，除非项目先定义了明确的共享输出契约。
+- 研究数据集默认使用 parquet 等紧凑列式格式保存给机器消费，除非用户明确要求 CSV。不要默认创建重复 CSV 导出。面向人的摘要用纯文本或 Markdown，不要用 JSON，除非用户明确要求机器可读 metadata 文件。
+- 按数据类型组织 `data/`。当前顶层数据目录为 `funding/`、`tick/`、需要时的 `bar/`、`signal/`、`notes/`，以及与策略 runtime 无关的数据抓取脚本目录 `fetchers/`。
+- 可复用市场数据文件名使用大写 symbol/scope、市场类型、数据类型或 interval、起始日期，例如 `BTCUSDT-PERP-1S-20250101.parquet` 或 `ALL-USDT-PERP-FUNDING-20250101.parquet`。永续合约使用 `PERP`。
+- 研究分析产物属于 `data/`，不属于 `reports/`，除非用户明确要求报告式交付物。
+- 数据分析期间，只持久化用户明确要求保留的可复用 metadata/data 和 notes。不要保存临时摘要、结果表、图、临时脚本、中间文件或一次性分析输出，除非用户明确要求。
+- `tools/` 下脚本和临时测试/检查脚本，应把用户常改参数放在底部 `main(...)` 调用里，并配短行内注释，而不是命令行参数或顶层常量，方便用户直接改文件末尾。
+- 解释分布时，优先用图而不是百分位表。用简短文字说明如何读图，除非用户要求数字细节，否则不要倾倒 25/75 分位表。
+- `config/` 下 set 文件中，把经常改的策略、市场、回测和 live 运行参数放在靠前位置；稳定的 instrument 和项目 plumbing 放在靠后位置。
+- YAML set 文件中，只用于回测的参数放在 `backtest` 下，不要放在顶层 strategy/live/instrument 区域。
+- Live 配置加载不能依赖回测专用字段。Live 路径只依赖 symbols、venues、credentials 和 runtime 设置；回测数据限制、合成 instrument 精度/费率/保证金值放在 `backtest` 下。
+- 入口 `main(config_name=None)` 函数应允许 CLI 配置名覆盖函数参数；函数参数只作为 IDE 运行且无 CLI 参数时的 fallback。
+- 不要添加重复 NautilusTrader 正常事件保证的防御性 guard 或 fallback 检查。策略 callback 尽量贴近 NT 示例，除非已经观察到具体失败。
+- 正常开发期间不要捕获异常来隐藏或转换错误。让错误暴露，然后修根因。
+- 不要把 `None` 作为错误状态返回，迫使调用方分支。必需配置、凭据和依赖应直接访问，缺失时让它抛错。
+- 不要设计参数 fallback 或静默默认值。必需的 runtime/trading 参数必须在 YAML 中显式声明，缺失时失败。如果确实需要共享默认值，放在 `config/global.yaml`，让策略 set YAML 通过正常分层覆盖。`trade_notional` 这类策略专用值属于 `strategy.params`，并且只在策略 config 声明时传入。
+- 构建 node 时，不要在 Python 代码中引入隐式默认值。每个 node/runtime 设置都必须来自合并后的 YAML，使有效配置可检查；共享默认值属于 `config/global.yaml`，策略 set YAML 可以显式覆盖。
+- 本项目只在 Windows 上使用配置的 HTTP proxy。Linux 上即使 `config/global.yaml` 包含本地 Windows 代理地址，`proxy_url(settings)` 也应返回 `None`。
+- 做功能行为变更前先和用户确认。小的格式、注释、文档式本地清理可以直接做。
+- 不要为了报告写入、格式化或便利输出这类小型本地需求去改大型框架或 NautilusTrader 生命周期逻辑。小需求在拥有它的窄模块中解决；触碰 core run/build/stop flow 前先询问。
+- 触碰 Conda、全局配置、系统目录或 live trading credentials 之前，先说明动作并等待明确确认。
+- Windows PowerShell 5 中，裸 `Get-Content` 可能把正常 UTF-8 中文文件显示成乱码。读取可能包含中文的文件时，使用 `Get-Content -Encoding UTF8` 或 Python `Path.read_text(encoding="utf-8")`。不要把显示乱码当成文件损坏，也不要加 BOM 或重写编码，除非用户明确要求。
+- 本项目运行 Python 时直接使用 nt conda 环境解释器：`D:\app\miniconda\envs\nt\python.exe`。不要使用 base `python` 或 `conda run`，除非用户明确要求。
+- 如果任务需要未安装的 Python 库，清楚说明所需包，或在用户批准后用 `D:\app\miniconda\envs\nt\python.exe -m pip install ...` 安装到 nt 环境。不要静默用更弱的替代库替换用户请求或更合适的库。
+- Binance aggTrades REST 在当前环境中实际限频较低。大规模历史 tick 拉取必须可恢复并保守限速；遇到 HTTP 429 或 418 后立刻停止，稍后再恢复，不要紧密重试，否则临时封禁可能被延长。
 
-## Simplicity First
+## 简单优先
 
-- Implement the smallest design that satisfies the requested outcome.
-- Do not add speculative features, generic frameworks, or extra configuration.
-- Avoid abstractions for one-off code.
-- If the code grows beyond the problem, simplify before continuing.
+- 实现满足目标的最小设计。
+- 不要添加猜测性功能、通用框架或额外配置。
+- 避免为一次性代码创建抽象。
+- 如果代码规模超过问题本身，继续前先简化。
 
-## Surgical Changes
+## 精准改动
 
-- Touch only files needed for the current request.
-- Match nearby style and project conventions.
-- Do not reformat, refactor, or clean adjacent code unless it is required.
-- Remove only unused code introduced by the current change.
-- Mention unrelated problems instead of fixing them opportunistically.
+- 只触碰当前请求需要的文件。
+- 匹配附近风格和项目约定。
+- 除非必要，不要重排、重构或清理相邻代码。
+- 只移除当前改动引入的未使用代码。
+- 发现无关问题时说明即可，不要顺手修。
 
-## Goal-Driven Execution
+## 目标驱动执行
 
-For multi-step work, define a short success loop:
+多步骤工作使用短成功闭环：
 
-1. Implement the requested slice.
-2. Run the smallest useful verification.
-3. Fix only failures related to the slice.
-4. Report what passed, what failed, and what remains.
+1. 实现请求中的一个明确切片。
+2. 运行最小但有用的验证。
+3. 只修复与该切片相关的失败。
+4. 汇报哪些通过、哪些失败、还剩什么。
 
-Strong success criteria are preferred over vague "make it work" instructions.
+清晰的成功标准优于含糊的“让它能跑”。

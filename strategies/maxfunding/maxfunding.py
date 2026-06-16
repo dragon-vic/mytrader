@@ -87,8 +87,6 @@ class MaxFundingConfig(StrategyConfig, frozen=True):
     funding_income_delay_sec: float
     xgb_models: list[dict[str, Any]]
     xgb_primary: str
-    aggressive_mode: bool = False
-    aggressive_pass_score_bps: Decimal = Decimal("5")
     event_log_path: str = "auto"
 
 
@@ -108,7 +106,6 @@ class MaxFundingStrategy(Strategy):
         self.notional_scale = Decimal(str(config.notional_scale))
         self.base_score = Decimal(str(config.notional_base_score_bps))
         self.max_score = Decimal("60")
-        self.aggressive_pass_score = Decimal(str(config.aggressive_pass_score_bps))
         self.max_trades = int(config.max_trades)
         self.min_rate = Decimal(str(config.min_rate_bps)) / Decimal("10000")
         self.protect_giveback_bps = Decimal(str(config.protect_giveback_bps))
@@ -195,8 +192,6 @@ class MaxFundingStrategy(Strategy):
             raise RuntimeError("notional_scale must be positive")
         if self.max_score <= self.base_score:
             raise RuntimeError("notional_base_score_bps must be lower than 60")
-        if self.aggressive_pass_score >= self.max_score:
-            raise RuntimeError("aggressive_pass_score_bps must be lower than 60")
         if self.config.funding_income_delay_sec <= self.config.exit_sec:
             raise RuntimeError("funding_income_delay_sec must be greater than exit_sec")
         if self.config.post_sec < self.config.funding_income_delay_sec:
@@ -463,7 +458,7 @@ class MaxFundingStrategy(Strategy):
                 self.open_fill_ns[event.instrument_id] = event.ts_opened
         elif isinstance(event, PositionChanged):
             if event.instrument_id in self.open_ids and event.closing_order_id is None:
-                self.open_fill_ns[event.instrument_id] = event.ts_last
+                self.open_fill_ns[event.instrument_id] = event.ts_event
         elif isinstance(event, PositionClosed):
             self.closed_events[event.instrument_id] = event
             self.close_fill_ns[event.instrument_id] = event.ts_closed
@@ -711,10 +706,8 @@ class MaxFundingStrategy(Strategy):
             return False
         if row.get("xgb_primary_pass") is True:
             return True
-        if not self.config.aggressive_mode:
-            return False
         score = self._decimal(row.get("xgb_primary_score"))
-        return score is not None and score > self.aggressive_pass_score
+        return score is not None
 
     def _select_key(self, item: tuple[InstrumentId, dict[str, Any]]) -> float:
         row = item[1]

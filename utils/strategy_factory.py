@@ -32,6 +32,17 @@ def strategy_instruments(settings: dict[str, Any], run_type: str, params: dict[s
     return InstrumentFactory.from_client(source)
 
 
+# 从 enabled data clients 自动展开 instrument id。
+def enabled_instruments(settings: dict[str, Any]) -> list[str]:
+    values = []
+    for cfg in settings["data"]["clients"].values():
+        if not cfg.get("enabled") or cfg.get("markets_all"):
+            continue
+        factory = InstrumentFactory.from_client(cfg)
+        values.extend(str(factory.instrument_id(market)) for market in factory.markets)
+    return values
+
+
 # 按策略配置字段自动补充运行类型、报告路径和全局代理。
 def strategy_params(
     settings: dict[str, Any],
@@ -40,6 +51,8 @@ def strategy_params(
 ) -> dict[str, Any]:
     params = dict(settings["strategy"].get("params", {}))
     fields = get_type_hints(config_cls)
+    if "instruments" in fields and params.get("instruments") == "enabled":
+        params["instruments"] = enabled_instruments(settings)
     if "instrument_ids" in fields or "bar_types" in fields:
         if "instrument_client" not in params:
             raise KeyError("strategy.params.instrument_client is required")

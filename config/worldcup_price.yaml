@@ -1,0 +1,38 @@
+strategy:
+  name: worldcup_price
+  params:
+    max_ticks: 0
+    timeout_sec: 0
+    flush_sec: 5
+    tick_rows: 12
+    html_refresh_ms: 1000
+    html_host: 127.0.0.1
+    html_port: 8765
+    backfill_on_start: true
+    backfill_from_start: true
+    backfill_limit: 500
+    backfill_max_pages: 40
+    backfill_pause_ms: 80
+    event_refresh_sec: 30
+    persist_ticks: true
+    tick_path: strategies/worldcupprice/data/poly_worldcup_ticks.parquet
+
+data:
+  clients:
+    polymarket:
+      enabled: true
+      markets: all
+      instrument_provider:
+        event_slug_builder: strategies.worldcupprice.polymarket_worldcup:build_event_slugs
+
+exec:
+  engine:
+    reconciliation: false
+    reconciliation_scope: null
+
+  clients:
+    polymarket:
+      enabled: false
+
+reports:
+  enabled: true

@@ -1,0 +1,106 @@
+strategy:
+  name: preipo_arb
+  params:
+    assets: [OPENAI, ANTHROPIC]
+    instruments: enabled
+    spread_mode: mean_deviation
+    one_sided: true
+    entry_bps: "400"
+    exit_bps: "50"
+    lookback_sec: 43200
+    min_spread_samples: 600
+    entry_z: "2.25"
+    exit_z: "-1.0"
+    min_entry_bps: "150"
+    trade_notional: "20"
+    max_hold_sec: 43200
+    min_hold_sec: 60
+    cooldown_sec: 300
+    max_quote_age_sec: 15
+    slippage_bps: "2"
+    fee_bps:
+      BINANCE: 5
+      OKX: 5
+      KRAKEN: 10
+      HYPERLIQUID: 5
+    dry_run: false
+
+data:
+  clients:
+    binance_futures:
+      enabled: true
+      markets:
+        - OPENAI
+        - ANTHROPIC
+
+    okx_swap:
+      enabled: true
+      markets:
+        - OPENAI
+        - ANTHROPIC
+
+    kraken_futures:
+      enabled: false
+      markets:
+        - symbol: OPENAIX/USD
+          raw_symbol: PF_OPENAIXUSD
+          instrument_symbol: PF_OPENAIXUSD
+          base_currency: OPENAI
+        - symbol: ANTHROPICX/USD
+          raw_symbol: PF_ANTHROPICXUSD
+          instrument_symbol: PF_ANTHROPICXUSD
+          base_currency: ANTHROPIC
+
+    # 当前 Hyperliquid 返回 VNTL 标的但 active=false；需要纳入时改 enabled。
+    hyperliquid_perp:
+      enabled: false
+      markets:
+        - symbol: VNTL-OPENAI/USD
+          raw_symbol: VNTL-OPENAI
+          instrument_symbol: VNTL-OPENAI
+          base_currency: OPENAI
+        - symbol: VNTL-ANTHROPIC/USD
+          raw_symbol: VNTL-ANTHROPIC
+          instrument_symbol: VNTL-ANTHROPIC
+          base_currency: ANTHROPIC
+
+exec:
+  clients:
+    binance_futures:
+      enabled: true
+      markets:
+        - OPENAI
+        - ANTHROPIC
+
+    okx_swap:
+      enabled: true
+      markets:
+        - OPENAI
+        - ANTHROPIC
+
+    kraken_futures:
+      enabled: false
+      markets:
+        - symbol: OPENAIX/USD
+          raw_symbol: PF_OPENAIXUSD
+          instrument_symbol: PF_OPENAIXUSD
+          base_currency: OPENAI
+        - symbol: ANTHROPICX/USD
+          raw_symbol: PF_ANTHROPICXUSD
+          instrument_symbol: PF_ANTHROPICXUSD
+          base_currency: ANTHROPIC
+
+    hyperliquid_perp:
+      enabled: false
+      markets:
+        - symbol: VNTL-OPENAI/USD
+          raw_symbol: VNTL-OPENAI
+          instrument_symbol: VNTL-OPENAI
+          base_currency: OPENAI
+        - symbol: VNTL-ANTHROPIC/USD
+          raw_symbol: VNTL-ANTHROPIC
+          instrument_symbol: VNTL-ANTHROPIC
+          base_currency: ANTHROPIC
+
+backtest:
+  quote_data_path: data/tick/PREIPO-BINANCE-OKX-TRADES-20260609-20260614.parquet
