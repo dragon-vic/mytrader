@@ -8,6 +8,13 @@ strategy:
     entry_bps: "400"
     exit_bps: "50"
     lookback_sec: 43200
+    min_window_sec: 0
+    initial_mean_bps:
+      OPENAI: 256.55
+      ANTHROPIC: 128.24
+    initial_std_bps:
+      OPENAI: 56.16
+      ANTHROPIC: 45.83
     min_spread_samples: 600
     entry_z: "2.25"
     exit_z: "-1.0"
@@ -17,7 +24,11 @@ strategy:
     min_hold_sec: 60
     cooldown_sec: 300
     max_quote_age_sec: 15
+    snapshot_interval_sec: 10
+    snapshot_display: file
+    snapshot_path: reports/live/preipo_arb_snapshot.json
     slippage_bps: "2"
+    use_hyphens_in_client_order_ids: false
     fee_bps:
       BINANCE: 5
       OKX: 5
