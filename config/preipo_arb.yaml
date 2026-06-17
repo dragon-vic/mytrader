@@ -26,7 +26,7 @@ strategy:
     max_hold_sec: 43200
     min_hold_sec: 60
     cooldown_sec: 300
-    max_quote_age_sec: 15
+    max_quote_age_sec: 0
     snapshot_interval_sec: 1
     snapshot_display: file
     snapshot_path: reports/live/preipo_arb_snapshot.json

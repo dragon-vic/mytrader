@@ -37,6 +37,7 @@ PAIRED = "PAIRED"
 CLOSING = "CLOSING"
 OPEN = "OPEN"
 CLOSE = "CLOSE"
+INIT_TICK_MATCH_MS = 15_000
 
 
 @dataclass
@@ -237,8 +238,8 @@ class PreipoArbStrategy(Strategy):
             raise RuntimeError("min_hold_sec must be positive")
         if self.config.cooldown_sec < 0:
             raise RuntimeError("cooldown_sec must be positive")
-        if self.config.max_quote_age_sec <= 0:
-            raise RuntimeError("max_quote_age_sec must be positive")
+        if self.config.max_quote_age_sec < 0:
+            raise RuntimeError("max_quote_age_sec must be non-negative")
         if self.config.snapshot_interval_sec < 0:
             raise RuntimeError("snapshot_interval_sec must be non-negative")
         if self.snapshot_display not in {"rich", "log", "file", "off"}:
@@ -458,7 +459,7 @@ class PreipoArbStrategy(Strategy):
     ) -> dict[str, tuple[float, float, int]]:
         last: dict[str, dict[InstrumentId, tuple[int, Decimal]]] = {asset: {} for asset in self.assets}
         values: dict[str, list[float]] = {asset: [] for asset in self.assets}
-        max_age_ms = int(self.max_quote_age_ns / 1_000_000)
+        max_age_ms = INIT_TICK_MATCH_MS
         for ts_ms, asset, instrument_id, price in rows:
             last[asset][instrument_id] = (ts_ms, price)
             fresh = [
@@ -496,8 +497,6 @@ class PreipoArbStrategy(Strategy):
         now_ns = self.clock.timestamp_ns()
         for instrument_id, quote in self.quotes.items():
             if self._asset(instrument_id) != asset:
-                continue
-            if now_ns - quote.ts_event > self.max_quote_age_ns:
                 continue
             bid = Decimal(str(quote.bid_price))
             ask = Decimal(str(quote.ask_price))
@@ -685,11 +684,6 @@ class PreipoArbStrategy(Strategy):
         if buy_quote is None or sell_quote is None:
             return
         now_ns = self.clock.timestamp_ns()
-        if now_ns - buy_quote.ts_event > self.max_quote_age_ns:
-            return
-        if now_ns - sell_quote.ts_event > self.max_quote_age_ns:
-            return
-
         age_ns = now_ns - pos.opened_ns
         expired = age_ns >= self.max_hold_ns
         if age_ns < self.min_hold_ns and not expired:
@@ -1189,8 +1183,6 @@ class PreipoArbStrategy(Strategy):
             if self._asset(instrument_id) != asset:
                 continue
             age_sec = (now_ns - quote.ts_event) / 1_000_000_000
-            if age_sec > self.max_quote_age_ns / 1_000_000_000:
-                continue
             rows.append(
                 f"{self._venue(instrument_id)} bid={self._fmt(quote.bid_price)} "
                 f"ask={self._fmt(quote.ask_price)} age={self._fmt(age_sec, 's')}",
