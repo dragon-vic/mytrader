@@ -966,17 +966,30 @@ class PreipoArbStrategy(Strategy):
             return
         self.last_snapshot_ns = now_ns
         rows: dict[str, dict[str, str]] = {}
+        market_tables: dict[str, list[dict[str, str]]] = {}
+        position_rows: list[dict[str, str]] = []
+        state_rows: list[dict[str, str]] = []
         log_parts = []
         for asset in self.assets:
             best = self._best(asset)
             asset_state = self._asset_state(asset)
             active = "Y" if self.active_asset == asset else "N"
+            pending = "Y" if asset in self.pending else "N"
+            position = self.positions.get(asset)
+            position_rows.append(self._position_snapshot(asset, position, current_states, now_ns))
+            state_rows.append({
+                "asset": asset,
+                "state": asset_state,
+                "active": active,
+                "pending": pending,
+                "has_position": "Y" if position is not None else "N",
+            })
             if best is None:
                 rows[asset] = {
                     "asset": asset,
                     "state": asset_state,
                     "active": active,
-                    "pending": str(asset in self.pending),
+                    "pending": pending,
                     "buy": "-",
                     "sell": "-",
                     "edge": "-",
@@ -987,6 +1000,7 @@ class PreipoArbStrategy(Strategy):
                     "window": "0s",
                     "quotes": "waiting",
                 }
+                market_tables[asset] = self._market_rows(asset, None, "-", "-", "-", "-", "-", "-")
                 log_parts.append(f"{asset} state={asset_state} active={active} quotes=waiting")
                 continue
             buy, sell = best
@@ -1012,7 +1026,7 @@ class PreipoArbStrategy(Strategy):
                 "asset": asset,
                 "state": asset_state,
                 "active": active,
-                "pending": "Y" if asset in self.pending else "N",
+                "pending": pending,
                 "buy": f"{buy.instrument_id}@{buy.price}",
                 "sell": f"{sell.instrument_id}@{sell.price}",
                 "edge": f"{edge:.2f}",
@@ -1024,6 +1038,16 @@ class PreipoArbStrategy(Strategy):
                 "source": source,
                 "quotes": quotes,
             }
+            market_tables[asset] = self._market_rows(
+                asset,
+                (buy, sell),
+                f"{edge:.2f}",
+                f"{mean:.2f}",
+                f"{std:.2f}",
+                f"{z_score:.2f}",
+                source,
+                f"{window_sec:.0f}s",
+            )
             log_parts.append(
                 f"{asset} state={asset_state} active={active} pending={asset in self.pending} "
                 f"edge={edge:.2f}bps z={z_score:.2f} buy={buy.instrument_id}@{buy.price} "
@@ -1034,6 +1058,111 @@ class PreipoArbStrategy(Strategy):
             return
         with self.snapshot_lock:
             self.snapshot_rows.update(rows)
+            self.snapshot_rows["__market_tables__"] = market_tables
+            self.snapshot_rows["__position_rows__"] = position_rows
+            self.snapshot_rows["__state_rows__"] = state_rows
+
+    def _market_rows(
+        self,
+        asset: str,
+        best: tuple[ArbLeg, ArbLeg] | None,
+        edge: str,
+        mean: str,
+        std: str,
+        z_score: str,
+        source: str,
+        window: str,
+    ) -> list[dict[str, str]]:
+        now_ns = self.clock.timestamp_ns()
+        best_buy = best[0].instrument_id if best is not None else None
+        best_sell = best[1].instrument_id if best is not None else None
+        rows = []
+        for instrument_id in sorted(self.instruments, key=lambda item: str(item)):
+            if self._asset(instrument_id) != asset:
+                continue
+            quote = self.quotes.get(instrument_id)
+            if quote is None:
+                rows.append({
+                    "exchange": self._venue(instrument_id),
+                    "instrument": str(instrument_id),
+                    "bid1": "-",
+                    "ask1": "-",
+                    "age": "-",
+                    "role": "-",
+                    "edge": edge,
+                    "mean": mean,
+                    "std": std,
+                    "z": z_score,
+                    "source": source,
+                    "window": window,
+                })
+                continue
+            age_sec = (now_ns - quote.ts_event) / 1_000_000_000
+            role = "-"
+            if instrument_id == best_buy:
+                role = "BUY"
+            elif instrument_id == best_sell:
+                role = "SELL"
+            rows.append({
+                "exchange": self._venue(instrument_id),
+                "instrument": str(instrument_id),
+                "bid1": str(quote.bid_price),
+                "ask1": str(quote.ask_price),
+                "age": f"{age_sec:.1f}s",
+                "role": role,
+                "edge": edge,
+                "mean": mean,
+                "std": std,
+                "z": z_score,
+                "source": source,
+                "window": window,
+            })
+        return rows
+
+    def _position_snapshot(
+        self,
+        asset: str,
+        position: ArbPos | None,
+        states: dict[tuple[InstrumentId, InstrumentId], SpreadState],
+        now_ns: int,
+    ) -> dict[str, str]:
+        if position is None:
+            return {
+                "asset": asset,
+                "side": "-",
+                "entry_buy": "-",
+                "entry_sell": "-",
+                "qty": "-",
+                "entry_edge": "-",
+                "entry_z": "-",
+                "current_close_edge": "-",
+                "current_z": "-",
+                "hold": "-",
+            }
+        buy_quote = self.quotes.get(position.buy_id)
+        sell_quote = self.quotes.get(position.sell_id)
+        close_edge = "-"
+        current_z = "-"
+        if buy_quote is not None and sell_quote is not None:
+            close_buy = ArbLeg(position.sell_id, Decimal(str(sell_quote.ask_price)))
+            close_sell = ArbLeg(position.buy_id, Decimal(str(buy_quote.bid_price)))
+            close_edge = f"{self._net_bps(close_buy, close_sell):.2f}"
+            state = states.get((position.buy_id, position.sell_id))
+            if state is not None:
+                current_z = f"{state.z_score:.2f}"
+        hold_sec = max((now_ns - position.opened_ns) / 1_000_000_000, 0.0)
+        return {
+            "asset": asset,
+            "side": f"buy_{self._venue(position.buy_id).lower()}_sell_{self._venue(position.sell_id).lower()}",
+            "entry_buy": f"{position.buy_id}@{position.buy_px}",
+            "entry_sell": f"{position.sell_id}@{position.sell_px}",
+            "qty": f"{position.buy_qty}/{position.sell_qty}",
+            "entry_edge": f"{position.edge_bps:.2f}",
+            "entry_z": f"{position.z_score:.2f}",
+            "current_close_edge": close_edge,
+            "current_z": current_z,
+            "hold": f"{hold_sec:.0f}s",
+        }
 
     def _window_debug(
         self,
@@ -1118,11 +1247,18 @@ class PreipoArbStrategy(Strategy):
         self._write_snapshot(rows)
 
     def _write_snapshot(self, rows: dict[str, dict[str, str]]) -> None:
+        market_tables = rows.get("__market_tables__", {})
+        position_rows = rows.get("__position_rows__", [])
+        state_rows = rows.get("__state_rows__", [])
+        asset_rows = {key: value for key, value in rows.items() if not key.startswith("__")}
         payload = {
             "ts_ns": self.clock.timestamp_ns(),
             "strategy": "preipo_arb",
             "assets": self.assets,
-            "rows": [rows[asset] for asset in self.assets if asset in rows],
+            "rows": [asset_rows[asset] for asset in self.assets if asset in asset_rows],
+            "market_tables": market_tables,
+            "position_rows": position_rows,
+            "state_rows": state_rows,
         }
         tmp = self.snapshot_path.with_suffix(f"{self.snapshot_path.suffix}.tmp")
         tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
