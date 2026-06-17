@@ -27,7 +27,7 @@ strategy:
     min_hold_sec: 60
     cooldown_sec: 300
     max_quote_age_sec: 15
-    snapshot_interval_sec: 10
+    snapshot_interval_sec: 1
     snapshot_display: file
     snapshot_path: reports/live/preipo_arb_snapshot.json
     slippage_bps: "2"
@@ -38,6 +38,10 @@ strategy:
       KRAKEN: 10
       HYPERLIQUID: 5
     dry_run: false
+
+logging:
+  component_levels:
+    Portfolio: WARNING
 
 data:
   clients:

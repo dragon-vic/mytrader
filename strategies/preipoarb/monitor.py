@@ -126,7 +126,7 @@ def build_view(payload: dict, path: Path) -> Group:
 
 def main(path: Path, refresh_sec: float) -> None:
     console = Console()
-    with Live(build_view(load_snapshot(path), path), console=console, screen=True, refresh_per_second=2) as live:
+    with Live(build_view(load_snapshot(path), path), console=console, screen=True, refresh_per_second=1) as live:
         while True:
             live.update(build_view(load_snapshot(path), path), refresh=True)
             time.sleep(refresh_sec)

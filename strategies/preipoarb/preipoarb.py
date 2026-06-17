@@ -958,6 +958,13 @@ class PreipoArbStrategy(Strategy):
             return self.arb_state
         return FLAT
 
+    def _fmt(self, value: object, suffix: str = "") -> str:
+        try:
+            text = f"{Decimal(str(value)):.2f}".rstrip("0").rstrip(".")
+        except Exception:
+            return str(value)
+        return f"{text}{suffix}"
+
     def _maybe_update_snapshot(self, current_states: dict[tuple[InstrumentId, InstrumentId], SpreadState]) -> None:
         if self.snapshot_interval_ns <= 0 or self.snapshot_display == "off":
             return
@@ -1027,26 +1034,26 @@ class PreipoArbStrategy(Strategy):
                 "state": asset_state,
                 "active": active,
                 "pending": pending,
-                "buy": f"{buy.instrument_id}@{buy.price}",
-                "sell": f"{sell.instrument_id}@{sell.price}",
-                "edge": f"{edge:.2f}",
-                "z": f"{z_score:.2f}",
-                "mean": f"{mean:.2f}",
-                "std": f"{std:.2f}",
+                "buy": f"{buy.instrument_id}@{self._fmt(buy.price)}",
+                "sell": f"{sell.instrument_id}@{self._fmt(sell.price)}",
+                "edge": self._fmt(edge),
+                "z": self._fmt(z_score),
+                "mean": self._fmt(mean),
+                "std": self._fmt(std),
                 "samples": str(samples),
-                "window": f"{window_sec:.0f}s",
+                "window": self._fmt(window_sec, "s"),
                 "source": source,
                 "quotes": quotes,
             }
             market_tables[asset] = self._market_rows(
                 asset,
                 (buy, sell),
-                f"{edge:.2f}",
-                f"{mean:.2f}",
-                f"{std:.2f}",
-                f"{z_score:.2f}",
+                self._fmt(edge),
+                self._fmt(mean),
+                self._fmt(std),
+                self._fmt(z_score),
                 source,
-                f"{window_sec:.0f}s",
+                self._fmt(window_sec, "s"),
             )
             log_parts.append(
                 f"{asset} state={asset_state} active={active} pending={asset in self.pending} "
@@ -1106,9 +1113,9 @@ class PreipoArbStrategy(Strategy):
             rows.append({
                 "exchange": self._venue(instrument_id),
                 "instrument": str(instrument_id),
-                "bid1": str(quote.bid_price),
-                "ask1": str(quote.ask_price),
-                "age": f"{age_sec:.1f}s",
+                "bid1": self._fmt(quote.bid_price),
+                "ask1": self._fmt(quote.ask_price),
+                "age": self._fmt(age_sec, "s"),
                 "role": role,
                 "edge": edge,
                 "mean": mean,
@@ -1146,22 +1153,22 @@ class PreipoArbStrategy(Strategy):
         if buy_quote is not None and sell_quote is not None:
             close_buy = ArbLeg(position.sell_id, Decimal(str(sell_quote.ask_price)))
             close_sell = ArbLeg(position.buy_id, Decimal(str(buy_quote.bid_price)))
-            close_edge = f"{self._net_bps(close_buy, close_sell):.2f}"
+            close_edge = self._fmt(self._net_bps(close_buy, close_sell))
             state = states.get((position.buy_id, position.sell_id))
             if state is not None:
-                current_z = f"{state.z_score:.2f}"
+                current_z = self._fmt(state.z_score)
         hold_sec = max((now_ns - position.opened_ns) / 1_000_000_000, 0.0)
         return {
             "asset": asset,
             "side": f"buy_{self._venue(position.buy_id).lower()}_sell_{self._venue(position.sell_id).lower()}",
-            "entry_buy": f"{position.buy_id}@{position.buy_px}",
-            "entry_sell": f"{position.sell_id}@{position.sell_px}",
-            "qty": f"{position.buy_qty}/{position.sell_qty}",
-            "entry_edge": f"{position.edge_bps:.2f}",
-            "entry_z": f"{position.z_score:.2f}",
+            "entry_buy": f"{position.buy_id}@{self._fmt(position.buy_px)}",
+            "entry_sell": f"{position.sell_id}@{self._fmt(position.sell_px)}",
+            "qty": f"{self._fmt(position.buy_qty)}/{self._fmt(position.sell_qty)}",
+            "entry_edge": self._fmt(position.edge_bps),
+            "entry_z": self._fmt(position.z_score),
             "current_close_edge": close_edge,
             "current_z": current_z,
-            "hold": f"{hold_sec:.0f}s",
+            "hold": self._fmt(hold_sec, "s"),
         }
 
     def _window_debug(
@@ -1185,7 +1192,8 @@ class PreipoArbStrategy(Strategy):
             if age_sec > self.max_quote_age_ns / 1_000_000_000:
                 continue
             rows.append(
-                f"{self._venue(instrument_id)} bid={quote.bid_price} ask={quote.ask_price} age={age_sec:.1f}s",
+                f"{self._venue(instrument_id)} bid={self._fmt(quote.bid_price)} "
+                f"ask={self._fmt(quote.ask_price)} age={self._fmt(age_sec, 's')}",
             )
         return "; ".join(rows)
 
