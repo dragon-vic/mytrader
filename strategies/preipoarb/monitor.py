@@ -134,6 +134,6 @@ def main(path: Path, refresh_sec: float) -> None:
 
 if __name__ == "__main__":
     main(
-        Path("reports/live/preipo_arb_snapshot.json"),
+        Path("strategies/preipoarb/preipo_arb_snapshot.json"),
         1.0,
     )

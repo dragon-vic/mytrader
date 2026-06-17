@@ -29,7 +29,7 @@ strategy:
     max_quote_age_sec: 0
     snapshot_interval_sec: 1
     snapshot_display: file
-    snapshot_path: reports/live/preipo_arb_snapshot.json
+    snapshot_path: strategies/preipoarb/preipo_arb_snapshot.json
     slippage_bps: "2"
     use_hyphens_in_client_order_ids: false
     fee_bps:

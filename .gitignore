@@ -9,6 +9,7 @@ data/
 !strategies/maxfunding/data/**
 reports/
 logs/
+strategies/preipoarb/preipo_arb_snapshot.json
 .gitignore
 .env
 .venv/
