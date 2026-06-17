@@ -4,6 +4,9 @@ import sys
 import json
 import time
 import requests
+from datetime import datetime
+from datetime import timedelta
+from datetime import timezone
 from threading import Lock
 from threading import Thread
 from threading import Event as ThreadEvent
@@ -43,6 +46,7 @@ STOPPING = "STOPPING"
 OPEN = "OPEN"
 CLOSE = "CLOSE"
 INIT_TICK_MATCH_MS = 15_000
+BEIJING_TZ = timezone(timedelta(hours=8))
 
 
 @dataclass
@@ -298,15 +302,16 @@ class PreipoArbStrategy(Strategy):
             return
         leg = batch.legs[order_id]
         leg.filled_qty += Decimal(str(event.last_qty))
+        fill_state = "filled" if self._leg_filled(leg) else "partial"
         self.log.info(
-            f"fill {asset} action={batch.action} order={order_id} "
+            f"{fill_state}_fill {asset} action={batch.action} order={order_id} "
             f"{leg.instrument_id} filled={leg.filled_qty}/{leg.target_qty}",
         )
         if asset in self.failed_assets:
             if batch.action == OPEN:
                 self._try_submit_emergency(leg.instrument_id, self._opposite(leg.side), Decimal(str(event.last_qty)))
             return
-        if not self._batch_done(batch):
+        if not self._batch_filled(batch):
             return
         if batch.action == OPEN:
             self._confirm_open(batch)
@@ -992,8 +997,12 @@ class PreipoArbStrategy(Strategy):
             return None
         return buy_qty
 
-    def _batch_done(self, batch: PendingBatch) -> bool:
-        return all(leg.filled_qty >= leg.target_qty for leg in batch.legs.values())
+    def _leg_filled(self, leg: PendingLeg) -> bool:
+        return leg.filled_qty >= leg.target_qty
+
+    # 只有所有腿都累计全量成交后，才确认开仓或平仓。
+    def _batch_filled(self, batch: PendingBatch) -> bool:
+        return all(self._leg_filled(leg) for leg in batch.legs.values())
 
     def _confirm_open(self, batch: PendingBatch) -> None:
         buy_qty = self._filled_qty(batch, batch.buy_id)
@@ -1118,6 +1127,12 @@ class PreipoArbStrategy(Strategy):
             return str(value)
         return f"{text}{suffix}"
 
+    def _beijing_time(self, ts_ns: int | None = None) -> str:
+        if ts_ns is None:
+            ts_ns = self.clock.timestamp_ns()
+        ts_sec = ts_ns / 1_000_000_000
+        return datetime.fromtimestamp(ts_sec, tz=timezone.utc).astimezone(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
+
     def _maybe_update_snapshot(self, current_states: dict[tuple[InstrumentId, InstrumentId], SpreadState]) -> None:
         if self.snapshot_interval_ns <= 0 or self.snapshot_display == "off":
             return
@@ -1160,7 +1175,7 @@ class PreipoArbStrategy(Strategy):
                     "window": "0s",
                     "quotes": "waiting",
                 }
-                market_tables[asset] = self._market_rows(asset, None, "-", "-", "-", "-", "-", "-")
+                market_tables[asset] = self._market_rows(asset, None, "-", "-", "-", "-", "-")
                 log_parts.append(f"{asset} state={asset_state} active={active} quotes=waiting")
                 continue
             buy, sell = best
@@ -1168,19 +1183,15 @@ class PreipoArbStrategy(Strategy):
             state = current_states.get((buy.instrument_id, sell.instrument_id))
             if state is None:
                 samples, mean, std, window_sec = self._window_debug(asset, buy.instrument_id, sell.instrument_id)
-                initial = "initial" if samples < self.min_spread_samples else "rolling_pending"
                 mean = self.initial_mean_bps.get(asset, mean)
                 std = self.initial_std_bps.get(asset, std)
                 z_score = (float(edge) - mean) / std if std > 0 else 0.0
-                source = initial
             else:
                 samples = state.samples
                 mean = state.mean_bps
                 std = state.std_bps
                 z_score = state.z_score
                 window_sec = state.window_sec
-                weight = min(max(window_sec * 1_000_000_000 / self.init_blend_ns, 0.0), 1.0)
-                source = "rolling" if weight >= 1.0 else f"blend {weight:.0%}"
             quotes = self._quote_text(asset)
             rows[asset] = {
                 "asset": asset,
@@ -1195,7 +1206,6 @@ class PreipoArbStrategy(Strategy):
                 "std": self._fmt(std),
                 "samples": str(samples),
                 "window": self._fmt(window_sec, "s"),
-                "source": source,
                 "quotes": quotes,
             }
             market_tables[asset] = self._market_rows(
@@ -1205,13 +1215,12 @@ class PreipoArbStrategy(Strategy):
                 self._fmt(mean),
                 self._fmt(std),
                 self._fmt(z_score),
-                source,
                 self._fmt(window_sec, "s"),
             )
             log_parts.append(
                 f"{asset} state={asset_state} active={active} pending={asset in self.pending} "
                 f"edge={edge:.2f}bps z={z_score:.2f} buy={buy.instrument_id}@{buy.price} "
-                f"sell={sell.instrument_id}@{sell.price} source={source} quotes=[{quotes}]",
+                f"sell={sell.instrument_id}@{sell.price} quotes=[{quotes}]",
             )
         if self.snapshot_display == "log":
             self.log.info("market_snapshot | " + " | ".join(log_parts))
@@ -1221,6 +1230,7 @@ class PreipoArbStrategy(Strategy):
             self.snapshot_rows["__market_tables__"] = market_tables
             self.snapshot_rows["__position_rows__"] = position_rows
             self.snapshot_rows["__state_rows__"] = state_rows
+            self.snapshot_rows["__beijing_time__"] = self._beijing_time(now_ns)
 
     def _market_rows(
         self,
@@ -1230,7 +1240,6 @@ class PreipoArbStrategy(Strategy):
         mean: str,
         std: str,
         z_score: str,
-        source: str,
         window: str,
     ) -> list[dict[str, str]]:
         now_ns = self.clock.timestamp_ns()
@@ -1253,7 +1262,6 @@ class PreipoArbStrategy(Strategy):
                     "mean": mean,
                     "std": std,
                     "z": z_score,
-                    "source": source,
                     "window": window,
                 })
                 continue
@@ -1274,7 +1282,6 @@ class PreipoArbStrategy(Strategy):
                 "mean": mean,
                 "std": std,
                 "z": z_score,
-                "source": source,
                 "window": window,
             })
         return rows
@@ -1409,9 +1416,11 @@ class PreipoArbStrategy(Strategy):
         market_tables = rows.get("__market_tables__", {})
         position_rows = rows.get("__position_rows__", [])
         state_rows = rows.get("__state_rows__", [])
+        ts_ns = self.clock.timestamp_ns()
         asset_rows = {key: value for key, value in rows.items() if not key.startswith("__")}
         payload = {
-            "ts_ns": self.clock.timestamp_ns(),
+            "ts_ns": ts_ns,
+            "beijing_time": rows.get("__beijing_time__") or self._beijing_time(ts_ns),
             "strategy": "preipo_arb",
             "assets": self.assets,
             "rows": [asset_rows[asset] for asset in self.assets if asset in asset_rows],
@@ -1424,7 +1433,8 @@ class PreipoArbStrategy(Strategy):
         tmp.replace(self.snapshot_path)
 
     def _snapshot_table(self, rows: dict[str, dict[str, str]]) -> Table:
-        table = Table(title="PREIPO Arbitrage Live", expand=True)
+        title = f"PREIPO Arbitrage Live | 北京时间 {rows.get('__beijing_time__') or self._beijing_time()}"
+        table = Table(title=title, expand=True)
         for column, justify in (
             ("asset", "left"),
             ("state", "left"),
@@ -1434,7 +1444,6 @@ class PreipoArbStrategy(Strategy):
             ("z", "right"),
             ("mean", "right"),
             ("std", "right"),
-            ("src", "left"),
             ("samples", "right"),
             ("window", "right"),
             ("buy", "left"),
@@ -1445,7 +1454,7 @@ class PreipoArbStrategy(Strategy):
         for asset in self.assets:
             row = rows.get(asset)
             if row is None:
-                table.add_row(asset, "FLAT", "N", "N", "-", "-", "-", "-", "-", "0", "0s", "-", "-", "waiting")
+                table.add_row(asset, "FLAT", "N", "N", "-", "-", "-", "-", "0", "0s", "-", "-", "waiting")
                 continue
             table.add_row(
                 row["asset"],
@@ -1456,7 +1465,6 @@ class PreipoArbStrategy(Strategy):
                 row["z"],
                 row["mean"],
                 row["std"],
-                row.get("source", "-"),
                 row["samples"],
                 row["window"],
                 row["buy"],

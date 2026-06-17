@@ -13,7 +13,14 @@ from rich.table import Table
 
 def load_snapshot(path: Path) -> dict:
     if not path.exists():
-        return {"rows": [], "market_tables": {}, "position_rows": [], "state_rows": [], "ts_ns": None}
+        return {
+            "rows": [],
+            "market_tables": {},
+            "position_rows": [],
+            "state_rows": [],
+            "ts_ns": None,
+            "beijing_time": "-",
+        }
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -30,12 +37,11 @@ def market_table(asset: str, rows: list[dict[str, str]]) -> Table:
         ("mean", "right"),
         ("std", "right"),
         ("z", "right"),
-        ("src", "left"),
         ("window", "right"),
     ):
         table.add_column(column, justify=justify, no_wrap=True)
     if not rows:
-        table.add_row("-", "-", "-", "-", "-", "-", "-", "-", "-", "-", "-", "-")
+        table.add_row("-", "-", "-", "-", "-", "-", "-", "-", "-", "-", "-")
         return table
     for row in rows:
         table.add_row(
@@ -49,7 +55,6 @@ def market_table(asset: str, rows: list[dict[str, str]]) -> Table:
             str(row.get("mean", "-")),
             str(row.get("std", "-")),
             str(row.get("z", "-")),
-            str(row.get("source", "-")),
             str(row.get("window", "-")),
         )
     return table
@@ -116,7 +121,8 @@ def state_table(rows: list[dict[str, str]]) -> Table:
 def build_view(payload: dict, path: Path) -> Group:
     market_tables = payload.get("market_tables") or {}
     assets = payload.get("assets") or sorted(market_tables)
-    parts = [Panel.fit(f"PREIPO Arbitrage Live - {path}", border_style="cyan")]
+    beijing_time = payload.get("beijing_time") or "-"
+    parts = [Panel.fit(f"PREIPO Arbitrage Live | 北京时间 {beijing_time} | {path}", border_style="cyan")]
     for asset in assets:
         parts.append(market_table(str(asset), market_tables.get(str(asset), [])))
     parts.append(positions_table(payload.get("position_rows") or []))
