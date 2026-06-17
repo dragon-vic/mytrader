@@ -16,6 +16,7 @@ from utils.config_loader import load_settings
 from utils.config_loader import market_dict
 from utils.config_loader import normalize_client_markets
 from utils.market_data import MarketDataStore
+from utils.report_writer import log_file_settings
 from utils.report_writer import prepare_report_dir
 from utils.report_writer import print_backtest_summary
 from utils.report_writer import write_backtest_result
@@ -55,6 +56,7 @@ def build_backtest_engine(settings: dict) -> BacktestEngine:
             logging=LoggingConfig(
                 log_level=settings["backtest"]["logging"]["log_level"],
                 bypass_logging=bool(settings["backtest"]["logging"]["bypass"]),
+                **log_file_settings(settings, "backtest"),
             ),
         ),
     )

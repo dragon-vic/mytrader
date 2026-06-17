@@ -21,6 +21,7 @@ from utils.arguments import NODE_STOP_TOPIC
 from utils.config_loader import load_settings
 from utils.config_loader import proxy_url
 from utils.instrument_factory import InstrumentFactory
+from utils.report_writer import log_file_settings
 from utils.polymarket_btc5m import up_down_instrument_windows
 from utils.report_writer import print_live_summary
 from utils.report_writer import TraderReportWriter
@@ -130,6 +131,7 @@ def build_live_node(settings: dict[str, Any]) -> TradingNode:
                 **logging["component_levels"],
                 settings["strategy"]["class"]: logging["strategy_log_level"],
             },
+            **log_file_settings(settings, "live"),
         ),
         data_engine=data_engine_config(settings),
         data_clients=data_clients,
@@ -158,7 +160,10 @@ def run_live_node(node: TradingNode) -> None:
     loop = node.get_event_loop()
 
     def wait_enter() -> None:
-        input()
+        try:
+            input()
+        except EOFError:
+            return
         loop.call_soon_threadsafe(lambda: stop_node(node, "回车"))
 
     if os.name == "nt" and sys.stdin.isatty():

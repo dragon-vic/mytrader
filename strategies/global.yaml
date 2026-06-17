@@ -10,6 +10,12 @@ cache:
 # NT logging 默认值；策略 set 只覆盖有差异的叶子。
 logging:
   log_level: INFO
+  log_level_file: INFO
+  log_file_name: node
+  log_file_format: null
+  log_file_max_size: null
+  log_file_max_backup_count: 5
+  clear_log_file: true
   strategy_log_level: INFO 
   log_colors: true
   component_levels:

@@ -1,0 +1,26 @@
+strategy:
+  name: bintest
+  params:
+    instrument_client: binance_futures
+
+logging:
+  strategy_log_level: INFO
+
+data:
+  clients:
+    binance_futures:
+      enabled: true
+      markets:
+        - symbol: BTC/USDT
+          timeframe: 1s
+
+exec:
+  engine:
+    reconciliation: false
+    reconciliation_scope: null
+
+  clients:
+    binance_futures:
+      enabled: false
+      markets: []
+

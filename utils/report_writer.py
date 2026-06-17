@@ -40,6 +40,20 @@ def run_reports_dir(settings: dict[str, Any], run_type: str) -> Path:
     return reports_root(settings) / f"{run_type}-{settings['project']['config_name']}"
 
 
+# 返回 NT LoggingConfig 需要的文件日志参数。
+def log_file_settings(settings: dict[str, Any], run_type: str) -> dict[str, Any]:
+    logging = settings["logging"]
+    return {
+        "log_level_file": logging["log_level_file"],
+        "log_directory": str(run_reports_dir(settings, run_type)),
+        "log_file_name": logging["log_file_name"],
+        "log_file_format": logging["log_file_format"],
+        "log_file_max_size": logging["log_file_max_size"],
+        "log_file_max_backup_count": logging["log_file_max_backup_count"],
+        "clear_log_file": bool(logging["clear_log_file"]),
+    }
+
+
 # 创建当前运行的报告目录；每次运行使用新目录，不再清理旧文件。
 def prepare_report_dir(settings: dict[str, Any], run_type: str) -> Path:
     root = reports_root(settings).resolve()
