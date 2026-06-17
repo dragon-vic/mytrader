@@ -9,6 +9,9 @@ strategy:
     exit_bps: "50"
     lookback_sec: 43200
     min_window_sec: 0
+    init_fetch_sec: 21600
+    init_fetch_timeout_sec: 180
+    init_blend_sec: 43200
     initial_mean_bps:
       OPENAI: 256.55
       ANTHROPIC: 128.24

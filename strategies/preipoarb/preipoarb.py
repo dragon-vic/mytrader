@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import sys
 import json
+import time
+import requests
 from threading import Lock
 from threading import Thread
 from threading import Event as ThreadEvent
@@ -128,6 +130,9 @@ class PreipoArbConfig(StrategyConfig, frozen=True):
     exit_bps: Decimal
     lookback_sec: float
     min_window_sec: float
+    init_fetch_sec: float
+    init_fetch_timeout_sec: float
+    init_blend_sec: float
     initial_mean_bps: dict[str, float]
     initial_std_bps: dict[str, float]
     min_spread_samples: int
@@ -166,6 +171,9 @@ class PreipoArbStrategy(Strategy):
         self.exit_bps = Decimal(str(config.exit_bps))
         self.lookback_ns = int(float(config.lookback_sec) * 1_000_000_000)
         self.min_window_ns = int(float(config.min_window_sec) * 1_000_000_000)
+        self.init_fetch_sec = float(config.init_fetch_sec)
+        self.init_fetch_timeout_sec = float(config.init_fetch_timeout_sec)
+        self.init_blend_ns = int(float(config.init_blend_sec) * 1_000_000_000)
         self.initial_mean_bps = {key.upper(): float(value) for key, value in config.initial_mean_bps.items()}
         self.initial_std_bps = {key.upper(): float(value) for key, value in config.initial_std_bps.items()}
         self.min_spread_samples = int(config.min_spread_samples)
@@ -207,10 +215,17 @@ class PreipoArbStrategy(Strategy):
                 raise RuntimeError("lookback_sec must be positive")
             if self.min_window_ns < 0:
                 raise RuntimeError("min_window_sec must be non-negative")
+            if self.init_fetch_sec <= 0:
+                raise RuntimeError("init_fetch_sec must be positive")
+            if self.init_fetch_timeout_sec <= 0:
+                raise RuntimeError("init_fetch_timeout_sec must be positive")
+            if self.init_blend_ns <= 0:
+                raise RuntimeError("init_blend_sec must be positive")
             if self.min_spread_samples <= 1:
                 raise RuntimeError("min_spread_samples must be greater than 1")
             if self.entry_z <= self.exit_z:
                 raise RuntimeError("entry_z must be greater than exit_z")
+            self._refresh_initial_stats()
             for asset in self.assets:
                 if asset not in self.initial_mean_bps:
                     raise RuntimeError(f"initial_mean_bps missing asset: {asset}")
@@ -235,6 +250,7 @@ class PreipoArbStrategy(Strategy):
             f"preipo_arb started assets={','.join(self.assets)} instruments={len(self.instruments)} "
             f"mode={self.spread_mode} one_sided={self.one_sided} "
             f"lookback={self.config.lookback_sec}s min_window={self.config.min_window_sec}s "
+            f"init_fetch={self.config.init_fetch_sec}s init_blend={self.config.init_blend_sec}s "
             f"entry_z={self.entry_z} exit_z={self.exit_z} initial_mean={self.initial_mean_bps} "
             f"initial_std={self.initial_std_bps} notional={self.notional} "
             f"snapshot_interval={self.config.snapshot_interval_sec}s snapshot_display={self.snapshot_display} "
@@ -310,6 +326,170 @@ class PreipoArbStrategy(Strategy):
     def _fee(self, instrument_id: InstrumentId) -> Decimal:
         return self.fee_bps[self._venue(instrument_id)]
 
+    def _refresh_initial_stats(self) -> None:
+        start_ms = int((time.time() - self.init_fetch_sec) * 1000)
+        end_ms = int(time.time() * 1000)
+        deadline = time.monotonic() + self.init_fetch_timeout_sec
+        rows = self._fetch_recent_trades(start_ms, end_ms, deadline)
+        stats = self._initial_stats_from_trades(rows)
+        for asset in self.assets:
+            values = stats.get(asset)
+            if values is None:
+                raise RuntimeError(f"failed to compute initial stats for {asset}")
+            mean, std, samples = values
+            if std <= 0:
+                raise RuntimeError(f"initial std must be positive for {asset}: samples={samples}")
+            self.initial_mean_bps[asset] = mean
+            self.initial_std_bps[asset] = std
+            self.log.info(f"initial_stats {asset} samples={samples} mean={mean:.2f}bps std={std:.2f}bps")
+
+    def _fetch_recent_trades(
+        self,
+        start_ms: int,
+        end_ms: int,
+        deadline: float,
+    ) -> list[tuple[int, str, InstrumentId, Decimal]]:
+        rows: list[tuple[int, str, InstrumentId, Decimal]] = []
+        for instrument_id in self.instruments:
+            venue = self._venue(instrument_id)
+            asset = self._asset(instrument_id)
+            if asset is None:
+                continue
+            if venue == "BINANCE":
+                rows.extend(self._fetch_binance_trades(asset, instrument_id, start_ms, end_ms, deadline))
+            elif venue == "OKX":
+                rows.extend(self._fetch_okx_trades(asset, instrument_id, start_ms, end_ms, deadline))
+            else:
+                self.log.warning(f"initial_stats_skip_venue {instrument_id} venue={venue}")
+        if not rows:
+            raise RuntimeError("no initial trade ticks fetched")
+        rows.sort(key=lambda item: item[0])
+        return rows
+
+    def _fetch_binance_trades(
+        self,
+        asset: str,
+        instrument_id: InstrumentId,
+        start_ms: int,
+        end_ms: int,
+        deadline: float,
+    ) -> list[tuple[int, str, InstrumentId, Decimal]]:
+        symbol = str(instrument_id.symbol).upper().replace("-PERP", "")
+        rows: list[tuple[int, str, InstrumentId, Decimal]] = []
+        next_ms = start_ms
+        while next_ms <= end_ms:
+            self._check_init_deadline(deadline)
+            payload = self._get_json(
+                "https://fapi.binance.com/fapi/v1/aggTrades",
+                {"symbol": symbol, "startTime": next_ms, "endTime": end_ms, "limit": 1000},
+            )
+            if not payload:
+                break
+            for item in payload:
+                ts_ms = int(item["T"])
+                rows.append((ts_ms, asset, instrument_id, Decimal(str(item["p"]))))
+            new_next = int(payload[-1]["T"]) + 1
+            if new_next <= next_ms:
+                break
+            next_ms = new_next
+            time.sleep(0.03)
+        self.log.info(f"initial_fetch {asset} {instrument_id} venue=BINANCE ticks={len(rows)}")
+        return rows
+
+    def _fetch_okx_trades(
+        self,
+        asset: str,
+        instrument_id: InstrumentId,
+        start_ms: int,
+        end_ms: int,
+        deadline: float,
+    ) -> list[tuple[int, str, InstrumentId, Decimal]]:
+        inst_id = str(instrument_id.symbol).upper()
+        rows: list[tuple[int, str, InstrumentId, Decimal]] = []
+        seen: set[str] = set()
+        after: str | None = None
+        while True:
+            self._check_init_deadline(deadline)
+            params = {"instId": inst_id, "limit": 100}
+            if after is not None:
+                params["after"] = after
+            payload = self._get_json("https://www.okx.com/api/v5/market/history-trades", params)
+            if payload.get("code") != "0":
+                raise RuntimeError(f"OKX history trades failed for {inst_id}: {payload}")
+            data = payload.get("data") or []
+            if not data:
+                break
+            oldest_ms = min(int(item["ts"]) for item in data)
+            for item in data:
+                trade_id = str(item["tradeId"])
+                ts_ms = int(item["ts"])
+                if ts_ms > end_ms or ts_ms < start_ms or trade_id in seen:
+                    continue
+                seen.add(trade_id)
+                rows.append((ts_ms, asset, instrument_id, Decimal(str(item["px"]))))
+            after = str(data[-1]["tradeId"])
+            if oldest_ms < start_ms:
+                break
+            time.sleep(0.08)
+        self.log.info(f"initial_fetch {asset} {instrument_id} venue=OKX ticks={len(rows)}")
+        return rows
+
+    def _get_json(self, url: str, params: dict[str, object]) -> object:
+        last_error: Exception | None = None
+        headers = {"User-Agent": "nt_quant_preipo_arb/1.0", "Connection": "close"}
+        for attempt in range(5):
+            try:
+                response = requests.get(url, params=params, headers=headers, timeout=15)
+                if response.status_code == 200:
+                    return response.json()
+                last_error = RuntimeError(f"HTTP {response.status_code}: {response.text[:200]}")
+            except Exception as exc:
+                last_error = exc
+            time.sleep(0.4 * (attempt + 1))
+        raise RuntimeError(f"historical tick request failed: {last_error}")
+
+    def _check_init_deadline(self, deadline: float) -> None:
+        if time.monotonic() > deadline:
+            raise RuntimeError("initial historical tick fetch timed out")
+
+    def _initial_stats_from_trades(
+        self,
+        rows: list[tuple[int, str, InstrumentId, Decimal]],
+    ) -> dict[str, tuple[float, float, int]]:
+        last: dict[str, dict[InstrumentId, tuple[int, Decimal]]] = {asset: {} for asset in self.assets}
+        values: dict[str, list[float]] = {asset: [] for asset in self.assets}
+        max_age_ms = int(self.max_quote_age_ns / 1_000_000)
+        for ts_ms, asset, instrument_id, price in rows:
+            last[asset][instrument_id] = (ts_ms, price)
+            fresh = [
+                (inst_id, px)
+                for inst_id, (last_ms, px) in last[asset].items()
+                if ts_ms - last_ms <= max_age_ms
+            ]
+            if len(fresh) < 2:
+                continue
+            best_edge: Decimal | None = None
+            for buy_id, buy_px in fresh:
+                for sell_id, sell_px in fresh:
+                    if buy_id == sell_id:
+                        continue
+                    edge = self._net_bps(ArbLeg(buy_id, buy_px), ArbLeg(sell_id, sell_px))
+                    if self.one_sided and edge <= 0:
+                        continue
+                    if best_edge is None or edge > best_edge:
+                        best_edge = edge
+            if best_edge is not None:
+                values[asset].append(float(best_edge))
+
+        stats: dict[str, tuple[float, float, int]] = {}
+        for asset, samples in values.items():
+            if len(samples) < 2:
+                continue
+            mean = sum(samples) / len(samples)
+            variance = max(sum((value - mean) ** 2 for value in samples) / len(samples), 0.0)
+            stats[asset] = (mean, sqrt(variance), len(samples))
+        return stats
+
     def _valid_quotes(self, asset: str) -> tuple[list[ArbLeg], list[ArbLeg]]:
         bids: list[ArbLeg] = []
         asks: list[ArbLeg] = []
@@ -383,12 +563,21 @@ class PreipoArbStrategy(Strategy):
         std: float,
         window_sec: float,
     ) -> tuple[float, float] | None:
-        if samples >= self.min_spread_samples and window_sec * 1_000_000_000 >= self.min_window_ns and std > 0:
-            return mean, std
         initial_std = self.initial_std_bps.get(asset, 0.0)
         if initial_std <= 0:
             return None
-        return self.initial_mean_bps[asset], initial_std
+        initial_mean = self.initial_mean_bps[asset]
+        if samples < 2 or std <= 0:
+            return initial_mean, initial_std
+        if window_sec * 1_000_000_000 < self.min_window_ns:
+            return initial_mean, initial_std
+        weight = min(max(window_sec * 1_000_000_000 / self.init_blend_ns, 0.0), 1.0)
+        blended_mean = initial_mean * (1.0 - weight) + mean * weight
+        blended_var = (
+            (1.0 - weight) * (initial_std * initial_std + (initial_mean - blended_mean) ** 2)
+            + weight * (std * std + (mean - blended_mean) ** 2)
+        )
+        return blended_mean, sqrt(max(blended_var, 0.0))
 
     def _maybe_open(self, asset: str, states: dict[tuple[InstrumentId, InstrumentId], SpreadState]) -> None:
         if self.arb_state != FLAT or self.active_asset is not None:
@@ -816,7 +1005,8 @@ class PreipoArbStrategy(Strategy):
                 std = state.std_bps
                 z_score = state.z_score
                 window_sec = state.window_sec
-                source = "rolling"
+                weight = min(max(window_sec * 1_000_000_000 / self.init_blend_ns, 0.0), 1.0)
+                source = "rolling" if weight >= 1.0 else f"blend {weight:.0%}"
             quotes = self._quote_text(asset)
             rows[asset] = {
                 "asset": asset,
