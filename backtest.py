@@ -21,8 +21,6 @@ from utils.report_writer import print_backtest_summary
 from utils.report_writer import write_backtest_result
 from utils.report_writer import write_trader_reports
 from utils.runtime_ids import claim_run
-from utils.runtime_ids import finalize_run_dir
-from utils.runtime_ids import release_run
 from utils.strategy_factory import build_strategy
 
 
@@ -110,5 +108,3 @@ def main(config_name: str) -> None:
     finally:
         if engine is not None:
             engine.dispose()
-        finalize_run_dir(settings)
-        release_run(settings)

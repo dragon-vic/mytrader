@@ -25,8 +25,6 @@ from utils.polymarket_btc5m import up_down_instrument_windows
 from utils.report_writer import print_live_summary
 from utils.report_writer import TraderReportWriter
 from utils.runtime_ids import claim_run
-from utils.runtime_ids import finalize_run_dir
-from utils.runtime_ids import release_run
 from utils.strategy_factory import build_strategy
 
 
@@ -180,6 +178,4 @@ def main(config_name: str, mode: str | None = None) -> None:
     finally:
         report_writer.write_final_reports(node.trader)
         node.dispose()
-        finalize_run_dir(settings)
         print_live_summary(settings)
-        release_run(settings)

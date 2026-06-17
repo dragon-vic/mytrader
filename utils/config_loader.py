@@ -9,6 +9,8 @@ import yaml
 from utils.arguments import DEFAULT_CONFIG_NAME
 
 ROOT = Path(__file__).resolve().parent.parent
+STRATEGIES_DIR = ROOT / "strategies"
+GLOBAL_CONFIG_PATH = STRATEGIES_DIR / "global.yaml"
 
 CLIENTS = {
     "binance_spot": {
@@ -82,16 +84,44 @@ CLIENTS = {
 }
 
 
+# 返回所有策略目录下的具名配置。
+def config_paths() -> list[Path]:
+    return sorted(
+        path
+        for path in STRATEGIES_DIR.glob("*/*.yaml")
+        if path.name != "global.yaml"
+    )
+
+
+# 返回交互入口可选择的配置名。
+def config_names() -> list[str]:
+    return sorted(path.stem for path in config_paths())
+
+
+# 在策略目录内查找一个具名 set。
+def config_path(config_name: str) -> Path:
+    matches = [path for path in config_paths() if path.stem == config_name]
+    if not matches:
+        raise FileNotFoundError(f"Config not found under strategies/*/: {config_name}.yaml")
+    if len(matches) > 1:
+        values = ", ".join(str(path.relative_to(ROOT)) for path in matches)
+        raise ValueError(f"Duplicate config name {config_name}: {values}")
+    return matches[0]
+
+
 # 加载一个具名 set，让每个策略保留自己的市场和参数。
 def load_settings(config_name: str | None = None, mode: str | None = None) -> dict[str, Any]:
     name = config_name or DEFAULT_CONFIG_NAME
-    with (ROOT / "config" / "global.yaml").open("r", encoding="utf-8") as f:
+    path = config_path(name)
+    with GLOBAL_CONFIG_PATH.open("r", encoding="utf-8") as f:
         global_settings = yaml.safe_load(f)
-    with (ROOT / "config" / f"{name}.yaml").open("r", encoding="utf-8") as f:
+    with path.open("r", encoding="utf-8") as f:
         strategy_settings = yaml.safe_load(f)
     settings = deep_merge(global_settings, strategy_settings)
     settings["mode"] = mode
     settings["project"]["config_name"] = name
+    settings["project"]["config_path"] = str(path)
+    settings["project"]["strategy_dir"] = str(path.parent)
     normalize_settings(settings, mode)
     return settings
 

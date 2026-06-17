@@ -90,18 +90,52 @@ config_names() {
   local file
   local name
 
-  for file in config/*.yaml; do
+  for file in strategies/*/*.yaml; do
     [ -e "$file" ] || continue
     name="$(basename "$file" .yaml)"
-    if [ "$name" != "global" ]; then
-      printf "%s\n" "$name"
-    fi
+    printf "%s\n" "$name"
   done | sort
+}
+
+config_path() {
+  local config_name="$1"
+  local matches=()
+
+  mapfile -t matches < <(find strategies -mindepth 2 -maxdepth 2 -type f -name "$config_name.yaml" | sort)
+  if [ "${#matches[@]}" -eq 0 ]; then
+    echo "找不到配置：$config_name" >&2
+    exit 1
+  fi
+  if [ "${#matches[@]}" -gt 1 ]; then
+    echo "配置名重复：$config_name" >&2
+    printf "%s\n" "${matches[@]}" >&2
+    exit 1
+  fi
+  printf "%s" "${matches[0]}"
+}
+
+strategy_dir() {
+  dirname "$(config_path "$1")"
+}
+
+strategy_name() {
+  local config_path
+  config_path="$(config_path "$1")"
+  awk '
+    /^[[:space:]]*name:[[:space:]]*/ {
+      value=$0
+      sub(/^[[:space:]]*name:[[:space:]]*/, "", value)
+      gsub(/["'\'']/, "", value)
+      print value
+      exit
+    }
+  ' "$config_path"
 }
 
 running_options() {
   local configs=()
   local config
+  local strategy
   local session
 
   command -v tmux >/dev/null 2>&1 || return 0
@@ -109,12 +143,29 @@ running_options() {
 
   while IFS= read -r session; do
     for config in "${configs[@]}"; do
-      if [ "$session" = "$config" ] || [[ "$session" == "$config"-* ]]; then
+      strategy="$(strategy_name "$config")"
+      if [ "$session" = "$strategy" ] || [[ "$session" == "$strategy"-* ]]; then
         printf "运行中：%s\n" "$session"
         break
       fi
     done
   done < <(tmux list-sessions -F "#{session_name}" 2>/dev/null | sort)
+}
+
+ensure_strategy_not_running() {
+  local config_name="$1"
+  local strategy
+  local session
+
+  command -v tmux >/dev/null 2>&1 || return 0
+  strategy="$(strategy_name "$config_name")"
+  while IFS= read -r session; do
+    if [[ "$session" == "$strategy"-* ]]; then
+      echo "策略已在运行：$session" >&2
+      echo "同一个策略默认只允许一个 node。请先 tmux attach -t $session 后停止旧进程。" >&2
+      exit 1
+    fi
+  done < <(tmux list-sessions -F "#{session_name}" 2>/dev/null || true)
 }
 
 mode_value() {
@@ -143,15 +194,18 @@ run_background() {
   local log_dir
   local log_path
   local pid
+  local strategy
 
   if ! command -v tmux >/dev/null 2>&1; then
     echo "后台运行需要 tmux，请先安装 tmux，或选择前台运行。" >&2
     exit 1
   fi
 
-  session_name="${config_name}-$(date +%Y%m%d%H%M%S)"
+  ensure_strategy_not_running "$config_name"
+  strategy="$(strategy_name "$config_name")"
+  session_name="${strategy}-$(date +%Y%m%d%H%M%S)"
 
-  log_dir="$PROJECT_DIR/reports/tmux"
+  log_dir="$PROJECT_DIR/$(strategy_dir "$config_name")/report/tmux"
   log_path="$log_dir/$session_name.log"
   mkdir -p "$log_dir"
 

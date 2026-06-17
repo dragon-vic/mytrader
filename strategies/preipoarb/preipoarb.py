@@ -7,6 +7,7 @@ import requests
 from threading import Lock
 from threading import Thread
 from threading import Event as ThreadEvent
+from collections import defaultdict
 from collections import deque
 from dataclasses import dataclass
 from decimal import Decimal
@@ -18,6 +19,7 @@ from rich.live import Live
 from rich.table import Table
 
 from nautilus_trader.config import StrategyConfig
+from nautilus_trader.model.currencies import USDT
 from nautilus_trader.model.data import QuoteTick
 from nautilus_trader.model.enums import OrderSide
 from nautilus_trader.model.enums import TimeInForce
@@ -30,11 +32,14 @@ from nautilus_trader.model.objects import Quantity
 from nautilus_trader.model.orders import MarketOrder
 from nautilus_trader.trading.strategy import Strategy
 
+from utils.arguments import NODE_STOP_TOPIC
+
 
 FLAT = "FLAT"
 OPENING = "OPENING"
 PAIRED = "PAIRED"
 CLOSING = "CLOSING"
+STOPPING = "STOPPING"
 OPEN = "OPEN"
 CLOSE = "CLOSE"
 INIT_TICK_MATCH_MS = 15_000
@@ -195,8 +200,11 @@ class PreipoArbStrategy(Strategy):
         self.windows: dict[tuple[str, InstrumentId, InstrumentId], SpreadWindow] = {}
         self.arb_state = FLAT
         self.active_asset: str | None = None
+        self.stopped = False
+        self.stop_requested = False
         self.positions: dict[str, ArbPos] = {}
         self.pending: dict[str, PendingBatch] = {}
+        self.failed_assets: set[str] = set()
         self.order_asset: dict[str, str] = {}
         self.last_close_ns: dict[str, int] = {}
         self.last_snapshot_ns = 0
@@ -244,6 +252,9 @@ class PreipoArbStrategy(Strategy):
             raise RuntimeError("snapshot_interval_sec must be non-negative")
         if self.snapshot_display not in {"rich", "log", "file", "off"}:
             raise RuntimeError("snapshot_display must be rich, log, file, or off")
+        self._check_start_account_state()
+        if self.stopped:
+            return
         for instrument_id in self.instruments:
             self.subscribe_quote_ticks(instrument_id)
         self._start_snapshot_display()
@@ -260,6 +271,8 @@ class PreipoArbStrategy(Strategy):
         )
 
     def on_quote_tick(self, tick: QuoteTick) -> None:
+        if self.stopped:
+            return
         self.quotes[tick.instrument_id] = tick
         asset = self._asset(tick.instrument_id)
         if asset is None:
@@ -289,6 +302,10 @@ class PreipoArbStrategy(Strategy):
             f"fill {asset} action={batch.action} order={order_id} "
             f"{leg.instrument_id} filled={leg.filled_qty}/{leg.target_qty}",
         )
+        if asset in self.failed_assets:
+            if batch.action == OPEN:
+                self._try_submit_emergency(leg.instrument_id, self._opposite(leg.side), Decimal(str(event.last_qty)))
+            return
         if not self._batch_done(batch):
             return
         if batch.action == OPEN:
@@ -579,6 +596,8 @@ class PreipoArbStrategy(Strategy):
         return blended_mean, sqrt(max(blended_var, 0.0))
 
     def _maybe_open(self, asset: str, states: dict[tuple[InstrumentId, InstrumentId], SpreadState]) -> None:
+        if self.stopped:
+            return
         if self.arb_state != FLAT or self.active_asset is not None:
             return
         last_close_ns = self.last_close_ns.get(asset)
@@ -604,6 +623,8 @@ class PreipoArbStrategy(Strategy):
         return not self.one_sided or state.edge_bps > 0
 
     def _maybe_open_threshold(self, asset: str, now_ns: int) -> None:
+        if self.stopped:
+            return
         if self.arb_state != FLAT or self.active_asset is not None:
             return
         best = self._best(asset)
@@ -753,9 +774,12 @@ class PreipoArbStrategy(Strategy):
         now_ns: int,
         buy_qty: Decimal | None = None,
         sell_qty: Decimal | None = None,
-    ) -> PendingBatch:
+    ) -> PendingBatch | None:
         buy_order, buy_target = self._make_order(buy_id, buy_side, buy_px, buy_qty)
         sell_order, sell_target = self._make_order(sell_id, sell_side, sell_px, sell_qty)
+        if action == OPEN and not self._check_open_balances(asset, buy_id, buy_px, buy_target, sell_id, sell_px, sell_target):
+            self._fail_before_submit(asset, "insufficient USDT for opening pair")
+            return None
         buy_order_id = str(buy_order.client_order_id)
         sell_order_id = str(sell_order.client_order_id)
         self.order_asset[buy_order_id] = asset
@@ -791,14 +815,125 @@ class PreipoArbStrategy(Strategy):
             self.submit_order(sell_order)
         except Exception as exc:
             self.log.error(f"submit_batch_failed {asset} action={action} error={exc}")
-            self._emergency_flatten(batch)
-            self.positions.pop(asset, None)
-            self.last_close_ns[asset] = self.clock.timestamp_ns()
-            self.arb_state = FLAT
-            self.active_asset = None
-            self._clear_pending(batch)
-            raise
+            self._fail_batch(batch, f"submit exception: {exc}")
         return batch
+
+    # 启动时确认没有遗留持仓，并且每个执行账户至少够开一条腿。
+    def _check_start_account_state(self) -> None:
+        open_positions = []
+        for instrument_id in self.instruments:
+            try:
+                open_positions.extend(self.cache.positions_open(instrument_id=instrument_id))
+            except TypeError:
+                open_positions.extend(
+                    position
+                    for position in self.cache.positions_open()
+                    if position.instrument_id == instrument_id
+                )
+        if open_positions:
+            details = ", ".join(str(position) for position in open_positions)
+            self.log.error(f"start_check_failed open_positions={details}")
+            self._request_stop("preipo 启动检查发现已有持仓")
+            return
+
+        accounts = list(self.cache.accounts())
+        if not accounts:
+            self.log.error("start_check_failed accounts=0")
+            self._request_stop("preipo 启动检查没有账户数据")
+            return
+
+        for venue in sorted({self._venue(instrument_id) for instrument_id in self.instruments}):
+            account = self._account_for_venue(venue)
+            if account is None:
+                self.log.error(f"start_check_failed venue={venue} account=missing")
+                self._request_stop(f"preipo 启动检查缺少 {venue} 账户")
+                return
+            free = self._free_usdt(account)
+            if free < self.notional:
+                self.log.error(
+                    f"start_check_failed venue={venue} account={account.id} free_usdt={free} required={self.notional}",
+                )
+                self._request_stop(f"preipo 启动检查 {venue} USDT 不足")
+                return
+
+    # 开仓前按两条腿所在账户合并检查可用 USDT。
+    def _check_open_balances(
+        self,
+        asset: str,
+        buy_id: InstrumentId,
+        buy_px: Decimal,
+        buy_qty: Decimal,
+        sell_id: InstrumentId,
+        sell_px: Decimal,
+        sell_qty: Decimal,
+    ) -> bool:
+        required: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+        accounts = {}
+        for instrument_id, price, qty in (
+            (buy_id, buy_px, buy_qty),
+            (sell_id, sell_px, sell_qty),
+        ):
+            venue = self._venue(instrument_id)
+            account = self._account_for_venue(venue)
+            if account is None:
+                self.log.error(f"open_check_failed {asset} venue={venue} account=missing")
+                return False
+            account_id = str(account.id)
+            accounts[account_id] = account
+            fee_buffer = self._fee(instrument_id) / Decimal("10000")
+            slippage_buffer = self.slippage_bps / Decimal("10000")
+            required[account_id] += price * qty * (Decimal("1") + fee_buffer + slippage_buffer)
+
+        ok = True
+        for account_id, need in required.items():
+            free = self._free_usdt(accounts[account_id])
+            if free < need:
+                self.log.error(f"open_check_failed {asset} account={account_id} free_usdt={free} required={need}")
+                ok = False
+            else:
+                self.log.info(f"open_check_ok {asset} account={account_id} free_usdt={free} required={need}")
+        return ok
+
+    # 按 Instrument venue 匹配 NT 账户。
+    def _account_for_venue(self, venue: str):
+        venue_text = venue.upper()
+        for account in self.cache.accounts():
+            if str(account.id).upper().startswith(venue_text):
+                return account
+        return None
+
+    # 从账户对象读取 USDT 可用余额，兼容 cash/margin 账户暴露方式差异。
+    def _free_usdt(self, account) -> Decimal:
+        money = None
+        if hasattr(account, "balance_free"):
+            try:
+                money = account.balance_free(USDT)
+            except Exception:
+                money = None
+        if money is None and hasattr(account, "balances_free"):
+            try:
+                balances = account.balances_free()
+            except Exception:
+                balances = {}
+            money = balances.get(USDT)
+            if money is None:
+                for currency, value in balances.items():
+                    if str(currency) == "USDT":
+                        money = value
+                        break
+        if money is None:
+            return Decimal("0")
+        if hasattr(money, "as_decimal"):
+            return Decimal(str(money.as_decimal()))
+        return Decimal(str(money).replace("_", "").split()[0])
+
+    # 下单前检查失败时，不提交订单，直接停止。
+    def _fail_before_submit(self, asset: str, reason: str) -> None:
+        self.log.error(f"strategy_stop {asset} reason={reason}")
+        self.last_close_ns[asset] = self.clock.timestamp_ns()
+        self.arb_state = STOPPING
+        self.active_asset = asset
+        self._request_stop(reason)
 
     def _make_order(
         self,
@@ -905,13 +1040,30 @@ class PreipoArbStrategy(Strategy):
         if batch is None:
             self.order_asset.pop(order_id, None)
             return
+        if asset in self.failed_assets:
+            self.log.error(f"order_failed_after_stop {asset} action={batch.action} order={order_id} reason={reason}")
+            return
         self.log.error(f"order_failed {asset} action={batch.action} order={order_id} reason={reason}")
+        self._fail_batch(batch, reason)
+
+    # 任一腿失败后只做平仓和停机，不再回到 FLAT 继续开仓。
+    def _fail_batch(self, batch: PendingBatch, reason: str) -> None:
+        self.failed_assets.add(batch.asset)
         self._emergency_flatten(batch)
-        self.positions.pop(asset, None)
-        self.last_close_ns[asset] = self.clock.timestamp_ns()
-        self.arb_state = FLAT
-        self.active_asset = None
-        self._clear_pending(batch)
+        self.positions.pop(batch.asset, None)
+        self.last_close_ns[batch.asset] = self.clock.timestamp_ns()
+        self.arb_state = STOPPING
+        self.active_asset = batch.asset
+        self._request_stop(f"preipo order failed: {reason}")
+
+    # 请求 live 入口停止整个 node，保证 finally 仍能写报告。
+    def _request_stop(self, reason: str) -> None:
+        self.stopped = True
+        if self.stop_requested:
+            return
+        self.stop_requested = True
+        self.log.error(f"strategy_stop reason={reason}")
+        self.msgbus.publish(NODE_STOP_TOPIC, {"source": "preipo_arb", "reason": reason})
 
     def _emergency_flatten(self, batch: PendingBatch) -> None:
         if self.config.dry_run:
@@ -919,13 +1071,20 @@ class PreipoArbStrategy(Strategy):
         if batch.action == OPEN:
             for leg in batch.legs.values():
                 if leg.filled_qty > 0:
-                    self._submit_emergency(leg.instrument_id, self._opposite(leg.side), leg.filled_qty)
+                    self._try_submit_emergency(leg.instrument_id, self._opposite(leg.side), leg.filled_qty)
             return
 
         for leg in batch.legs.values():
             remaining = leg.target_qty - leg.filled_qty
             if remaining > 0:
-                self._submit_emergency(leg.instrument_id, leg.side, remaining)
+                self._try_submit_emergency(leg.instrument_id, leg.side, remaining)
+
+    # 应急平仓失败只能记录，不能让策略回到可开仓状态。
+    def _try_submit_emergency(self, instrument_id: InstrumentId, side: OrderSide, qty: Decimal) -> None:
+        try:
+            self._submit_emergency(instrument_id, side, qty)
+        except Exception as exc:
+            self.log.error(f"emergency_flatten_failed {instrument_id} side={side} qty={qty} error={exc}")
 
     def _submit_emergency(self, instrument_id: InstrumentId, side: OrderSide, qty: Decimal) -> None:
         instrument = self.cache.instrument(instrument_id)

@@ -227,7 +227,7 @@ actors:
 # 报告输出。
 reports:
   enabled: true
-  root: reports
+  root: report
 
 # 项目路径。
 project:

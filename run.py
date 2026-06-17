@@ -2,17 +2,12 @@ from __future__ import annotations
 
 import os
 import sys
-from pathlib import Path
 
 import backtest
 import live
 from utils.arguments import MODE_OPTIONS
 from utils.arguments import RUN_MODES
-
-
-def config_names() -> list[str]:
-    config_dir = Path(__file__).resolve().parent / "config"
-    return sorted(path.stem for path in config_dir.glob("*.yaml") if path.stem != "global")
+from utils.config_loader import config_names
 
 
 def clear_screen() -> None:

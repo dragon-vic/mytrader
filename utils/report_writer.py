@@ -15,29 +15,36 @@ from utils.arguments import POSITIONS_FILE
 from utils.arguments import REPORT_COLUMNS
 from utils.arguments import REPORT_FILES
 from utils.arguments import SUMMARY_FILE
-from utils.config_loader import ROOT
 from utils.report_labels import to_chinese_columns
 
 
 LOCAL_TZ = ZoneInfo("Asia/Shanghai")
 
 
+# 返回当前策略自己的报告根目录。
+def reports_root(settings: dict[str, Any]) -> Path:
+    root = Path(settings["reports"]["root"])
+    if root.is_absolute():
+        return root
+    return Path(settings["project"]["strategy_dir"]) / root
+
+
 # 返回当前运行的报告目录。
 def run_reports_dir(settings: dict[str, Any], run_type: str) -> Path:
     report_dir_name = settings.get("runtime", {}).get("report_dir_name")
     if report_dir_name:
-        return ROOT / settings["reports"]["root"] / report_dir_name
+        return reports_root(settings) / report_dir_name
     run_name = settings.get("runtime", {}).get("run_name")
     if run_name:
-        return ROOT / settings["reports"]["root"] / run_name
-    return ROOT / settings["reports"]["root"] / f"{settings['project']['config_name']}-{run_type}"
+        return reports_root(settings) / run_name
+    return reports_root(settings) / f"{run_type}-{settings['project']['config_name']}"
 
 
 # 创建当前运行的报告目录；每次运行使用新目录，不再清理旧文件。
 def prepare_report_dir(settings: dict[str, Any], run_type: str) -> Path:
-    reports_root = (ROOT / settings["reports"]["root"]).resolve()
+    root = reports_root(settings).resolve()
     output_dir = run_reports_dir(settings, run_type).resolve()
-    output_dir.relative_to(reports_root)
+    output_dir.relative_to(root)
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
 
