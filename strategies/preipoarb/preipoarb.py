@@ -147,6 +147,7 @@ class PreipoArbConfig(StrategyConfig, frozen=True):
     initial_std_bps: dict[str, float]
     min_spread_samples: int
     entry_z: Decimal
+    entry_z_step: Decimal
     exit_z: Decimal
     min_entry_bps: Decimal
     trade_notional: Decimal
@@ -188,6 +189,7 @@ class PreipoArbStrategy(Strategy):
         self.initial_std_bps = {key.upper(): float(value) for key, value in config.initial_std_bps.items()}
         self.min_spread_samples = int(config.min_spread_samples)
         self.entry_z = float(config.entry_z)
+        self.entry_z_step = float(config.entry_z_step)
         self.exit_z = float(config.exit_z)
         self.min_entry_bps = Decimal(str(config.min_entry_bps))
         self.notional = Decimal(str(config.trade_notional))
@@ -206,7 +208,7 @@ class PreipoArbStrategy(Strategy):
         self.active_asset: str | None = None
         self.stopped = False
         self.stop_requested = False
-        self.positions: dict[str, ArbPos] = {}
+        self.positions: dict[str, list[ArbPos]] = {}
         self.pending: dict[str, PendingBatch] = {}
         self.failed_assets: set[str] = set()
         self.order_asset: dict[str, str] = {}
@@ -238,6 +240,8 @@ class PreipoArbStrategy(Strategy):
                 raise RuntimeError("min_spread_samples must be greater than 1")
             if self.entry_z <= self.exit_z:
                 raise RuntimeError("entry_z must be greater than exit_z")
+            if self.entry_z_step <= 0:
+                raise RuntimeError("entry_z_step must be positive")
             self._refresh_initial_stats()
             for asset in self.assets:
                 if asset not in self.initial_mean_bps:
@@ -267,7 +271,7 @@ class PreipoArbStrategy(Strategy):
             f"mode={self.spread_mode} one_sided={self.one_sided} "
             f"lookback={self.config.lookback_sec}s min_window={self.config.min_window_sec}s "
             f"init_fetch={self.config.init_fetch_sec}s init_blend={self.config.init_blend_sec}s "
-            f"entry_z={self.entry_z} exit_z={self.exit_z} initial_mean={self.initial_mean_bps} "
+            f"entry_z={self.entry_z} entry_z_step={self.entry_z_step} exit_z={self.exit_z} initial_mean={self.initial_mean_bps} "
             f"initial_std={self.initial_std_bps} notional={self.notional} "
             f"snapshot_interval={self.config.snapshot_interval_sec}s snapshot_display={self.snapshot_display} "
             f"snapshot_path={self.snapshot_path} "
@@ -288,9 +292,11 @@ class PreipoArbStrategy(Strategy):
         if self.arb_state in {OPENING, CLOSING}:
             return
         if self.arb_state == PAIRED:
-            self._maybe_close(asset, states)
-        else:
+            if self._maybe_close(asset, states):
+                return
             self._maybe_open(asset, states)
+            return
+        self._maybe_open(asset, states)
 
     def on_order_filled(self, event: OrderFilled) -> None:
         order_id = str(event.client_order_id)
@@ -328,6 +334,7 @@ class PreipoArbStrategy(Strategy):
         self._handle_order_failed(str(event.client_order_id), "expired")
 
     def on_stop(self) -> None:
+        self._flatten_on_stop()
         self._stop_snapshot_display()
         for instrument_id in self.instruments:
             self.unsubscribe_quote_ticks(instrument_id)
@@ -603,25 +610,47 @@ class PreipoArbStrategy(Strategy):
     def _maybe_open(self, asset: str, states: dict[tuple[InstrumentId, InstrumentId], SpreadState]) -> None:
         if self.stopped:
             return
-        if self.arb_state != FLAT or self.active_asset is not None:
+        if self.arb_state not in {FLAT, PAIRED}:
+            return
+        if self.active_asset is not None and self.active_asset != asset:
             return
         last_close_ns = self.last_close_ns.get(asset)
         now_ns = self.clock.timestamp_ns()
-        if last_close_ns is not None and now_ns - last_close_ns < self.cooldown_ns:
+        if not self.positions.get(asset) and last_close_ns is not None and now_ns - last_close_ns < self.cooldown_ns:
             return
 
         if self.spread_mode == "threshold":
             self._maybe_open_threshold(asset, now_ns)
             return
 
-        candidates = [state for state in states.values() if self._can_open(state)]
+        threshold = self._next_entry_z(asset)
+        candidates = [
+            state
+            for state in states.values()
+            if self._can_open(state, threshold) and self._same_route(asset, state)
+        ]
         if not candidates:
             return
         state = max(candidates, key=lambda item: item.z_score)
+        if self.positions.get(asset):
+            self.log.info(
+                f"add_signal {asset} next_z={threshold:.2f} lots={len(self.positions[asset])} "
+                f"z={state.z_score:.2f} buy={state.buy.instrument_id} sell={state.sell.instrument_id}",
+            )
         self._open_pair(asset, state.buy, state.sell, state.edge_bps, state.mean_bps, state.z_score, now_ns)
 
-    def _can_open(self, state: SpreadState) -> bool:
-        if state.z_score < self.entry_z:
+    def _next_entry_z(self, asset: str) -> float:
+        return self.entry_z + len(self.positions.get(asset, [])) * self.entry_z_step
+
+    def _same_route(self, asset: str, state: SpreadState) -> bool:
+        lots = self.positions.get(asset)
+        if not lots:
+            return True
+        first = lots[0]
+        return state.buy.instrument_id == first.buy_id and state.sell.instrument_id == first.sell_id
+
+    def _can_open(self, state: SpreadState, threshold: float) -> bool:
+        if state.z_score < threshold:
             return False
         if state.edge_bps < self.min_entry_bps:
             return False
@@ -662,7 +691,7 @@ class PreipoArbStrategy(Strategy):
         if self.config.dry_run:
             self.arb_state = OPENING
             self.active_asset = asset
-            self.positions[asset] = ArbPos(
+            self.positions.setdefault(asset, []).append(ArbPos(
                 buy_id=buy.instrument_id,
                 sell_id=sell.instrument_id,
                 buy_px=buy.price,
@@ -673,10 +702,14 @@ class PreipoArbStrategy(Strategy):
                 mean_bps=mean_bps,
                 z_score=z_score,
                 opened_ns=now_ns,
-            )
+            ))
             self.arb_state = PAIRED
             self.active_asset = asset
-            self.log.info(f"state {asset} {OPENING}->{PAIRED} dry_run qty={qty}")
+            self.log.info(
+                f"state {asset} {OPENING}->{PAIRED} dry_run qty={qty} "
+                f"lots={len(self.positions[asset])} next_z={self._next_entry_z(asset):.2f}",
+            )
+            self._log_next_notional(asset)
             return
 
         self._submit_batch(
@@ -696,24 +729,26 @@ class PreipoArbStrategy(Strategy):
             sell_qty=qty,
         )
 
-    def _maybe_close(self, asset: str, states: dict[tuple[InstrumentId, InstrumentId], SpreadState]) -> None:
+    def _maybe_close(self, asset: str, states: dict[tuple[InstrumentId, InstrumentId], SpreadState]) -> bool:
         if self.arb_state != PAIRED or self.active_asset != asset:
-            return
-        pos = self.positions.get(asset)
-        if pos is None:
+            return False
+        lots = self.positions.get(asset, [])
+        if not lots:
             self.log.error(f"state_error {asset} state={self.arb_state} missing_position")
             self.arb_state = FLAT
             self.active_asset = None
-            return
+            return False
+        pos = lots[0]
         buy_quote = self.quotes.get(pos.buy_id)
         sell_quote = self.quotes.get(pos.sell_id)
         if buy_quote is None or sell_quote is None:
-            return
+            return False
         now_ns = self.clock.timestamp_ns()
-        age_ns = now_ns - pos.opened_ns
-        expired = age_ns >= self.max_hold_ns
-        if age_ns < self.min_hold_ns and not expired:
-            return
+        oldest_ns = min(lot.opened_ns for lot in lots)
+        newest_ns = max(lot.opened_ns for lot in lots)
+        expired = now_ns - oldest_ns >= self.max_hold_ns
+        if now_ns - newest_ns < self.min_hold_ns and not expired:
+            return False
 
         close_buy = ArbLeg(pos.sell_id, Decimal(str(sell_quote.ask_price)))
         close_sell = ArbLeg(pos.buy_id, Decimal(str(buy_quote.bid_price)))
@@ -726,16 +761,19 @@ class PreipoArbStrategy(Strategy):
         else:
             state = states.get((pos.buy_id, pos.sell_id))
             if state is None and not expired:
-                return
+                return False
             z_score = state.z_score if state is not None else float("nan")
             should_close = z_score <= self.exit_z or expired
             signal = f"edge_z={z_score:.2f} close_edge={close_edge:.2f}bps"
 
         if not should_close:
-            return
+            return False
+        buy_qty = sum((lot.buy_qty for lot in lots), Decimal("0"))
+        sell_qty = sum((lot.sell_qty for lot in lots), Decimal("0"))
         self.log.info(
-            f"close_signal {asset} {signal} expired={expired} "
-            f"sell_long={pos.buy_id}@{close_sell.price} buy_short={pos.sell_id}@{close_buy.price}",
+            f"close_signal {asset} {signal} lots={len(lots)} expired={expired} "
+            f"sell_long={pos.buy_id}@{close_sell.price} qty={buy_qty} "
+            f"buy_short={pos.sell_id}@{close_buy.price} qty={sell_qty}",
         )
         if self.config.dry_run:
             self.arb_state = CLOSING
@@ -744,7 +782,7 @@ class PreipoArbStrategy(Strategy):
             self.arb_state = FLAT
             self.active_asset = None
             self.log.info(f"state {asset} {CLOSING}->{FLAT} dry_run")
-            return
+            return True
 
         self._submit_batch(
             asset=asset,
@@ -759,9 +797,10 @@ class PreipoArbStrategy(Strategy):
             mean_bps=pos.mean_bps,
             z_score=z_score,
             now_ns=now_ns,
-            buy_qty=pos.buy_qty,
-            sell_qty=pos.sell_qty,
+            buy_qty=buy_qty,
+            sell_qty=sell_qty,
         )
+        return True
 
     def _submit_batch(
         self,
@@ -899,6 +938,25 @@ class PreipoArbStrategy(Strategy):
                 self.log.info(f"open_check_ok {asset} account={account_id} free_usdt={free} required={need}")
         return ok
 
+    # 每次状态变化后记录是否还有足够 USDT 支持下一次开仓。
+    def _log_next_notional(self, asset: str) -> None:
+        for venue in sorted({self._venue(instrument_id) for instrument_id in self.instruments if self._asset(instrument_id) == asset}):
+            account = self._account_for_venue(venue)
+            if account is None:
+                self.log.error(f"next_open_balance_blocked {asset} venue={venue} account=missing")
+                continue
+            free = self._free_usdt(account)
+            if free < self.notional:
+                self.log.warning(
+                    f"next_open_balance_blocked {asset} venue={venue} account={account.id} "
+                    f"free_usdt={free} required={self.notional}",
+                )
+            else:
+                self.log.info(
+                    f"next_open_balance_ok {asset} venue={venue} account={account.id} "
+                    f"free_usdt={free} required={self.notional}",
+                )
+
     # 按 Instrument venue 匹配 NT 账户。
     def _account_for_venue(self, venue: str):
         venue_text = venue.upper()
@@ -935,10 +993,32 @@ class PreipoArbStrategy(Strategy):
     # 下单前检查失败时，不提交订单，直接停止。
     def _fail_before_submit(self, asset: str, reason: str) -> None:
         self.log.error(f"strategy_stop {asset} reason={reason}")
+        self._flatten_positions(asset, "open_check_failed")
         self.last_close_ns[asset] = self.clock.timestamp_ns()
         self.arb_state = STOPPING
         self.active_asset = asset
         self._request_stop(reason)
+
+    # 策略停止时按内部持仓记录提交反向市价单。
+    def _flatten_on_stop(self) -> None:
+        if self.config.dry_run or not self.positions:
+            return
+        if any(batch.action == CLOSE for batch in self.pending.values()):
+            self.log.warning("stop_flatten_skipped reason=close_batch_pending")
+            return
+        for asset in list(self.positions):
+            self._flatten_positions(asset, "strategy_stop")
+
+    def _flatten_positions(self, asset: str, reason: str) -> None:
+        if self.config.dry_run:
+            return
+        lots = self.positions.get(asset, [])
+        if not lots:
+            return
+        self.log.warning(f"flatten_positions {asset} reason={reason} lots={len(lots)}")
+        for lot in lots:
+            self._try_submit_emergency(lot.buy_id, OrderSide.SELL, lot.buy_qty)
+            self._try_submit_emergency(lot.sell_id, OrderSide.BUY, lot.sell_qty)
 
     def _make_order(
         self,
@@ -1007,7 +1087,7 @@ class PreipoArbStrategy(Strategy):
     def _confirm_open(self, batch: PendingBatch) -> None:
         buy_qty = self._filled_qty(batch, batch.buy_id)
         sell_qty = self._filled_qty(batch, batch.sell_id)
-        self.positions[batch.asset] = ArbPos(
+        self.positions.setdefault(batch.asset, []).append(ArbPos(
             buy_id=batch.buy_id,
             sell_id=batch.sell_id,
             buy_px=batch.buy_px,
@@ -1018,13 +1098,17 @@ class PreipoArbStrategy(Strategy):
             mean_bps=batch.mean_bps,
             z_score=batch.z_score,
             opened_ns=batch.created_ns,
-        )
+        ))
         self.arb_state = PAIRED
         self.active_asset = batch.asset
         self._clear_pending(batch)
         if buy_qty != sell_qty:
             self.log.warning(f"filled_qty_mismatch {batch.asset} buy_qty={buy_qty} sell_qty={sell_qty}")
-        self.log.info(f"state {batch.asset} {OPENING}->{PAIRED} qty={buy_qty}")
+        self.log.info(
+            f"state {batch.asset} {OPENING}->{PAIRED} qty={buy_qty} "
+            f"lots={len(self.positions[batch.asset])} next_z={self._next_entry_z(batch.asset):.2f}",
+        )
+        self._log_next_notional(batch.asset)
 
     def _confirm_close(self, batch: PendingBatch) -> None:
         self.positions.pop(batch.asset, None)
@@ -1033,6 +1117,7 @@ class PreipoArbStrategy(Strategy):
         self.active_asset = None
         self._clear_pending(batch)
         self.log.info(f"state {batch.asset} {CLOSING}->{FLAT}")
+        self._log_next_notional(batch.asset)
 
     def _filled_qty(self, batch: PendingBatch, instrument_id: InstrumentId) -> Decimal:
         total = Decimal("0")
@@ -1058,6 +1143,8 @@ class PreipoArbStrategy(Strategy):
     # 任一腿失败后只做平仓和停机，不再回到 FLAT 继续开仓。
     def _fail_batch(self, batch: PendingBatch, reason: str) -> None:
         self.failed_assets.add(batch.asset)
+        if batch.action == OPEN:
+            self._flatten_positions(batch.asset, "order_failed")
         self._emergency_flatten(batch)
         self.positions.pop(batch.asset, None)
         self.last_close_ns[batch.asset] = self.clock.timestamp_ns()
@@ -1150,14 +1237,14 @@ class PreipoArbStrategy(Strategy):
             asset_state = self._asset_state(asset)
             active = "Y" if self.active_asset == asset else "N"
             pending = "Y" if asset in self.pending else "N"
-            position = self.positions.get(asset)
-            position_rows.append(self._position_snapshot(asset, position, current_states, now_ns))
+            lots = self.positions.get(asset, [])
+            position_rows.append(self._position_snapshot(asset, lots, current_states, now_ns))
             state_rows.append({
                 "asset": asset,
                 "state": asset_state,
                 "active": active,
                 "pending": pending,
-                "has_position": "Y" if position is not None else "N",
+                "has_position": str(len(lots)) if lots else "N",
             })
             if best is None:
                 rows[asset] = {
@@ -1289,11 +1376,11 @@ class PreipoArbStrategy(Strategy):
     def _position_snapshot(
         self,
         asset: str,
-        position: ArbPos | None,
+        lots: list[ArbPos],
         states: dict[tuple[InstrumentId, InstrumentId], SpreadState],
         now_ns: int,
     ) -> dict[str, str]:
-        if position is None:
+        if not lots:
             return {
                 "asset": asset,
                 "side": "-",
@@ -1306,6 +1393,7 @@ class PreipoArbStrategy(Strategy):
                 "current_z": "-",
                 "hold": "-",
             }
+        position = lots[0]
         buy_quote = self.quotes.get(position.buy_id)
         sell_quote = self.quotes.get(position.sell_id)
         close_edge = "-"
@@ -1317,15 +1405,19 @@ class PreipoArbStrategy(Strategy):
             state = states.get((position.buy_id, position.sell_id))
             if state is not None:
                 current_z = self._fmt(state.z_score)
-        hold_sec = max((now_ns - position.opened_ns) / 1_000_000_000, 0.0)
+        hold_sec = max((now_ns - min(lot.opened_ns for lot in lots)) / 1_000_000_000, 0.0)
+        buy_qty = sum((lot.buy_qty for lot in lots), Decimal("0"))
+        sell_qty = sum((lot.sell_qty for lot in lots), Decimal("0"))
+        entry_edge = sum((lot.edge_bps for lot in lots), Decimal("0")) / Decimal(len(lots))
+        entry_z = sum(lot.z_score for lot in lots) / len(lots)
         return {
             "asset": asset,
-            "side": f"buy_{self._venue(position.buy_id).lower()}_sell_{self._venue(position.sell_id).lower()}",
+            "side": f"lots={len(lots)} buy_{self._venue(position.buy_id).lower()}_sell_{self._venue(position.sell_id).lower()}",
             "entry_buy": f"{position.buy_id}@{self._fmt(position.buy_px)}",
             "entry_sell": f"{position.sell_id}@{self._fmt(position.sell_px)}",
-            "qty": f"{self._fmt(position.buy_qty)}/{self._fmt(position.sell_qty)}",
-            "entry_edge": self._fmt(position.edge_bps),
-            "entry_z": self._fmt(position.z_score),
+            "qty": f"{self._fmt(buy_qty)}/{self._fmt(sell_qty)}",
+            "entry_edge": self._fmt(entry_edge),
+            "entry_z": self._fmt(entry_z),
             "current_close_edge": close_edge,
             "current_z": current_z,
             "hold": self._fmt(hold_sec, "s"),

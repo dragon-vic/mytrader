@@ -20,6 +20,7 @@ strategy:
       ANTHROPIC: 45.83
     min_spread_samples: 600
     entry_z: "2.25"
+    entry_z_step: "1.0"
     exit_z: "-1.0"
     min_entry_bps: "150"
     trade_notional: "20"

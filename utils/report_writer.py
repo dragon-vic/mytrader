@@ -40,6 +40,21 @@ def run_reports_dir(settings: dict[str, Any], run_type: str) -> Path:
     return reports_root(settings) / f"{run_type}-{settings['project']['config_name']}"
 
 
+# 返回本次运行开始时间的 UTC ns，用于剔除 reconciliation 带入的旧订单。
+def runtime_start_ns(settings: dict[str, Any]) -> int | None:
+    started_at = settings.get("runtime", {}).get("started_at")
+    if not started_at:
+        return None
+    dt = datetime.strptime(str(started_at), "%Y%m%d%H%M%S").replace(tzinfo=LOCAL_TZ)
+    return pd.Timestamp(dt).value
+
+
+def report_time(values: pd.Series) -> pd.Series:
+    if pd.api.types.is_numeric_dtype(values):
+        return pd.to_datetime(values, unit="ns", utc=True, errors="coerce")
+    return pd.to_datetime(values, utc=True, errors="coerce")
+
+
 # 返回 NT LoggingConfig 需要的文件日志参数。
 def log_file_settings(settings: dict[str, Any], run_type: str) -> dict[str, Any]:
     logging = settings["logging"]
@@ -70,15 +85,20 @@ def report_columns(name: str, df: pd.DataFrame) -> pd.DataFrame:
 
 
 class TraderReportWriter:
-    def __init__(self, output_dir: Path, enabled: bool = True) -> None:
+    def __init__(self, output_dir: Path, enabled: bool = True, run_start_ns: int | None = None) -> None:
         self.output_dir = output_dir
         self.enabled = enabled
+        self.run_start_ns = run_start_ns
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     # 从配置创建当前运行类型的报告整理器。
     @classmethod
     def from_settings(cls, settings: dict[str, Any], run_type: str):
-        return cls(run_reports_dir(settings, run_type), bool(settings["reports"]["enabled"]))
+        return cls(
+            run_reports_dir(settings, run_type),
+            bool(settings["reports"]["enabled"]),
+            runtime_start_ns(settings),
+        )
 
     # 保存 NT trader 在运行结束后生成的订单和持仓结果。
     def write_final_reports(self, trader, names=("orders", "positions")) -> None:
@@ -92,7 +112,7 @@ class TraderReportWriter:
         for name in names:
             df = self.account_report(trader) if name == "accounts" else report_fns[name]()
             if not df.empty:
-                reports[name] = report_columns(name, df)
+                reports[name] = self.filter_current_run(name, report_columns(name, df))
                 if name == "orders":
                     self.write_csv(self.format_orders(reports[name]), REPORT_FILES[name])
                 elif name == "accounts":
@@ -125,6 +145,17 @@ class TraderReportWriter:
     # 订单表只保留成交时间，时间统一在 write_csv 出口转换。
     def format_orders(self, orders: pd.DataFrame) -> pd.DataFrame:
         return orders.copy()
+
+    # 最终报告只保留本次 node 启动后的交易记录。
+    def filter_current_run(self, name: str, df: pd.DataFrame) -> pd.DataFrame:
+        if self.run_start_ns is None or df.empty:
+            return df
+        column = {"orders": "ts_last", "positions": "ts_opened", "position_events": "ts_event"}.get(name)
+        if column is None or column not in df.columns:
+            return df
+        ts = report_time(df[column])
+        start = pd.to_datetime(self.run_start_ns, unit="ns", utc=True)
+        return df[ts >= start].copy()
 
     # 账户最终结果只保留有余额的币。
     def filter_nonzero_accounts(self, accounts: pd.DataFrame) -> pd.DataFrame:
@@ -169,7 +200,7 @@ class TraderReportWriter:
                 row["fill_price"] = ""
                 rows.append({column: row.get(column) for column in REPORT_COLUMNS["position_events"]})
         if rows:
-            self.write_csv(pd.DataFrame(rows), "position_events.csv")
+            self.write_csv(self.filter_current_run("position_events", pd.DataFrame(rows)), "position_events.csv")
 
     # 生成更容易看的 positions.csv 和中文 summary.md。
     def write_clean_reports(self, positions: pd.DataFrame) -> None:
