@@ -6,7 +6,7 @@ strategy:
     spread_mode: mean_deviation
     one_sided: true
     entry_bps: "400"
-    exit_bps: "50"
+    exit_bps: "60"
     lookback_sec: 43200
     min_window_sec: 0
     init_fetch_sec: 21600
@@ -24,13 +24,10 @@ strategy:
     exit_z: "-1.0"
     min_entry_bps: "150"
     trade_notional: "20"
-    max_hold_sec: 43200
-    min_hold_sec: 60
-    cooldown_sec: 300
     max_quote_age_sec: 0
     snapshot_interval_sec: 1
     snapshot_display: file
-    snapshot_path: strategies/preipoarb/preipo_arb_snapshot.json
+    snapshot_path: auto
     slippage_bps: "2"
     use_hyphens_in_client_order_ids: false
     fee_bps:

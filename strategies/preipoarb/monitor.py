@@ -2,13 +2,33 @@ from __future__ import annotations
 
 import json
 import time
+from datetime import datetime
+from datetime import timedelta
+from datetime import timezone
 from pathlib import Path
 
+from rich.columns import Columns
 from rich.console import Console
 from rich.console import Group
 from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
+
+
+BEIJING_TZ = timezone(timedelta(hours=8))
+REPORT_ROOT = Path("strategies/preipoarb/report")
+SNAPSHOT_NAME = "preipo_arb_snapshot.json"
+
+
+def latest_snapshot_path() -> Path:
+    snapshots = sorted(
+        REPORT_ROOT.glob(f"live-*/{SNAPSHOT_NAME}"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    if snapshots:
+        return snapshots[0]
+    return REPORT_ROOT / SNAPSHOT_NAME
 
 
 def load_snapshot(path: Path) -> dict:
@@ -18,45 +38,21 @@ def load_snapshot(path: Path) -> dict:
             "market_tables": {},
             "position_rows": [],
             "state_rows": [],
-            "ts_ns": None,
-            "beijing_time": "-",
         }
     return json.loads(path.read_text(encoding="utf-8"))
 
 
 def market_table(asset: str, rows: list[dict[str, str]]) -> Table:
     table = Table(title=f"{asset} Market", expand=True)
-    for column, justify in (
-        ("exchange", "left"),
-        ("instrument", "left"),
-        ("bid1", "right"),
-        ("ask1", "right"),
-        ("age", "right"),
-        ("role", "center"),
-        ("edge", "right"),
-        ("mean", "right"),
-        ("std", "right"),
-        ("z", "right"),
-        ("window", "right"),
-    ):
-        table.add_column(column, justify=justify, no_wrap=True)
+    venues = [key for key in (rows[0].keys() if rows else []) if key != "metric"]
+    table.add_column("metric", justify="left", no_wrap=True)
+    for venue in venues:
+        table.add_column(venue, justify="right", no_wrap=True)
     if not rows:
-        table.add_row("-", "-", "-", "-", "-", "-", "-", "-", "-", "-", "-")
+        table.add_row("-")
         return table
     for row in rows:
-        table.add_row(
-            str(row.get("exchange", "-")),
-            str(row.get("instrument", "-")),
-            str(row.get("bid1", "-")),
-            str(row.get("ask1", "-")),
-            str(row.get("age", "-")),
-            str(row.get("role", "-")),
-            str(row.get("edge", "-")),
-            str(row.get("mean", "-")),
-            str(row.get("std", "-")),
-            str(row.get("z", "-")),
-            str(row.get("window", "-")),
-        )
+        table.add_row(str(row.get("metric", "-")), *(str(row.get(venue, "-")) for venue in venues))
     return table
 
 
@@ -121,28 +117,31 @@ def state_table(rows: list[dict[str, str]]) -> Table:
 def build_view(payload: dict, path: Path) -> Group:
     market_tables = payload.get("market_tables") or {}
     assets = payload.get("assets") or sorted(market_tables)
-    beijing_time = payload.get("beijing_time") or "-"
+    beijing_time = datetime.now(tz=BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
     parts = [Panel.fit(f"PREIPO Arbitrage Live | 北京时间 {beijing_time} | {path}", border_style="cyan")]
-    for asset in assets:
-        parts.append(market_table(str(asset), market_tables.get(str(asset), [])))
+    tables = [market_table(str(asset), market_tables.get(str(asset), [])) for asset in assets]
+    if len(tables) >= 2:
+        parts.append(Columns(tables[:2], equal=True, expand=True))
+        parts.extend(tables[2:])
+    else:
+        parts.extend(tables)
     parts.append(positions_table(payload.get("position_rows") or []))
     parts.append(state_table(payload.get("state_rows") or []))
     return Group(*parts)
 
 
-def main(path: Path, refresh_sec: float) -> None:
+def main(path: Path | None, refresh_sec: float) -> None:
     console = Console()
     try:
-        with Live(build_view(load_snapshot(path), path), console=console, screen=True, refresh_per_second=1) as live:
+        current_path = path or latest_snapshot_path()
+        with Live(build_view(load_snapshot(current_path), current_path), console=console, screen=True, refresh_per_second=1) as live:
             while True:
-                live.update(build_view(load_snapshot(path), path), refresh=True)
+                current_path = path or latest_snapshot_path()
+                live.update(build_view(load_snapshot(current_path), current_path), refresh=True)
                 time.sleep(refresh_sec)
     except KeyboardInterrupt:
         return
 
 
 if __name__ == "__main__":
-    main(
-        Path("strategies/preipoarb/preipo_arb_snapshot.json"),
-        1.0,
-    )
+    main(None, 1.0)

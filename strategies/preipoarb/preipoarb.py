@@ -56,6 +56,15 @@ class ArbLeg:
 
 
 @dataclass
+class InitialTrade:
+    ts_ms: int
+    asset: str
+    instrument_id: InstrumentId
+    price: Decimal
+    side: str
+
+
+@dataclass
 class ArbPos:
     buy_id: InstrumentId
     sell_id: InstrumentId
@@ -65,6 +74,7 @@ class ArbPos:
     sell_qty: Decimal
     edge_bps: Decimal
     mean_bps: float
+    std_bps: float
     z_score: float
     opened_ns: int
 
@@ -100,6 +110,7 @@ class PendingBatch:
     sell_px: Decimal
     edge_bps: Decimal
     mean_bps: float
+    std_bps: float
     z_score: float
     created_ns: int
     legs: dict[str, PendingLeg]
@@ -151,9 +162,6 @@ class PreipoArbConfig(StrategyConfig, frozen=True):
     exit_z: Decimal
     min_entry_bps: Decimal
     trade_notional: Decimal
-    max_hold_sec: float
-    min_hold_sec: float
-    cooldown_sec: float
     max_quote_age_sec: float
     snapshot_interval_sec: float
     snapshot_display: str
@@ -193,15 +201,10 @@ class PreipoArbStrategy(Strategy):
         self.exit_z = float(config.exit_z)
         self.min_entry_bps = Decimal(str(config.min_entry_bps))
         self.notional = Decimal(str(config.trade_notional))
-        self.max_hold_ns = int(float(config.max_hold_sec) * 1_000_000_000)
-        self.min_hold_ns = int(float(config.min_hold_sec) * 1_000_000_000)
-        self.cooldown_ns = int(float(config.cooldown_sec) * 1_000_000_000)
         self.max_quote_age_ns = int(float(config.max_quote_age_sec) * 1_000_000_000)
         self.snapshot_interval_ns = int(float(config.snapshot_interval_sec) * 1_000_000_000)
         self.snapshot_display = str(config.snapshot_display).lower()
         self.snapshot_path = Path(config.snapshot_path)
-        self.slippage_bps = Decimal(str(config.slippage_bps))
-        self.fee_bps = {key.upper(): Decimal(str(value)) for key, value in config.fee_bps.items()}
         self.quotes: dict[InstrumentId, QuoteTick] = {}
         self.windows: dict[tuple[str, InstrumentId, InstrumentId], SpreadWindow] = {}
         self.arb_state = FLAT
@@ -212,9 +215,9 @@ class PreipoArbStrategy(Strategy):
         self.pending: dict[str, PendingBatch] = {}
         self.failed_assets: set[str] = set()
         self.order_asset: dict[str, str] = {}
-        self.last_close_ns: dict[str, int] = {}
         self.last_snapshot_ns = 0
         self.snapshot_rows: dict[str, dict[str, str]] = {}
+        self.last_spread_states: dict[str, dict[tuple[InstrumentId, InstrumentId], SpreadState]] = {}
         self.snapshot_lock = Lock()
         self.snapshot_stop = ThreadEvent()
         self.snapshot_thread: Thread | None = None
@@ -250,10 +253,6 @@ class PreipoArbStrategy(Strategy):
                     raise RuntimeError(f"initial_std_bps must be positive for asset: {asset}")
         if self.notional <= 0:
             raise RuntimeError("trade_notional must be positive")
-        if self.config.min_hold_sec < 0:
-            raise RuntimeError("min_hold_sec must be positive")
-        if self.config.cooldown_sec < 0:
-            raise RuntimeError("cooldown_sec must be positive")
         if self.config.max_quote_age_sec < 0:
             raise RuntimeError("max_quote_age_sec must be non-negative")
         if self.config.snapshot_interval_sec < 0:
@@ -271,7 +270,8 @@ class PreipoArbStrategy(Strategy):
             f"mode={self.spread_mode} one_sided={self.one_sided} "
             f"lookback={self.config.lookback_sec}s min_window={self.config.min_window_sec}s "
             f"init_fetch={self.config.init_fetch_sec}s init_blend={self.config.init_blend_sec}s "
-            f"entry_z={self.entry_z} entry_z_step={self.entry_z_step} exit_z={self.exit_z} initial_mean={self.initial_mean_bps} "
+            f"entry_z={self.entry_z} entry_z_step={self.entry_z_step} exit_z={self.exit_z} "
+            f"exit_bps={self.exit_bps} initial_mean={self.initial_mean_bps} "
             f"initial_std={self.initial_std_bps} notional={self.notional} "
             f"snapshot_interval={self.config.snapshot_interval_sec}s snapshot_display={self.snapshot_display} "
             f"snapshot_path={self.snapshot_path} "
@@ -353,9 +353,6 @@ class PreipoArbStrategy(Strategy):
     def _venue(self, instrument_id: InstrumentId) -> str:
         return self.instrument_venues.get(instrument_id) or str(instrument_id.venue).upper()
 
-    def _fee(self, instrument_id: InstrumentId) -> Decimal:
-        return self.fee_bps[self._venue(instrument_id)]
-
     def _refresh_initial_stats(self) -> None:
         start_ms = int((time.time() - self.init_fetch_sec) * 1000)
         end_ms = int(time.time() * 1000)
@@ -371,15 +368,15 @@ class PreipoArbStrategy(Strategy):
                 raise RuntimeError(f"initial std must be positive for {asset}: samples={samples}")
             self.initial_mean_bps[asset] = mean
             self.initial_std_bps[asset] = std
-            self.log.info(f"initial_stats {asset} samples={samples} mean={mean:.2f}bps std={std:.2f}bps")
+            self.log.info(f"initial_stats_quote_est {asset} samples={samples} mean={mean:.2f}bps std={std:.2f}bps")
 
     def _fetch_recent_trades(
         self,
         start_ms: int,
         end_ms: int,
         deadline: float,
-    ) -> list[tuple[int, str, InstrumentId, Decimal]]:
-        rows: list[tuple[int, str, InstrumentId, Decimal]] = []
+    ) -> list[InitialTrade]:
+        rows: list[InitialTrade] = []
         for instrument_id in self.instruments:
             venue = self._venue(instrument_id)
             asset = self._asset(instrument_id)
@@ -393,7 +390,7 @@ class PreipoArbStrategy(Strategy):
                 self.log.warning(f"initial_stats_skip_venue {instrument_id} venue={venue}")
         if not rows:
             raise RuntimeError("no initial trade ticks fetched")
-        rows.sort(key=lambda item: item[0])
+        rows.sort(key=lambda item: item.ts_ms)
         return rows
 
     def _fetch_binance_trades(
@@ -403,9 +400,9 @@ class PreipoArbStrategy(Strategy):
         start_ms: int,
         end_ms: int,
         deadline: float,
-    ) -> list[tuple[int, str, InstrumentId, Decimal]]:
+    ) -> list[InitialTrade]:
         symbol = str(instrument_id.symbol).upper().replace("-PERP", "")
-        rows: list[tuple[int, str, InstrumentId, Decimal]] = []
+        rows: list[InitialTrade] = []
         next_ms = start_ms
         while next_ms <= end_ms:
             self._check_init_deadline(deadline)
@@ -417,7 +414,8 @@ class PreipoArbStrategy(Strategy):
                 break
             for item in payload:
                 ts_ms = int(item["T"])
-                rows.append((ts_ms, asset, instrument_id, Decimal(str(item["p"]))))
+                side = "sell" if bool(item.get("m")) else "buy"
+                rows.append(InitialTrade(ts_ms, asset, instrument_id, Decimal(str(item["p"])), side))
             new_next = int(payload[-1]["T"]) + 1
             if new_next <= next_ms:
                 break
@@ -433,9 +431,9 @@ class PreipoArbStrategy(Strategy):
         start_ms: int,
         end_ms: int,
         deadline: float,
-    ) -> list[tuple[int, str, InstrumentId, Decimal]]:
+    ) -> list[InitialTrade]:
         inst_id = str(instrument_id.symbol).upper()
-        rows: list[tuple[int, str, InstrumentId, Decimal]] = []
+        rows: list[InitialTrade] = []
         seen: set[str] = set()
         after: str | None = None
         while True:
@@ -456,7 +454,15 @@ class PreipoArbStrategy(Strategy):
                 if ts_ms > end_ms or ts_ms < start_ms or trade_id in seen:
                     continue
                 seen.add(trade_id)
-                rows.append((ts_ms, asset, instrument_id, Decimal(str(item["px"]))))
+                rows.append(
+                    InitialTrade(
+                        ts_ms,
+                        asset,
+                        instrument_id,
+                        Decimal(str(item["px"])),
+                        str(item.get("side", "")).lower(),
+                    ),
+                )
             after = str(data[-1]["tradeId"])
             if oldest_ms < start_ms:
                 break
@@ -484,32 +490,48 @@ class PreipoArbStrategy(Strategy):
 
     def _initial_stats_from_trades(
         self,
-        rows: list[tuple[int, str, InstrumentId, Decimal]],
+        rows: list[InitialTrade],
     ) -> dict[str, tuple[float, float, int]]:
-        last: dict[str, dict[InstrumentId, tuple[int, Decimal]]] = {asset: {} for asset in self.assets}
+        quotes: dict[str, dict[InstrumentId, dict[str, tuple[int, Decimal]]]] = {asset: {} for asset in self.assets}
         values: dict[str, list[float]] = {asset: [] for asset in self.assets}
         max_age_ms = INIT_TICK_MATCH_MS
-        for ts_ms, asset, instrument_id, price in rows:
-            last[asset][instrument_id] = (ts_ms, price)
-            fresh = [
-                (inst_id, px)
-                for inst_id, (last_ms, px) in last[asset].items()
-                if ts_ms - last_ms <= max_age_ms
-            ]
-            if len(fresh) < 2:
+        for row in rows:
+            if row.side not in {"buy", "sell"}:
                 continue
+            side = "ask" if row.side == "buy" else "bid"
+            quotes[row.asset].setdefault(row.instrument_id, {})[side] = (row.ts_ms, row.price)
+
+            binance_id = next(
+                (instrument_id for instrument_id in quotes[row.asset] if self._venue(instrument_id) == "BINANCE"),
+                None,
+            )
+            if binance_id is None:
+                continue
+            binance_bid = self._fresh_initial_quote(quotes[row.asset][binance_id], "bid", row.ts_ms, max_age_ms)
+            binance_ask = self._fresh_initial_quote(quotes[row.asset][binance_id], "ask", row.ts_ms, max_age_ms)
+            if binance_bid is None or binance_ask is None:
+                continue
+            binance_mid = (binance_bid + binance_ask) / Decimal("2")
             best_edge: Decimal | None = None
-            for buy_id, buy_px in fresh:
-                for sell_id, sell_px in fresh:
-                    if buy_id == sell_id:
+            for instrument_id, book in quotes[row.asset].items():
+                if self._venue(instrument_id) == "BINANCE":
+                    continue
+                other_bid = self._fresh_initial_quote(book, "bid", row.ts_ms, max_age_ms)
+                other_ask = self._fresh_initial_quote(book, "ask", row.ts_ms, max_age_ms)
+                edges = []
+                if other_bid is not None:
+                    edges.append(self._edge_bps(other_bid - binance_ask, binance_mid))
+                if other_ask is not None:
+                    edges.append(self._edge_bps(binance_bid - other_ask, binance_mid))
+                for edge in edges:
+                    if edge is None:
                         continue
-                    edge = self._net_bps(ArbLeg(buy_id, buy_px), ArbLeg(sell_id, sell_px))
                     if self.one_sided and edge <= 0:
                         continue
                     if best_edge is None or edge > best_edge:
                         best_edge = edge
             if best_edge is not None:
-                values[asset].append(float(best_edge))
+                values[row.asset].append(float(best_edge))
 
         stats: dict[str, tuple[float, float, int]] = {}
         for asset, samples in values.items():
@@ -520,10 +542,25 @@ class PreipoArbStrategy(Strategy):
             stats[asset] = (mean, sqrt(variance), len(samples))
         return stats
 
+    # 用主动成交方向近似初始化阶段的 bid/ask。
+    def _fresh_initial_quote(
+        self,
+        book: dict[str, tuple[int, Decimal]],
+        side: str,
+        ts_ms: int,
+        max_age_ms: int,
+    ) -> Decimal | None:
+        value = book.get(side)
+        if value is None:
+            return None
+        quote_ts_ms, price = value
+        if ts_ms - quote_ts_ms > max_age_ms:
+            return None
+        return price
+
     def _valid_quotes(self, asset: str) -> tuple[list[ArbLeg], list[ArbLeg]]:
         bids: list[ArbLeg] = []
         asks: list[ArbLeg] = []
-        now_ns = self.clock.timestamp_ns()
         for instrument_id, quote in self.quotes.items():
             if self._asset(instrument_id) != asset:
                 continue
@@ -536,51 +573,84 @@ class PreipoArbStrategy(Strategy):
         return bids, asks
 
     def _best(self, asset: str) -> tuple[ArbLeg, ArbLeg] | None:
-        bids, asks = self._valid_quotes(asset)
-        if not bids or not asks:
+        candidates = self._route_candidates(asset)
+        if not candidates:
             return None
-        buy = min(asks, key=lambda leg: leg.price)
-        sell = max(bids, key=lambda leg: leg.price)
-        if buy.instrument_id == sell.instrument_id:
-            return None
+        _, buy, sell = max(candidates, key=lambda item: item[0])
         return buy, sell
 
-    def _net_bps(self, buy: ArbLeg, sell: ArbLeg) -> Decimal:
-        gross = (sell.price - buy.price) / buy.price * Decimal("10000")
-        costs = self._fee(buy.instrument_id) + self._fee(sell.instrument_id) + self.slippage_bps * Decimal("2")
-        return gross - costs
+    def _binance_mid(self, asset: str) -> Decimal | None:
+        for instrument_id, quote in self.quotes.items():
+            if self._asset(instrument_id) != asset or self._venue(instrument_id) != "BINANCE":
+                continue
+            bid = Decimal(str(quote.bid_price))
+            ask = Decimal(str(quote.ask_price))
+            if bid <= 0 or ask <= 0:
+                return None
+            return (bid + ask) / Decimal("2")
+        return None
+
+    def _edge_bps(self, numerator: Decimal, price: Decimal) -> Decimal | None:
+        if price <= 0:
+            return None
+        return numerator / price * Decimal("10000")
+
+    # 策略信号以 Binance mid 归一化，只看盘口价差，暂不扣手续费和滑点。
+    def _route_edge_bps(self, asset: str, buy: ArbLeg, sell: ArbLeg) -> Decimal | None:
+        buy_is_binance = self._venue(buy.instrument_id) == "BINANCE"
+        sell_is_binance = self._venue(sell.instrument_id) == "BINANCE"
+        if buy_is_binance == sell_is_binance:
+            return None
+        price = self._binance_mid(asset)
+        if price is None:
+            return None
+        return self._edge_bps(sell.price - buy.price, price)
+
+    def _route_candidates(self, asset: str) -> list[tuple[Decimal, ArbLeg, ArbLeg]]:
+        bids, asks = self._valid_quotes(asset)
+        candidates: list[tuple[Decimal, ArbLeg, ArbLeg]] = []
+        for buy in asks:
+            for sell in bids:
+                if buy.instrument_id == sell.instrument_id:
+                    continue
+                edge = self._route_edge_bps(asset, buy, sell)
+                if edge is not None:
+                    candidates.append((edge, buy, sell))
+        return candidates
+
+    def _close_edge_bps(self, asset: str, long_leg: ArbLeg, short_leg: ArbLeg) -> Decimal | None:
+        price = self._binance_mid(asset)
+        if price is None:
+            return None
+        return self._edge_bps(short_leg.price - long_leg.price, price)
 
     def _update_spreads(self, asset: str) -> dict[tuple[InstrumentId, InstrumentId], SpreadState]:
         states: dict[tuple[InstrumentId, InstrumentId], SpreadState] = {}
         if self.spread_mode != "mean_deviation":
             return states
 
-        bids, asks = self._valid_quotes(asset)
         now_ns = self.clock.timestamp_ns()
-        for buy in asks:
-            for sell in bids:
-                if buy.instrument_id == sell.instrument_id:
-                    continue
-                edge = self._net_bps(buy, sell)
-                key = (asset, buy.instrument_id, sell.instrument_id)
-                window = self.windows.setdefault(key, SpreadWindow())
-                window.add(now_ns, float(edge), self.lookback_ns)
-                samples, mean, std, window_sec = window.stats()
-                stats = self._active_stats(asset, samples, mean, std, window_sec)
-                if stats is None:
-                    continue
-                mean, std = stats
-                z_score = (float(edge) - mean) / std
-                states[(buy.instrument_id, sell.instrument_id)] = SpreadState(
-                    buy=buy,
-                    sell=sell,
-                    edge_bps=edge,
-                    mean_bps=mean,
-                    std_bps=std,
-                    z_score=z_score,
-                    samples=samples,
-                    window_sec=window_sec,
-                )
+        for edge, buy, sell in self._route_candidates(asset):
+            key = (asset, buy.instrument_id, sell.instrument_id)
+            window = self.windows.setdefault(key, SpreadWindow())
+            window.add(now_ns, float(edge), self.lookback_ns)
+            samples, mean, std, window_sec = window.stats()
+            stats = self._active_stats(asset, samples, mean, std, window_sec)
+            if stats is None:
+                continue
+            mean, std = stats
+            z_score = (float(edge) - mean) / std
+            states[(buy.instrument_id, sell.instrument_id)] = SpreadState(
+                buy=buy,
+                sell=sell,
+                edge_bps=edge,
+                mean_bps=mean,
+                std_bps=std,
+                z_score=z_score,
+                samples=samples,
+                window_sec=window_sec,
+            )
+        self.last_spread_states[asset] = states
         return states
 
     def _active_stats(
@@ -614,10 +684,7 @@ class PreipoArbStrategy(Strategy):
             return
         if self.active_asset is not None and self.active_asset != asset:
             return
-        last_close_ns = self.last_close_ns.get(asset)
         now_ns = self.clock.timestamp_ns()
-        if not self.positions.get(asset) and last_close_ns is not None and now_ns - last_close_ns < self.cooldown_ns:
-            return
 
         if self.spread_mode == "threshold":
             self._maybe_open_threshold(asset, now_ns)
@@ -637,7 +704,7 @@ class PreipoArbStrategy(Strategy):
                 f"add_signal {asset} next_z={threshold:.2f} lots={len(self.positions[asset])} "
                 f"z={state.z_score:.2f} buy={state.buy.instrument_id} sell={state.sell.instrument_id}",
             )
-        self._open_pair(asset, state.buy, state.sell, state.edge_bps, state.mean_bps, state.z_score, now_ns)
+        self._open_pair(asset, state.buy, state.sell, state.edge_bps, state.mean_bps, state.std_bps, state.z_score, now_ns)
 
     def _next_entry_z(self, asset: str) -> float:
         return self.entry_z + len(self.positions.get(asset, [])) * self.entry_z_step
@@ -665,10 +732,12 @@ class PreipoArbStrategy(Strategy):
         if best is None:
             return
         buy, sell = best
-        net = self._net_bps(buy, sell)
+        net = self._route_edge_bps(asset, buy, sell)
+        if net is None:
+            return
         if net < self.entry_bps:
             return
-        self._open_pair(asset, buy, sell, net, float(net), 0.0, now_ns)
+        self._open_pair(asset, buy, sell, net, float(net), 0.0, 0.0, now_ns)
 
     def _open_pair(
         self,
@@ -677,6 +746,7 @@ class PreipoArbStrategy(Strategy):
         sell: ArbLeg,
         edge_bps: Decimal,
         mean_bps: float,
+        std_bps: float,
         z_score: float,
         now_ns: int,
     ) -> None:
@@ -700,6 +770,7 @@ class PreipoArbStrategy(Strategy):
                 sell_qty=qty,
                 edge_bps=edge_bps,
                 mean_bps=mean_bps,
+                std_bps=std_bps,
                 z_score=z_score,
                 opened_ns=now_ns,
             ))
@@ -723,6 +794,7 @@ class PreipoArbStrategy(Strategy):
             sell_side=OrderSide.SELL,
             edge_bps=edge_bps,
             mean_bps=mean_bps,
+            std_bps=std_bps,
             z_score=z_score,
             now_ns=now_ns,
             buy_qty=qty,
@@ -744,40 +816,46 @@ class PreipoArbStrategy(Strategy):
         if buy_quote is None or sell_quote is None:
             return False
         now_ns = self.clock.timestamp_ns()
-        oldest_ns = min(lot.opened_ns for lot in lots)
-        newest_ns = max(lot.opened_ns for lot in lots)
-        expired = now_ns - oldest_ns >= self.max_hold_ns
-        if now_ns - newest_ns < self.min_hold_ns and not expired:
+
+        close_sell = ArbLeg(pos.buy_id, Decimal(str(buy_quote.bid_price)))
+        close_buy = ArbLeg(pos.sell_id, Decimal(str(sell_quote.ask_price)))
+        close_edge = self._close_edge_bps(asset, close_sell, close_buy)
+        if close_edge is None:
             return False
 
-        close_buy = ArbLeg(pos.sell_id, Decimal(str(sell_quote.ask_price)))
-        close_sell = ArbLeg(pos.buy_id, Decimal(str(buy_quote.bid_price)))
-        close_edge = self._net_bps(close_buy, close_sell)
-
-        if self.spread_mode == "threshold":
-            should_close = close_edge <= self.exit_bps or expired
-            signal = f"close_edge={close_edge:.2f}bps"
-            z_score = 0.0
-        else:
-            state = states.get((pos.buy_id, pos.sell_id))
-            if state is None and not expired:
-                return False
-            z_score = state.z_score if state is not None else float("nan")
-            should_close = z_score <= self.exit_z or expired
-            signal = f"edge_z={z_score:.2f} close_edge={close_edge:.2f}bps"
+        first = lots[0]
+        entry_edge = first.edge_bps
+        capture_bps = entry_edge - close_edge
+        state = states.get((pos.buy_id, pos.sell_id))
+        edge_stop = close_edge <= entry_edge - self.exit_bps
+        z_score = float("nan")
+        mean = first.mean_bps
+        std = first.std_bps
+        stat_stop = False
+        if state is not None and state.std_bps > 0:
+            mean = state.mean_bps
+            std = state.std_bps
+            z_score = (float(close_edge) - state.mean_bps) / state.std_bps
+            stat_stop = close_edge <= Decimal(str(state.mean_bps + self.exit_z * state.std_bps))
+        should_close = edge_stop or stat_stop
+        signal = (
+            f"entry_edge={entry_edge:.2f}bps close_edge={close_edge:.2f}bps "
+            f"capture={capture_bps:.2f}bps edge_stop={edge_stop} "
+            f"mean={mean:.2f}bps std={std:.2f}bps "
+            f"close_z={z_score:.2f} stat_stop={stat_stop}"
+        )
 
         if not should_close:
             return False
         buy_qty = sum((lot.buy_qty for lot in lots), Decimal("0"))
         sell_qty = sum((lot.sell_qty for lot in lots), Decimal("0"))
         self.log.info(
-            f"close_signal {asset} {signal} lots={len(lots)} expired={expired} "
+            f"close_signal {asset} {signal} lots={len(lots)} "
             f"sell_long={pos.buy_id}@{close_sell.price} qty={buy_qty} "
             f"buy_short={pos.sell_id}@{close_buy.price} qty={sell_qty}",
         )
         if self.config.dry_run:
             self.arb_state = CLOSING
-            self.last_close_ns[asset] = now_ns
             self.positions.pop(asset, None)
             self.arb_state = FLAT
             self.active_asset = None
@@ -795,6 +873,7 @@ class PreipoArbStrategy(Strategy):
             sell_side=OrderSide.BUY,
             edge_bps=close_edge,
             mean_bps=pos.mean_bps,
+            std_bps=pos.std_bps,
             z_score=z_score,
             now_ns=now_ns,
             buy_qty=buy_qty,
@@ -814,6 +893,7 @@ class PreipoArbStrategy(Strategy):
         sell_side: OrderSide,
         edge_bps: Decimal,
         mean_bps: float,
+        std_bps: float,
         z_score: float,
         now_ns: int,
         buy_qty: Decimal | None = None,
@@ -837,6 +917,7 @@ class PreipoArbStrategy(Strategy):
             sell_px=sell_px,
             edge_bps=edge_bps,
             mean_bps=mean_bps,
+            std_bps=std_bps,
             z_score=z_score,
             created_ns=now_ns,
             legs={
@@ -924,9 +1005,7 @@ class PreipoArbStrategy(Strategy):
                 return False
             account_id = str(account.id)
             accounts[account_id] = account
-            fee_buffer = self._fee(instrument_id) / Decimal("10000")
-            slippage_buffer = self.slippage_bps / Decimal("10000")
-            required[account_id] += price * qty * (Decimal("1") + fee_buffer + slippage_buffer)
+            required[account_id] += price * qty
 
         ok = True
         for account_id, need in required.items():
@@ -994,7 +1073,6 @@ class PreipoArbStrategy(Strategy):
     def _fail_before_submit(self, asset: str, reason: str) -> None:
         self.log.error(f"strategy_stop {asset} reason={reason}")
         self._flatten_positions(asset, "open_check_failed")
-        self.last_close_ns[asset] = self.clock.timestamp_ns()
         self.arb_state = STOPPING
         self.active_asset = asset
         self._request_stop(reason)
@@ -1096,6 +1174,7 @@ class PreipoArbStrategy(Strategy):
             sell_qty=sell_qty,
             edge_bps=batch.edge_bps,
             mean_bps=batch.mean_bps,
+            std_bps=batch.std_bps,
             z_score=batch.z_score,
             opened_ns=batch.created_ns,
         ))
@@ -1112,7 +1191,6 @@ class PreipoArbStrategy(Strategy):
 
     def _confirm_close(self, batch: PendingBatch) -> None:
         self.positions.pop(batch.asset, None)
-        self.last_close_ns[batch.asset] = self.clock.timestamp_ns()
         self.arb_state = FLAT
         self.active_asset = None
         self._clear_pending(batch)
@@ -1147,7 +1225,6 @@ class PreipoArbStrategy(Strategy):
             self._flatten_positions(batch.asset, "order_failed")
         self._emergency_flatten(batch)
         self.positions.pop(batch.asset, None)
-        self.last_close_ns[batch.asset] = self.clock.timestamp_ns()
         self.arb_state = STOPPING
         self.active_asset = batch.asset
         self._request_stop(f"preipo order failed: {reason}")
@@ -1209,7 +1286,7 @@ class PreipoArbStrategy(Strategy):
 
     def _fmt(self, value: object, suffix: str = "") -> str:
         try:
-            text = f"{Decimal(str(value)):.2f}".rstrip("0").rstrip(".")
+            text = f"{Decimal(str(value)):.2f}"
         except Exception:
             return str(value)
         return f"{text}{suffix}"
@@ -1233,12 +1310,13 @@ class PreipoArbStrategy(Strategy):
         state_rows: list[dict[str, str]] = []
         log_parts = []
         for asset in self.assets:
+            asset_states = self.last_spread_states.get(asset, current_states)
             best = self._best(asset)
             asset_state = self._asset_state(asset)
             active = "Y" if self.active_asset == asset else "N"
             pending = "Y" if asset in self.pending else "N"
             lots = self.positions.get(asset, [])
-            position_rows.append(self._position_snapshot(asset, lots, current_states, now_ns))
+            position_rows.append(self._position_snapshot(asset, lots, asset_states, now_ns))
             state_rows.append({
                 "asset": asset,
                 "state": asset_state,
@@ -1262,12 +1340,14 @@ class PreipoArbStrategy(Strategy):
                     "window": "0s",
                     "quotes": "waiting",
                 }
-                market_tables[asset] = self._market_rows(asset, None, "-", "-", "-", "-", "-")
+                market_tables[asset] = self._market_rows(asset, asset_states)
                 log_parts.append(f"{asset} state={asset_state} active={active} quotes=waiting")
                 continue
             buy, sell = best
-            edge = self._net_bps(buy, sell)
-            state = current_states.get((buy.instrument_id, sell.instrument_id))
+            edge = self._route_edge_bps(asset, buy, sell)
+            if edge is None:
+                continue
+            state = asset_states.get((buy.instrument_id, sell.instrument_id))
             if state is None:
                 samples, mean, std, window_sec = self._window_debug(asset, buy.instrument_id, sell.instrument_id)
                 mean = self.initial_mean_bps.get(asset, mean)
@@ -1297,12 +1377,7 @@ class PreipoArbStrategy(Strategy):
             }
             market_tables[asset] = self._market_rows(
                 asset,
-                (buy, sell),
-                self._fmt(edge),
-                self._fmt(mean),
-                self._fmt(std),
-                self._fmt(z_score),
-                self._fmt(window_sec, "s"),
+                asset_states,
             )
             log_parts.append(
                 f"{asset} state={asset_state} active={active} pending={asset in self.pending} "
@@ -1322,55 +1397,74 @@ class PreipoArbStrategy(Strategy):
     def _market_rows(
         self,
         asset: str,
-        best: tuple[ArbLeg, ArbLeg] | None,
-        edge: str,
-        mean: str,
-        std: str,
-        z_score: str,
-        window: str,
+        states: dict[tuple[InstrumentId, InstrumentId], SpreadState],
     ) -> list[dict[str, str]]:
         now_ns = self.clock.timestamp_ns()
-        best_buy = best[0].instrument_id if best is not None else None
-        best_sell = best[1].instrument_id if best is not None else None
-        rows = []
-        for instrument_id in sorted(self.instruments, key=lambda item: str(item)):
-            if self._asset(instrument_id) != asset:
-                continue
+        instrument_ids = [
+            instrument_id
+            for instrument_id in self.instruments
+            if self._asset(instrument_id) == asset
+        ]
+        instrument_ids.sort(key=lambda item: (0 if self._venue(item) == "BINANCE" else 1, self._venue(item)))
+        venues = [self._venue(instrument_id) for instrument_id in instrument_ids]
+        rows = [{"metric": metric, **{venue: "-" for venue in venues}} for metric in (
+            "bid",
+            "ask",
+            "age",
+            "open_edge",
+            "close_edge",
+            "mean",
+            "std",
+            "z",
+        )]
+        by_metric = {row["metric"]: row for row in rows}
+
+        binance_id = next((instrument_id for instrument_id in instrument_ids if self._venue(instrument_id) == "BINANCE"), None)
+        binance_quote = self.quotes.get(binance_id) if binance_id is not None else None
+        if binance_quote is None:
+            return rows
+        binance_bid = Decimal(str(binance_quote.bid_price))
+        binance_ask = Decimal(str(binance_quote.ask_price))
+        binance_mid = (binance_bid + binance_ask) / Decimal("2")
+
+        for instrument_id in instrument_ids:
+            venue = self._venue(instrument_id)
             quote = self.quotes.get(instrument_id)
             if quote is None:
-                rows.append({
-                    "exchange": self._venue(instrument_id),
-                    "instrument": str(instrument_id),
-                    "bid1": "-",
-                    "ask1": "-",
-                    "age": "-",
-                    "role": "-",
-                    "edge": edge,
-                    "mean": mean,
-                    "std": std,
-                    "z": z_score,
-                    "window": window,
-                })
                 continue
-            age_sec = (now_ns - quote.ts_event) / 1_000_000_000
-            role = "-"
-            if instrument_id == best_buy:
-                role = "BUY"
-            elif instrument_id == best_sell:
-                role = "SELL"
-            rows.append({
-                "exchange": self._venue(instrument_id),
-                "instrument": str(instrument_id),
-                "bid1": self._fmt(quote.bid_price),
-                "ask1": self._fmt(quote.ask_price),
-                "age": self._fmt(age_sec, "s"),
-                "role": role,
-                "edge": edge,
-                "mean": mean,
-                "std": std,
-                "z": z_score,
-                "window": window,
-            })
+            bid = Decimal(str(quote.bid_price))
+            ask = Decimal(str(quote.ask_price))
+            by_metric["bid"][venue] = self._fmt(bid)
+            by_metric["ask"][venue] = self._fmt(ask)
+            by_metric["age"][venue] = self._fmt((now_ns - quote.ts_event) / 1_000_000_000, "s")
+            if venue == "BINANCE":
+                spread = self._edge_bps(binance_ask - binance_bid, binance_mid)
+                by_metric["open_edge"][venue] = f"spread {self._fmt(spread)}" if spread is not None else "-"
+                continue
+
+            buy_binance = ArbLeg(binance_id, binance_ask)
+            sell_binance = ArbLeg(binance_id, binance_bid)
+            buy_other = ArbLeg(instrument_id, ask)
+            sell_other = ArbLeg(instrument_id, bid)
+            edge_a = self._route_edge_bps(asset, buy_binance, sell_other)
+            edge_b = self._route_edge_bps(asset, buy_other, sell_binance)
+            if edge_a is None and edge_b is None:
+                continue
+            if edge_b is None or (edge_a is not None and edge_a >= edge_b):
+                open_edge = edge_a
+                close_edge = self._close_edge_bps(asset, sell_binance, buy_other)
+                state = states.get((buy_binance.instrument_id, sell_other.instrument_id))
+            else:
+                open_edge = edge_b
+                close_edge = self._close_edge_bps(asset, sell_other, buy_binance)
+                state = states.get((buy_other.instrument_id, sell_binance.instrument_id))
+            by_metric["open_edge"][venue] = self._fmt(open_edge)
+            if close_edge is not None:
+                by_metric["close_edge"][venue] = self._fmt(close_edge)
+            if state is not None:
+                by_metric["mean"][venue] = self._fmt(state.mean_bps)
+                by_metric["std"][venue] = self._fmt(state.std_bps)
+                by_metric["z"][venue] = self._fmt(state.z_score)
         return rows
 
     def _position_snapshot(
@@ -1399,12 +1493,14 @@ class PreipoArbStrategy(Strategy):
         close_edge = "-"
         current_z = "-"
         if buy_quote is not None and sell_quote is not None:
-            close_buy = ArbLeg(position.sell_id, Decimal(str(sell_quote.ask_price)))
             close_sell = ArbLeg(position.buy_id, Decimal(str(buy_quote.bid_price)))
-            close_edge = self._fmt(self._net_bps(close_buy, close_sell))
-            state = states.get((position.buy_id, position.sell_id))
-            if state is not None:
-                current_z = self._fmt(state.z_score)
+            close_buy = ArbLeg(position.sell_id, Decimal(str(sell_quote.ask_price)))
+            edge = self._close_edge_bps(asset, close_sell, close_buy)
+            if edge is not None:
+                close_edge = self._fmt(edge)
+                state = states.get((position.buy_id, position.sell_id))
+                if state is not None and state.std_bps > 0:
+                    current_z = self._fmt((float(edge) - state.mean_bps) / state.std_bps)
         hold_sec = max((now_ns - min(lot.opened_ns for lot in lots)) / 1_000_000_000, 0.0)
         buy_qty = sum((lot.buy_qty for lot in lots), Decimal("0"))
         sell_qty = sum((lot.sell_qty for lot in lots), Decimal("0"))
@@ -1508,11 +1604,8 @@ class PreipoArbStrategy(Strategy):
         market_tables = rows.get("__market_tables__", {})
         position_rows = rows.get("__position_rows__", [])
         state_rows = rows.get("__state_rows__", [])
-        ts_ns = self.clock.timestamp_ns()
         asset_rows = {key: value for key, value in rows.items() if not key.startswith("__")}
         payload = {
-            "ts_ns": ts_ns,
-            "beijing_time": rows.get("__beijing_time__") or self._beijing_time(ts_ns),
             "strategy": "preipo_arb",
             "assets": self.assets,
             "rows": [asset_rows[asset] for asset in self.assets if asset in asset_rows],

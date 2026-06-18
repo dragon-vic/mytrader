@@ -72,6 +72,8 @@ def strategy_params(
         ]
     if "event_log_path" in fields and params.get("event_log_path", "auto") == "auto":
         params["event_log_path"] = str(run_reports_dir(settings, run_type) / "strategy_events.csv")
+    if "snapshot_path" in fields and params.get("snapshot_path", "auto") == "auto":
+        params["snapshot_path"] = str(run_reports_dir(settings, run_type) / "preipo_arb_snapshot.json")
     if "tick_log_path" in fields and params.get("tick_log_path", "auto") == "auto":
         params["tick_log_path"] = str(run_reports_dir(settings, run_type) / "poly_ticks.parquet")
     if "poly_trade_path" in fields and params.get("poly_trade_path", "auto") == "auto":
