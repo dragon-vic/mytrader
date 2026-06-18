@@ -19,6 +19,7 @@ from utils.market_data import MarketDataStore
 from utils.report_writer import log_file_settings
 from utils.report_writer import prepare_report_dir
 from utils.report_writer import print_backtest_summary
+from utils.report_writer import tee_node_log
 from utils.report_writer import write_backtest_result
 from utils.report_writer import write_trader_reports
 from utils.runtime_ids import claim_run
@@ -106,7 +107,8 @@ def main(config_name: str) -> None:
         prepare_report_dir(settings, "backtest")
         engine = build_backtest_engine(settings)
         engine.run()
-        write_reports(engine, engine.get_result(), settings)
+        with tee_node_log(settings, "backtest"):
+            write_reports(engine, engine.get_result(), settings)
     finally:
         if engine is not None:
             engine.dispose()

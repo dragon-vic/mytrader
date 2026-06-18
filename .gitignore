@@ -9,6 +9,7 @@ data/
 !strategies/maxfunding/data/**
 reports/
 strategies/*/report/
+strategies/*/research/raw/
 logs/
 strategies/preipoarb/preipo_arb_snapshot.json
 .gitignore

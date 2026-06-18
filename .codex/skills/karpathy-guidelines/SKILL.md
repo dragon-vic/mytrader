@@ -46,13 +46,14 @@ source: https://github.com/forrestchang/andrej-karpathy-skills
 - 函数用途注释放在函数定义上一行，这样折叠代码时仍然可见。
 - 策略选择由配置驱动。`config/` 下的 set 文件声明 `strategy.name`；`runtime.py` 推导 `strategy.module`、`strategy.class` 和 `strategy.config_class`，除非这些值被显式覆盖。
 - `backtest.py` 和 `live.py` 必须保持通用。不要在这些入口脚本里为某个具体策略或具体配置集添加分支。
-- YAML 配置保持分层。项目路径、交易所名和 venue、代理、外部数据 client host/port 等环境级值放在 `config/global.yaml`。
-- 共享 live/node 默认值放在 `config/global.yaml`；策略 set YAML 可以显式覆盖。策略参数、各模式市场选择、instrument 精度/限制/费率、回测账户设置放在各自策略 set YAML 中。
-- `runtime.py` 先加载 `config/global.yaml`，再递归叠加所选策略 set。键冲突时，策略 set 的值覆盖 global。
+- YAML 配置保持分层。共享 global 配置放在 `strategies/global.yaml`；策略自己的 set YAML 放在对应 `strategies/{strategy_name}/` 目录下。
+- 共享 live/node 默认值放在 `strategies/global.yaml`；策略 set YAML 可以显式覆盖。策略参数、各模式市场选择、instrument 精度/限制/费率、回测账户设置放在各自策略 set YAML 中。
+- `runtime.py` 先加载 `strategies/global.yaml`，再递归叠加所选策略 set。键冲突时，策略 set 的值覆盖 global。
 - `live.py` 可以为每个 node 注册外部信号 client 等共享 data client；需要它们的策略自行订阅，不需要的策略忽略。
-- 报告存放在 `reports/{run_type}/{config_name}`。回测在运行结束后写最终报告；live 在 `OrderFilled` 事件发生时立即写成交记录，并在运行结束后写最终订单和持仓快照。
+- 报告存放在对应策略目录下的 `report/{live|backtest}-开始时间`。回测在运行结束后写最终报告；live 在 `OrderFilled` 事件发生时立即写成交记录，并在运行结束后写最终订单和持仓快照。
 - 策略不能 import 报告写入工具。Live 报告写入属于 node/trader 设置层，应通过 `Trader` 订阅 `events.order.{strategy_id}`。
 - 策略外部组件不能依赖某个策略的私有行为、文件 schema、事件 schema 或内部生命周期。`strategy_events.csv` 这类策略私有输出归策略自己所有；通用 writer、actor、factory 和 runtime 代码不能读取、转换、推断或基于其内容分支，除非项目先定义了明确的共享输出契约。
+- 策略独有的研究脚本、临时回测、数据、图、notes 和其它产物都放在对应 `strategies/{strategy_name}/` 目录下。只有跨策略复用的数据或工具才放在仓库级 `data/`、`tools/` 或 `utils/`。
 - 研究数据集默认使用 parquet 等紧凑列式格式保存给机器消费，除非用户明确要求 CSV。不要默认创建重复 CSV 导出。面向人的摘要用纯文本或 Markdown，不要用 JSON，除非用户明确要求机器可读 metadata 文件。
 - 按数据类型组织 `data/`。当前顶层数据目录为 `funding/`、`tick/`、需要时的 `bar/`、`signal/`、`notes/`，以及与策略 runtime 无关的数据抓取脚本目录 `fetchers/`。
 - 可复用市场数据文件名使用大写 symbol/scope、市场类型、数据类型或 interval、起始日期，例如 `BTCUSDT-PERP-1S-20250101.parquet` 或 `ALL-USDT-PERP-FUNDING-20250101.parquet`。永续合约使用 `PERP`。
@@ -67,10 +68,12 @@ source: https://github.com/forrestchang/andrej-karpathy-skills
 - 不要添加重复 NautilusTrader 正常事件保证的防御性 guard 或 fallback 检查。策略 callback 尽量贴近 NT 示例，除非已经观察到具体失败。
 - 正常开发期间不要捕获异常来隐藏或转换错误。让错误暴露，然后修根因。
 - 不要把 `None` 作为错误状态返回，迫使调用方分支。必需配置、凭据和依赖应直接访问，缺失时让它抛错。
-- 不要设计参数 fallback 或静默默认值。必需的 runtime/trading 参数必须在 YAML 中显式声明，缺失时失败。如果确实需要共享默认值，放在 `config/global.yaml`，让策略 set YAML 通过正常分层覆盖。`trade_notional` 这类策略专用值属于 `strategy.params`，并且只在策略 config 声明时传入。
-- 构建 node 时，不要在 Python 代码中引入隐式默认值。每个 node/runtime 设置都必须来自合并后的 YAML，使有效配置可检查；共享默认值属于 `config/global.yaml`，策略 set YAML 可以显式覆盖。
-- 本项目只在 Windows 上使用配置的 HTTP proxy。Linux 上即使 `config/global.yaml` 包含本地 Windows 代理地址，`proxy_url(settings)` 也应返回 `None`。
+- 不要设计参数 fallback 或静默默认值。必需的 runtime/trading 参数必须在 YAML 中显式声明，缺失时失败。如果确实需要共享默认值，放在 `strategies/global.yaml`，让策略 set YAML 通过正常分层覆盖。`trade_notional` 这类策略专用值属于 `strategy.params`，并且只在策略 config 声明时传入。
+- 构建 node 时，不要在 Python 代码中引入隐式默认值。每个 node/runtime 设置都必须来自合并后的 YAML，使有效配置可检查；共享默认值属于 `strategies/global.yaml`，策略 set YAML 可以显式覆盖。
+- 本项目只在 Windows 上使用配置的 HTTP proxy。Linux 上即使 `strategies/global.yaml` 包含本地 Windows 代理地址，`proxy_url(settings)` 也应返回 `None`。
 - 做功能行为变更前先和用户确认。小的格式、注释、文档式本地清理可以直接做。
+- 本项目验证 live/testnet 相关改动时，默认使用 `bintest` 作为测试配置，除非用户明确指定别的 set。
+- 如果某处写法是为了绕开历史坑、外部库限制、交易所行为、运行环境差异，或用户明确指定过“必须这么写”，必须在代码附近加简短注释说明原因。以后改代码时先看这些注释，不要把已经踩过的坑改回去。
 - 不要为了报告写入、格式化或便利输出这类小型本地需求去改大型框架或 NautilusTrader 生命周期逻辑。小需求在拥有它的窄模块中解决；触碰 core run/build/stop flow 前先询问。
 - 触碰 Conda、全局配置、系统目录或 live trading credentials 之前，先说明动作并等待明确确认。
 - Windows PowerShell 5 中，裸 `Get-Content` 可能把正常 UTF-8 中文文件显示成乱码。读取可能包含中文的文件时，使用 `Get-Content -Encoding UTF8` 或 Python `Path.read_text(encoding="utf-8")`。不要把显示乱码当成文件损坏，也不要加 BOM 或重写编码，除非用户明确要求。

@@ -36,8 +36,7 @@ def load_snapshot(path: Path) -> dict:
         return {
             "rows": [],
             "market_tables": {},
-            "position_rows": [],
-            "state_rows": [],
+            "pair_rows": [],
         }
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -56,60 +55,30 @@ def market_table(asset: str, rows: list[dict[str, str]]) -> Table:
     return table
 
 
-def positions_table(rows: list[dict[str, str]]) -> Table:
-    table = Table(title="Positions", expand=True)
-    for column, justify in (
-        ("asset", "left"),
-        ("side", "left"),
-        ("entry_buy", "left"),
-        ("entry_sell", "left"),
-        ("qty", "right"),
-        ("entry_edge", "right"),
-        ("entry_z", "right"),
-        ("close_edge", "right"),
-        ("current_z", "right"),
-        ("hold", "right"),
-    ):
-        table.add_column(column, justify=justify, no_wrap=column not in {"entry_buy", "entry_sell"})
+def pair_history_table(rows: list[dict[str, str]]) -> Table:
+    table = Table(title="持仓历史", expand=True)
+    columns = (
+        ("asset", "标的", "left"),
+        ("lot", "pair", "right"),
+        ("route", "方向", "left"),
+        ("qty", "qty", "right"),
+        ("entry_edge", "开仓edge", "right"),
+        ("close_edge", "平仓edge", "right"),
+        ("entry_mean", "开仓30m均值", "right"),
+        ("entry_std", "开仓std", "right"),
+        ("entry_jump", "偏离bps", "right"),
+        ("status", "状态", "center"),
+        ("opened_at", "开仓北京时间", "left"),
+        ("hold_min", "持有分钟", "right"),
+    )
+    for key, label, justify in columns:
+        table.add_column(label, justify=justify, no_wrap=key not in {"route", "opened_at"})
     if not rows:
-        table.add_row("-", "-", "-", "-", "-", "-", "-", "-", "-", "-")
+        table.add_row(*("-" for _ in columns))
         return table
     for row in rows:
         table.add_row(
-            str(row.get("asset", "-")),
-            str(row.get("side", "-")),
-            str(row.get("entry_buy", "-")),
-            str(row.get("entry_sell", "-")),
-            str(row.get("qty", "-")),
-            str(row.get("entry_edge", "-")),
-            str(row.get("entry_z", "-")),
-            str(row.get("current_close_edge", "-")),
-            str(row.get("current_z", "-")),
-            str(row.get("hold", "-")),
-        )
-    return table
-
-
-def state_table(rows: list[dict[str, str]]) -> Table:
-    table = Table(title="State", expand=True)
-    for column, justify in (
-        ("asset", "left"),
-        ("state", "left"),
-        ("active", "center"),
-        ("pending", "center"),
-        ("position", "center"),
-    ):
-        table.add_column(column, justify=justify, no_wrap=True)
-    if not rows:
-        table.add_row("-", "waiting", "-", "-", "-")
-        return table
-    for row in rows:
-        table.add_row(
-            str(row.get("asset", "-")),
-            str(row.get("state", "-")),
-            str(row.get("active", "-")),
-            str(row.get("pending", "-")),
-            str(row.get("has_position", "-")),
+            *(str(row.get(key, "-")) for key, _, _ in columns),
         )
     return table
 
@@ -125,8 +94,7 @@ def build_view(payload: dict, path: Path) -> Group:
         parts.extend(tables[2:])
     else:
         parts.extend(tables)
-    parts.append(positions_table(payload.get("position_rows") or []))
-    parts.append(state_table(payload.get("state_rows") or []))
+    parts.append(pair_history_table(payload.get("pair_rows") or payload.get("position_rows") or []))
     return Group(*parts)
 
 

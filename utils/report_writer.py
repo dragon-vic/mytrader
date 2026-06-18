@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import sys
+import traceback
+from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
@@ -19,6 +22,30 @@ from utils.report_labels import to_chinese_columns
 
 
 LOCAL_TZ = ZoneInfo("Asia/Shanghai")
+
+
+class TeeStream:
+    def __init__(self, terminal, log_file) -> None:
+        self.terminal = terminal
+        self.log_file = log_file
+
+    def __getattr__(self, name: str):
+        return getattr(self.terminal, name)
+
+    def write(self, text: str) -> int:
+        self.terminal.write(text)
+        self.log_file.write(text)
+        return len(text)
+
+    def flush(self) -> None:
+        self.terminal.flush()
+        self.log_file.flush()
+
+    def isatty(self) -> bool:
+        return self.terminal.isatty()
+
+    def fileno(self) -> int:
+        return self.terminal.fileno()
 
 
 # 返回当前策略自己的报告根目录。
@@ -67,6 +94,36 @@ def log_file_settings(settings: dict[str, Any], run_type: str) -> dict[str, Any]
         "log_file_max_backup_count": logging["log_file_max_backup_count"],
         "clear_log_file": bool(logging["clear_log_file"]),
     }
+
+
+# 返回 NT node.log 的完整路径。
+def node_log_path(settings: dict[str, Any], run_type: str) -> Path:
+    filename = str(settings["logging"]["log_file_name"])
+    if not filename.endswith(".log"):
+        filename = f"{filename}.log"
+    return run_reports_dir(settings, run_type) / filename
+
+
+# 把 node 返回后的终端输出同时补进 node.log。
+@contextmanager
+def tee_node_log(settings: dict[str, Any], run_type: str):
+    path = node_log_path(settings, run_type)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as log_file:
+        stdout = sys.stdout
+        stderr = sys.stderr
+        sys.stdout = TeeStream(stdout, log_file)
+        sys.stderr = TeeStream(stderr, log_file)
+        try:
+            yield
+        except BaseException:
+            log_file.write("\n")
+            traceback.print_exc(file=log_file)
+            raise
+        finally:
+            sys.stdout = stdout
+            sys.stderr = stderr
+            log_file.flush()
 
 
 # 创建当前运行的报告目录；每次运行使用新目录，不再清理旧文件。

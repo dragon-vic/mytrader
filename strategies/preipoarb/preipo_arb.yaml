@@ -6,24 +6,25 @@ strategy:
     spread_mode: mean_deviation
     one_sided: true
     entry_bps: "400"
-    exit_bps: "60"
-    lookback_sec: 43200
+    exit_bps: "40"
+    lookback_sec: 1800
     min_window_sec: 0
-    init_fetch_sec: 21600
-    init_fetch_timeout_sec: 180
-    init_blend_sec: 43200
+    init_fetch_sec: 1800
+    init_fetch_timeout_sec: 90
+    init_blend_sec: 1800
     initial_mean_bps:
       OPENAI: 256.55
       ANTHROPIC: 128.24
     initial_std_bps:
       OPENAI: 56.16
       ANTHROPIC: 45.83
-    min_spread_samples: 600
     entry_z: "2.25"
-    entry_z_step: "1.0"
-    exit_z: "-1.0"
+    exit_z: "0.0"
     min_entry_bps: "150"
+    min_entry_jump_bps: "40"
+    add_entry_std_mult: "1.5"
     trade_notional: "20"
+    trade_qty: "0.01"
     max_quote_age_sec: 0
     snapshot_interval_sec: 1
     snapshot_display: file
