@@ -80,6 +80,7 @@ source: https://github.com/forrestchang/andrej-karpathy-skills
 - 本项目运行 Python 时直接使用 nt conda 环境解释器：`D:\app\miniconda\envs\nt\python.exe`。不要使用 base `python` 或 `conda run`，除非用户明确要求。
 - 如果任务需要未安装的 Python 库，清楚说明所需包，或在用户批准后用 `D:\app\miniconda\envs\nt\python.exe -m pip install ...` 安装到 nt 环境。不要静默用更弱的替代库替换用户请求或更合适的库。
 - 服务器可通过本机 SSH alias `remote` 登录；远端项目目录是 `/root/pycharm_nt`，远端 nt 环境 Python 是 `/root/miniconda/envs/nt/bin/python`。涉及线上 report、tmux 运行态、实盘日志、交易所 REST 延迟或服务器网络环境时，默认可在服务器上读取和诊断；不要暴露或改动 SSH key、系统级配置或 live credentials。
+- 每次成功 push 到远端仓库后，默认登录服务器 `remote`，在 `/root/pycharm_nt` 执行 `git pull --ff-only` 同步代码；如果服务器有本地未提交改动，先 stash 备份再 pull，不要直接覆盖。
 - 涉及框架、runtime、report writer、adapter、配置加载、live/backtest 入口等通用改动时，改完后可以默认在服务器项目目录 `/root/pycharm_nt` 用远端 nt 环境跑 `bintest` 做一次 live/testnet smoke 验证；如果会触碰真实 live credentials、真实下单或需要重启正在运行的生产策略，先说明并等用户确认。
 - Binance aggTrades REST 在当前环境中实际限频较低。大规模历史 tick 拉取必须可恢复并保守限速；遇到 HTTP 429 或 418 后立刻停止，稍后再恢复，不要紧密重试，否则临时封禁可能被延长。
 
