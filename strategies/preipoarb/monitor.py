@@ -55,19 +55,19 @@ def market_table(asset: str, rows: list[dict[str, str]]) -> Table:
     return table
 
 
-def pair_history_table(rows: list[dict[str, str]]) -> Table:
-    table = Table(title="持仓历史", expand=True)
+def pair_table(rows: list[dict[str, str]]) -> Table:
+    table = Table(title="Pairs", expand=True)
     columns = (
         ("asset", "标的", "left"),
-        ("lot", "pair", "right"),
         ("route", "方向", "left"),
+        ("status", "状态", "center"),
         ("qty", "qty", "right"),
         ("entry_edge", "开仓edge", "right"),
-        ("close_edge", "平仓edge", "right"),
-        ("entry_mean", "开仓30m均值", "right"),
-        ("entry_std", "开仓std", "right"),
+        ("actual_entry_edge", "实际开仓edge", "right"),
+        ("target_edge", "平仓目标", "right"),
+        ("entry_mean", "开仓均值", "right"),
+        ("std", "开仓std", "right"),
         ("entry_jump", "偏离bps", "right"),
-        ("status", "状态", "center"),
         ("opened_at", "开仓北京时间", "left"),
         ("hold_min", "持有分钟", "right"),
     )
@@ -77,9 +77,7 @@ def pair_history_table(rows: list[dict[str, str]]) -> Table:
         table.add_row(*("-" for _ in columns))
         return table
     for row in rows:
-        table.add_row(
-            *(str(row.get(key, "-")) for key, _, _ in columns),
-        )
+        table.add_row(*(str(row.get(key, "-")) for key, _, _ in columns))
     return table
 
 
@@ -94,7 +92,7 @@ def build_view(payload: dict, path: Path) -> Group:
         parts.extend(tables[2:])
     else:
         parts.extend(tables)
-    parts.append(pair_history_table(payload.get("pair_rows") or payload.get("position_rows") or []))
+    parts.append(pair_table(payload.get("pair_rows") or []))
     return Group(*parts)
 
 

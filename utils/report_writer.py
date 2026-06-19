@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import traceback
+import re
 from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import datetime
@@ -79,7 +80,10 @@ def runtime_start_ns(settings: dict[str, Any]) -> int | None:
 def report_time(values: pd.Series) -> pd.Series:
     if pd.api.types.is_numeric_dtype(values):
         return pd.to_datetime(values, unit="ns", utc=True, errors="coerce")
-    return pd.to_datetime(values, utc=True, errors="coerce")
+    parsed = pd.to_datetime(values, errors="coerce")
+    if getattr(parsed.dt, "tz", None) is None:
+        return parsed.dt.tz_localize(LOCAL_TZ).dt.tz_convert("UTC")
+    return parsed.dt.tz_convert("UTC")
 
 
 # 返回 NT LoggingConfig 需要的文件日志参数。
@@ -157,13 +161,12 @@ class TraderReportWriter:
             runtime_start_ns(settings),
         )
 
-    # 保存 NT trader 在运行结束后生成的订单和持仓结果。
-    def write_final_reports(self, trader, names=("orders", "positions")) -> None:
+    # 保存 NT trader 在运行结束后生成的订单，并用订单流重建仓位表。
+    def write_final_reports(self, trader, names=("orders",)) -> None:
         if not self.enabled:
             return
         report_fns = {
             "orders": trader.generate_orders_report,
-            "positions": trader.generate_positions_report,
         }
         reports = {}
         for name in names:
@@ -174,8 +177,7 @@ class TraderReportWriter:
                     self.write_csv(self.format_orders(reports[name]), REPORT_FILES[name])
                 elif name == "accounts":
                     self.write_csv(self.filter_nonzero_accounts(reports[name]), REPORT_FILES[name])
-        self.write_position_events(trader)
-        self.write_clean_reports(reports.get("positions", pd.DataFrame()))
+        self.write_positions_from_orders(reports.get("orders", pd.DataFrame()))
         self.localize_runtime_csv("funding_fees.csv")
 
     # 从 NT cache 的全部账户生成最终账户快照。
@@ -207,7 +209,7 @@ class TraderReportWriter:
     def filter_current_run(self, name: str, df: pd.DataFrame) -> pd.DataFrame:
         if self.run_start_ns is None or df.empty:
             return df
-        column = {"orders": "ts_last", "positions": "ts_opened", "position_events": "ts_event"}.get(name)
+        column = {"orders": "ts_last"}.get(name)
         if column is None or column not in df.columns:
             return df
         ts = report_time(df[column])
@@ -227,65 +229,143 @@ class TraderReportWriter:
         )
         return data[balances.abs().sum(axis=1) > 0]
 
-    # 从 NT cache 回写完整仓位事件，补齐停止阶段平仓事件。
-    def write_position_events(self, trader) -> None:
-        rows = []
-        for position in trader._cache.positions():
-            for index, event in enumerate(position.events):
-                row = type(event).to_dict(event)
-                row["ts_event"] = pd.to_datetime(event.ts_event, unit="ns", utc=True)
-                if index == 0:
-                    row["event_type"] = "PositionOpened"
-                elif position.ts_closed and event.ts_event == position.ts_closed:
-                    row["event_type"] = "PositionClosed"
-                else:
-                    row["event_type"] = "PositionChanged"
-                row["adjustment_type"] = row.get("adjustment_type", "")
-                row["quantity_change"] = row.get("quantity_change", "")
-                row["pnl_change"] = row.get("pnl_change", "")
-                row["reason"] = row.get("reason", "")
-                row["event_side"] = row.get("side") or row.get("order_side") or row.get("entry", "")
-                row["fill_quantity"] = row.get("last_qty", "")
-                row["fill_price"] = row.get("last_px", "")
-                rows.append({column: row.get(column) for column in REPORT_COLUMNS["position_events"]})
-            for event in position.adjustments:
-                row = type(event).to_dict(event)
-                row["ts_event"] = pd.to_datetime(event.ts_event, unit="ns", utc=True)
-                row["event_type"] = type(event).__name__
-                row["event_side"] = ""
-                row["fill_quantity"] = ""
-                row["fill_price"] = ""
-                rows.append({column: row.get(column) for column in REPORT_COLUMNS["position_events"]})
-        if rows:
-            self.write_csv(self.filter_current_run("position_events", pd.DataFrame(rows)), "position_events.csv")
+    # 从订单流重建完成仓位，避开交易所固定 position_id 覆盖历史的问题。
+    def write_positions_from_orders(self, orders: pd.DataFrame) -> None:
+        positions = self.build_positions_from_orders(orders)
+        if not positions.empty:
+            self.write_csv(positions, POSITIONS_FILE)
 
-    # 生成更容易看的 positions.csv 和中文 summary.md。
-    def write_clean_reports(self, positions: pd.DataFrame) -> None:
-        trades = self.build_trades(positions)
-        if not trades.empty:
-            self.write_csv(trades, POSITIONS_FILE)
-
-    # 按 position 维度合成交易表，并合并 funding 相关字段。
-    def build_trades(self, positions: pd.DataFrame) -> pd.DataFrame:
-        if positions.empty:
+    # 同一标的和仓位 ID 的连续同向成交合成一个净仓位，归零时写一行。
+    def build_positions_from_orders(self, orders: pd.DataFrame) -> pd.DataFrame:
+        if orders.empty:
             return pd.DataFrame()
 
-        return pd.DataFrame(
-            {
-                "open_time": pd.to_datetime(positions["ts_opened"], unit="ns", utc=True),
-                "close_time": pd.to_datetime(positions["ts_closed"], unit="ns", utc=True),
-                "instrument_id": positions["instrument_id"],
-                "side": positions["entry"],
-                "qty": positions["peak_qty"],
-                "avg_open": positions["avg_px_open"],
-                "avg_close": positions["avg_px_close"],
-                "realized_pnl": positions["realized_pnl"].map(money_to_float),
-                "realized_return": pd.to_numeric(positions["realized_return"], errors="coerce"),
-                "commissions": positions["commissions"].map(commissions_to_float),
-                "duration_min": pd.to_numeric(positions["duration_ns"], errors="coerce") / 60_000_000_000,
-                "position_id": positions["position_id"],
-            },
-        )
+        data = orders.copy()
+        data["filled_qty_num"] = pd.to_numeric(data["filled_qty"], errors="coerce").fillna(0.0)
+        data["avg_px_num"] = pd.to_numeric(data["avg_px"], errors="coerce")
+        data["fee_num"] = data["commissions"].map(commissions_to_float)
+        data["order_time"] = report_time(data["ts_last"])
+        data["source_seq"] = range(len(data))
+        data["order_seq"] = [
+            sequence if sequence is not None else source
+            for sequence, source in zip(data["client_order_id"].map(order_sequence), data["source_seq"])
+        ]
+        data = data[(data["filled_qty_num"] > 0) & data["avg_px_num"].notna() & data["order_time"].notna()]
+        if data.empty:
+            return pd.DataFrame()
+
+        rows = []
+        keys = ["instrument_id", "position_id"]
+        for (_, _), group in data.sort_values(["order_time", "order_seq"]).groupby(keys, dropna=False, sort=False):
+            state = None
+            for order in group.sort_values(["order_time", "order_seq"]).to_dict("records"):
+                state = self.apply_order_to_position_state(state, order, rows)
+            # 未平仓不写入完成仓位表；summary 只统计完成仓位。
+        return pd.DataFrame(rows)
+
+    # 将一笔订单应用到当前净仓位；如果反手，会拆成平旧仓和开新仓。
+    def apply_order_to_position_state(self, state: dict[str, Any] | None, order: dict[str, Any], rows: list[dict[str, Any]]):
+        side = str(order["side"])
+        qty = float(order["filled_qty_num"])
+        px = float(order["avg_px_num"])
+        fee = float(order["fee_num"])
+        remaining = qty
+        remaining_fee = fee
+        direction = 1 if side == "BUY" else -1
+
+        while remaining > 1e-12:
+            if state is None:
+                return new_position_state(order, side, remaining, px, remaining_fee)
+
+            state_dir = 1 if state["side"] == "BUY" else -1
+            if state_dir == direction:
+                add_to_position_state(state, order, remaining, px, remaining_fee)
+                return state
+
+            close_qty = min(state["qty"], remaining)
+            close_fee = remaining_fee * close_qty / remaining if remaining else 0.0
+            close_position_state(state, order, close_qty, px, close_fee)
+            remaining -= close_qty
+            remaining_fee -= close_fee
+            if state["qty"] <= 1e-12:
+                rows.append(finished_position_row(state, order))
+                state = None
+        return state
+
+
+# 从客户端订单 ID 取递增序号；没有序号时保持原始相对顺序。
+def order_sequence(value: Any) -> int | None:
+    match = re.search(r"(\d+)$", str(value))
+    return int(match.group(1)) if match else None
+
+
+# 创建一个由订单流驱动的净仓位状态。
+def new_position_state(order: dict[str, Any], side: str, qty: float, px: float, fee: float) -> dict[str, Any]:
+    return {
+        "open_time": order["order_time"],
+        "close_time": None,
+        "instrument_id": order["instrument_id"],
+        "side": side,
+        "qty": qty,
+        "peak_qty": qty,
+        "open_notional": qty * px,
+        "close_notional": 0.0,
+        "closed_open_notional": 0.0,
+        "closed_qty": 0.0,
+        "gross_pnl": 0.0,
+        "fees": fee,
+        "position_id": order.get("position_id", ""),
+        "opening_order_id": order.get("client_order_id", ""),
+        "closing_order_id": "",
+    }
+
+
+# 同向成交视为对当前净仓位加仓。
+def add_to_position_state(state: dict[str, Any], order: dict[str, Any], qty: float, px: float, fee: float) -> None:
+    state["qty"] += qty
+    state["peak_qty"] = max(state["peak_qty"], state["qty"])
+    state["open_notional"] += qty * px
+    state["fees"] += fee
+
+
+# 反向成交视为平仓，直到净仓位归零或订单剩余部分反手开新仓。
+def close_position_state(state: dict[str, Any], order: dict[str, Any], qty: float, px: float, fee: float) -> None:
+    avg_open = state["open_notional"] / state["qty"]
+    gross = (px - avg_open) * qty if state["side"] == "BUY" else (avg_open - px) * qty
+    state["qty"] -= qty
+    state["open_notional"] = avg_open * state["qty"]
+    state["close_notional"] += qty * px
+    state["closed_open_notional"] += qty * avg_open
+    state["closed_qty"] += qty
+    state["gross_pnl"] += gross
+    state["fees"] += fee
+    state["close_time"] = order["order_time"]
+    state["closing_order_id"] = order.get("client_order_id", "")
+
+
+# 把已归零的净仓位转成 positions.csv 的一行。
+def finished_position_row(state: dict[str, Any], order: dict[str, Any]) -> dict[str, Any]:
+    avg_close = state["close_notional"] / state["closed_qty"] if state["closed_qty"] else 0.0
+    avg_open = state["closed_open_notional"] / state["closed_qty"] if state["closed_qty"] else 0.0
+    close_time = state["close_time"] or order["order_time"]
+    duration = (close_time - state["open_time"]).total_seconds() / 60
+    return {
+        "open_time": state["open_time"],
+        "close_time": close_time,
+        "instrument_id": state["instrument_id"],
+        "side": state["side"],
+        "qty": state["peak_qty"],
+        "avg_open": avg_open,
+        "avg_close": avg_close,
+        "realized_pnl": state["gross_pnl"] - state["fees"],
+        "realized_return": state["gross_pnl"] / state["closed_open_notional"] if state["closed_open_notional"] else 0.0,
+        "commissions": state["fees"],
+        "duration_min": duration,
+        "position_id": state["position_id"],
+        "opening_order_id": state["opening_order_id"],
+        "closing_order_id": state["closing_order_id"],
+    }
+
 
 # 保存 NT trader 生成的订单、持仓报告。
 def write_trader_reports(trader, settings: dict[str, Any], run_type: str) -> None:
@@ -305,13 +385,13 @@ def print_backtest_summary(payload: dict[str, Any], settings: dict[str, Any]) ->
         "回测摘要",
         [
             ("回测总览", ("指标", "数值"), backtest_overview_rows(payload, settings)),
-            ("交易统计", ("指标", "数值"), trade_stats_rows(output_dir, elapsed_days)),
+            ("仓位统计", ("指标", "数值"), trade_stats_rows(output_dir, elapsed_days)),
             (
                 "标的统计",
-                ("标的", "交易数", "胜率", "净收益", "收益率", "平均收益", "最大盈利", "最大亏损", "手续费"),
+                ("标的", "仓位数", "胜率", "净收益", "收益率", "平均收益", "最大盈利", "最大亏损", "手续费"),
                 instrument_stats_rows(output_dir),
             ),
-            ("订单执行统计", ("指标", "数值"), order_stats_rows(output_dir)),
+            ("订单执行统计", ("指标", "数值"), order_stats_rows(output_dir, elapsed_days)),
         ],
         output_dir,
     )
@@ -329,13 +409,13 @@ def print_live_summary(settings: dict[str, Any]) -> None:
         "运行摘要",
         [
             ("运行总览", ("指标", "数值"), live_overview_rows(settings, output_dir)),
-            ("交易统计", ("指标", "数值"), trade_stats_rows(output_dir, elapsed_days)),
+            ("仓位统计", ("指标", "数值"), trade_stats_rows(output_dir, elapsed_days)),
             (
                 "标的统计",
-                ("标的", "交易数", "胜率", "净收益", "收益率", "平均收益", "最大盈利", "最大亏损", "手续费"),
+                ("标的", "仓位数", "胜率", "净收益", "收益率", "平均收益", "最大盈利", "最大亏损", "手续费"),
                 instrument_stats_rows(output_dir),
             ),
-            ("订单执行统计", ("指标", "数值"), order_stats_rows(output_dir)),
+            ("订单执行统计", ("指标", "数值"), order_stats_rows(output_dir, elapsed_days)),
         ],
         output_dir,
     )
@@ -343,14 +423,14 @@ def print_live_summary(settings: dict[str, Any]) -> None:
     print_summary_tables(console, build_live_overview_table(settings, output_dir), output_dir, elapsed_days)
 
 
-# 总览、交易统计、订单统计并排显示；标的统计较宽，单独放下面。
+# 总览、仓位统计、订单统计并排显示；标的统计较宽，单独放下面。
 def print_summary_tables(console: Console, overview: Table, output_dir: Path, elapsed_days: float) -> None:
     console.print(
         Columns(
             (
                 overview,
                 build_trade_stats_table(output_dir, elapsed_days),
-                build_order_stats_table(output_dir),
+                build_order_stats_table(output_dir, elapsed_days),
             ),
             equal=True,
             expand=True,
@@ -448,6 +528,7 @@ def live_overview_rows(settings: dict[str, Any], output_dir: Path) -> list[tuple
         ("报告目录", output_dir.name),
         ("markets", symbols),
         ("交易标的", traded_symbol_count(output_dir)),
+        ("净收益", format_number(net_pnl(output_dir))),
         ("生成时间", datetime.now(LOCAL_TZ).strftime("%Y-%m-%d %H:%M:%S")),
     ]
 
@@ -478,11 +559,11 @@ def short_symbol(value: Any) -> str:
     return text.split(".")[0].replace("USDT-PERP", "")
 
 
-# 从持仓汇总表组装交易统计表。
+# 从订单重建的持仓汇总表组装仓位统计表。
 def build_trade_stats_table(output_dir: Path, elapsed_days: float) -> Table | None:
     rows = trade_stats_rows(output_dir, elapsed_days)
 
-    table = Table(title="交易统计")
+    table = Table(title="仓位统计")
     table.add_column("指标")
     table.add_column("数值", justify="right")
     for label, value in rows:
@@ -490,18 +571,15 @@ def build_trade_stats_table(output_dir: Path, elapsed_days: float) -> Table | No
     return table
 
 
-# 从持仓汇总表组装交易统计行。
+# 从订单重建的持仓汇总表组装仓位统计行。
 def trade_stats_rows(output_dir: Path, elapsed_days: float) -> list[tuple[str, str]]:
     positions = read_report_csv(output_dir, POSITIONS_FILE)
     if positions.empty:
         return [
-            ("已完成交易数", "0"),
-            ("多单数量", "0"),
-            ("空单数量", "0"),
-            ("平均每日交易数", "0"),
+            ("完成仓位数", "0"),
             ("胜率", "0%"),
             ("净收益", "0"),
-            ("平均单笔收益", "0"),
+            ("平均仓位收益", "0"),
             ("总手续费", "0"),
             ("平均持仓分钟", "0"),
             ("最长持仓分钟", "0"),
@@ -514,16 +592,13 @@ def trade_stats_rows(output_dir: Path, elapsed_days: float) -> list[tuple[str, s
     losses = pnl[pnl < 0]
     gross_profit = wins.sum()
     return [
-        ("已完成交易数", format_int(len(positions))),
-        ("多单数量", format_int((positions["方向"] == "BUY").sum())),
-        ("空单数量", format_int((positions["方向"] == "SELL").sum())),
-        ("平均每日交易数", format_number(len(positions) / elapsed_days if elapsed_days else 0)),
+        ("完成仓位数", format_int(len(positions))),
         ("胜率", format_percent((pnl > 0).mean())),
-        ("净收益", format_number(pnl.sum())),
-        ("平均单笔收益", format_number(pnl.mean())),
-        ("单笔收益中位数", format_number(pnl.median())),
-        ("盈利单平均收益", format_number(wins.mean())),
-        ("亏损单平均亏损", format_number(losses.mean())),
+        ("净收益", format_number(net_pnl(output_dir))),
+        ("平均仓位收益", format_number(pnl.mean())),
+        ("仓位收益中位数", format_number(pnl.median())),
+        ("盈利仓位平均收益", format_number(wins.mean())),
+        ("亏损仓位平均亏损", format_number(losses.mean())),
         ("最大盈利", format_number(pnl.max())),
         ("最大亏损", format_number(pnl.min())),
         ("总手续费", format_number(fees.sum())),
@@ -533,6 +608,14 @@ def trade_stats_rows(output_dir: Path, elapsed_days: float) -> list[tuple[str, s
     ]
 
 
+# 当前通用报告按订单重建出的完成仓位统计收益。
+def net_pnl(output_dir: Path) -> float:
+    positions = read_report_csv(output_dir, POSITIONS_FILE)
+    if positions.empty:
+        return 0.0
+    return positions["已实现盈亏"].map(money_to_float).sum()
+
+
 # 从持仓汇总表按标的聚合统计。
 def build_instrument_stats_table(output_dir: Path) -> Table | None:
     rows = instrument_stats_rows(output_dir)
@@ -540,7 +623,7 @@ def build_instrument_stats_table(output_dir: Path) -> Table | None:
     table = Table(title="标的统计")
     for column, justify in (
         ("标的", "left"),
-        ("交易数", "right"),
+        ("仓位数", "right"),
         ("胜率", "right"),
         ("净收益", "right"),
         ("收益率", "right"),
@@ -585,8 +668,8 @@ def instrument_stats_rows(output_dir: Path) -> list[tuple[str, ...]]:
 
 
 # 从订单和成交表组装执行统计表。
-def build_order_stats_table(output_dir: Path) -> Table | None:
-    rows = order_stats_rows(output_dir)
+def build_order_stats_table(output_dir: Path, elapsed_days: float = 0.0) -> Table | None:
+    rows = order_stats_rows(output_dir, elapsed_days)
 
     table = Table(title="订单执行统计")
     table.add_column("指标")
@@ -597,11 +680,14 @@ def build_order_stats_table(output_dir: Path) -> Table | None:
 
 
 # 从订单和成交表组装执行统计行。
-def order_stats_rows(output_dir: Path) -> list[tuple[str, str]]:
+def order_stats_rows(output_dir: Path, elapsed_days: float = 0.0) -> list[tuple[str, str]]:
     orders = read_report_csv(output_dir, "orders.csv")
     if orders.empty:
         return [
             ("订单总数", "0"),
+            ("平均每日交易数", "0"),
+            ("多单数量", "0"),
+            ("空单数量", "0"),
             ("有成交订单数", "0"),
             ("已完成订单数", "0"),
             ("已取消订单数", "0"),
@@ -610,6 +696,9 @@ def order_stats_rows(output_dir: Path) -> list[tuple[str, str]]:
     filled_qty = pd.to_numeric(orders["已成交数量"], errors="coerce").fillna(0)
     return [
         ("订单总数", format_int(len(orders))),
+        ("平均每日交易数", format_number(len(orders) / elapsed_days if elapsed_days else 0)),
+        ("多单数量", format_int((orders["方向"] == "BUY").sum())),
+        ("空单数量", format_int((orders["方向"] == "SELL").sum())),
         ("有成交订单数", format_int((filled_qty > 0).sum())),
         ("已完成订单数", format_int((orders["订单状态"] == "FILLED").sum())),
         ("已取消订单数", format_int((orders["订单状态"] == "CANCELED").sum())),

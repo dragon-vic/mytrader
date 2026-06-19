@@ -40,7 +40,6 @@ TIMEFRAME_UNITS = {"s": "SECOND", "m": "MINUTE", "h": "HOUR", "d": "DAY"}
 # 报告文件名。
 ORDERS_FILE = "orders.csv"
 POSITIONS_FILE = "positions.csv"
-POSITION_EVENTS_FILE = "position_events.csv"
 SUMMARY_FILE = "summary.md"
 
 REPORT_FILES = {
@@ -50,7 +49,6 @@ REPORT_FILES = {
 LIVE_RESULT_FILES = (
     ORDERS_FILE,
     POSITIONS_FILE,
-    POSITION_EVENTS_FILE,
     "orders_aggregate.csv",
     "positions_aggregate.csv",
     "accounts_aggregate.csv",
@@ -63,6 +61,7 @@ LIVE_RESULT_FILES = (
 
 OBSOLETE_REPORT_FILES = (
     "account_states.csv",
+    "position_events.csv",
     "trades.csv",
     "summary.csv",
     "fills_clean.csv",
@@ -112,37 +111,4 @@ REPORT_COLUMNS = {
         "reported",
         "info",
     ],
-    "position_events": [
-        "ts_event",
-        "event_type",
-        "instrument_id",
-        "event_side",
-        "fill_quantity",
-        "fill_price",
-        "realized_pnl",
-        "adjustment_type",
-        "quantity_change",
-        "pnl_change",
-        "reason",
-        "account_id",
-        "strategy_id",
-        "position_id",
-    ],
 }
-
-POSITION_COLUMNS = [
-    "ts_event",
-    "instrument_id",
-    "event_side",
-    "fill_quantity",
-    "fill_price",
-    "realized_pnl",
-    "adjustment_type",
-    "quantity_change",
-    "pnl_change",
-    "reason",
-    "event_type",
-    "account_id",
-    "strategy_id",
-    "position_id",
-]
