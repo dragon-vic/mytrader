@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 import traceback
 import re
@@ -381,22 +382,19 @@ def write_backtest_result(result, settings: dict[str, Any]) -> dict[str, Any]:
 def print_backtest_summary(payload: dict[str, Any], settings: dict[str, Any]) -> None:
     output_dir = run_reports_dir(settings, "backtest")
     elapsed_days = float(payload.get("elapsed_time") or 0) / 86400
-    write_summary_markdown(
-        "回测摘要",
-        [
-            ("回测总览", ("指标", "数值"), backtest_overview_rows(payload, settings)),
-            ("仓位统计", ("指标", "数值"), trade_stats_rows(output_dir, elapsed_days)),
-            (
-                "标的统计",
-                ("标的", "仓位数", "胜率", "净收益", "收益率", "平均收益", "最大盈利", "最大亏损", "手续费"),
-                instrument_stats_rows(output_dir),
-            ),
-            ("订单执行统计", ("指标", "数值"), order_stats_rows(output_dir, elapsed_days)),
-        ],
-        output_dir,
-    )
+    sections = [
+        ("回测总览", ("指标", "数值"), backtest_overview_rows(payload, settings)),
+        ("仓位统计", ("指标", "数值"), trade_stats_rows(output_dir, elapsed_days)),
+        (
+            "标的统计",
+            ("标的", "仓位数", "胜率", "净收益", "收益率", "平均收益", "最大盈利", "最大亏损", "手续费"),
+            instrument_stats_rows(output_dir),
+        ),
+        ("订单执行统计", ("指标", "数值"), order_stats_rows(output_dir, elapsed_days)),
+    ]
+    write_summary_json("回测摘要", sections, output_dir)
     console = Console()
-    print_summary_tables(console, build_backtest_overview_table(payload, settings), output_dir, elapsed_days)
+    print_summary_tables(console, sections)
 
 
 # 打印 live/testnet 结束摘要。
@@ -405,72 +403,60 @@ def print_live_summary(settings: dict[str, Any]) -> None:
         return
     output_dir = run_reports_dir(settings, "live")
     elapsed_days = report_elapsed_days(output_dir)
-    write_summary_markdown(
-        "运行摘要",
-        [
-            ("运行总览", ("指标", "数值"), live_overview_rows(settings, output_dir)),
-            ("仓位统计", ("指标", "数值"), trade_stats_rows(output_dir, elapsed_days)),
-            (
-                "标的统计",
-                ("标的", "仓位数", "胜率", "净收益", "收益率", "平均收益", "最大盈利", "最大亏损", "手续费"),
-                instrument_stats_rows(output_dir),
-            ),
-            ("订单执行统计", ("指标", "数值"), order_stats_rows(output_dir, elapsed_days)),
-        ],
-        output_dir,
-    )
+    sections = [
+        ("运行总览", ("指标", "数值"), live_overview_rows(settings, output_dir)),
+        ("仓位统计", ("指标", "数值"), trade_stats_rows(output_dir, elapsed_days)),
+        (
+            "标的统计",
+            ("标的", "仓位数", "胜率", "净收益", "收益率", "平均收益", "最大盈利", "最大亏损", "手续费"),
+            instrument_stats_rows(output_dir),
+        ),
+        ("订单执行统计", ("指标", "数值"), order_stats_rows(output_dir, elapsed_days)),
+    ]
+    write_summary_json("运行摘要", sections, output_dir)
     console = Console()
-    print_summary_tables(console, build_live_overview_table(settings, output_dir), output_dir, elapsed_days)
+    print_summary_tables(console, sections)
+
+
+# 保存结构化摘要，终端展示时再渲染成 Rich 表格。
+def write_summary_json(
+    title: str,
+    sections: list[tuple[str, tuple[str, ...], list[tuple[Any, ...]]]],
+    output_dir: Path,
+) -> None:
+    payload = {
+        "title": title,
+        "generated_at": datetime.now(LOCAL_TZ).strftime("%Y-%m-%d %H:%M:%S"),
+        "sections": [
+            {
+                "title": section,
+                "headers": list(headers),
+                "rows": [[str(value) for value in row] for row in rows],
+            }
+            for section, headers, rows in sections
+            if rows
+        ],
+    }
+    (output_dir / SUMMARY_FILE).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 # 总览、仓位统计、订单统计并排显示；标的统计较宽，单独放下面。
-def print_summary_tables(console: Console, overview: Table, output_dir: Path, elapsed_days: float) -> None:
-    console.print(
-        Columns(
-            (
-                overview,
-                build_trade_stats_table(output_dir, elapsed_days),
-                build_order_stats_table(output_dir, elapsed_days),
-            ),
-            equal=True,
-            expand=True,
-        )
-    )
-    console.print(build_instrument_stats_table(output_dir))
+def print_summary_tables(console: Console, sections: list[tuple[str, tuple[str, ...], list[tuple[Any, ...]]]]) -> None:
+    tables = [summary_table(title, headers, rows) for title, headers, rows in sections if rows]
+    top = [table for table in tables if table.title != "标的统计"]
+    instruments = [table for table in tables if table.title == "标的统计"]
+    if top:
+        console.print(Columns(top, equal=True, expand=True))
+    for table in instruments:
+        console.print(table)
 
 
-# 保存终端同款表格到 markdown 摘要。
-def write_summary_markdown(
-    title: str,
-    sections: list[tuple[str, tuple[str, ...], list[tuple[str, ...]]]],
-    output_dir: Path,
-) -> None:
-    lines = [f"# {title}", ""]
-    for section, headers, rows in sections:
-        if not rows:
-            continue
-        lines.extend([f"## {section}", "", markdown_table(headers, rows), ""])
-    (output_dir / SUMMARY_FILE).write_text("\n".join(lines), encoding="utf-8-sig")
-
-
-# 组装 markdown 表格。
-def markdown_table(headers: tuple[str, ...], rows: list[tuple[str, ...]]) -> str:
-    lines = [
-        "| " + " | ".join(headers) + " |",
-        "| " + " | ".join("---" for _ in headers) + " |",
-    ]
+def summary_table(title: str, headers: tuple[str, ...], rows: list[tuple[Any, ...]]) -> Table:
+    table = Table(title=title)
+    for index, header in enumerate(headers):
+        table.add_column(str(header), justify="left" if index == 0 else "right")
     for row in rows:
-        lines.append("| " + " | ".join(str(value) for value in row) + " |")
-    return "\n".join(lines)
-
-
-# 用 NT 回测结果组装总体概览表。
-def build_backtest_overview_table(payload: dict[str, Any], settings: dict[str, Any]) -> Table:
-    table = Table(title="回测总览")
-    table.add_column("指标")
-    table.add_column("数值", justify="right")
-    for label, value in backtest_overview_rows(payload, settings):
-        table.add_row(label, value)
+        table.add_row(*(str(value) for value in row))
     return table
 
 
@@ -505,22 +491,9 @@ def backtest_overview_rows(payload: dict[str, Any], settings: dict[str, Any]) ->
     ]
 
 
-# 用 live/testnet 运行结果组装总体概览表。
-def build_live_overview_table(settings: dict[str, Any], output_dir: Path) -> Table:
-    table = Table(title="运行总览")
-    table.add_column("指标")
-    table.add_column("数值", justify="right")
-    for label, value in live_overview_rows(settings, output_dir):
-        table.add_row(label, value)
-    return table
-
-
 # 用 live/testnet 已落盘报告组装总体概览行。
 def live_overview_rows(settings: dict[str, Any], output_dir: Path) -> list[tuple[str, str]]:
-    markets = settings["markets"]
     symbols = market_symbols(settings, "live")
-    orders = read_report_csv(output_dir, "orders.csv")
-    positions = read_report_csv(output_dir, POSITIONS_FILE)
     return [
         ("配置名", settings["project"]["config_name"]),
         ("策略名", settings["strategy"]["name"]),
@@ -557,18 +530,6 @@ def traded_symbol_count(output_dir: Path) -> str:
 def short_symbol(value: Any) -> str:
     text = str(value)
     return text.split(".")[0].replace("USDT-PERP", "")
-
-
-# 从订单重建的持仓汇总表组装仓位统计表。
-def build_trade_stats_table(output_dir: Path, elapsed_days: float) -> Table | None:
-    rows = trade_stats_rows(output_dir, elapsed_days)
-
-    table = Table(title="仓位统计")
-    table.add_column("指标")
-    table.add_column("数值", justify="right")
-    for label, value in rows:
-        table.add_row(label, value)
-    return table
 
 
 # 从订单重建的持仓汇总表组装仓位统计行。
@@ -616,29 +577,6 @@ def net_pnl(output_dir: Path) -> float:
     return positions["已实现盈亏"].map(money_to_float).sum()
 
 
-# 从持仓汇总表按标的聚合统计。
-def build_instrument_stats_table(output_dir: Path) -> Table | None:
-    rows = instrument_stats_rows(output_dir)
-
-    table = Table(title="标的统计")
-    for column, justify in (
-        ("标的", "left"),
-        ("仓位数", "right"),
-        ("胜率", "right"),
-        ("净收益", "right"),
-        ("收益率", "right"),
-        ("平均收益", "right"),
-        ("最大盈利", "right"),
-        ("最大亏损", "right"),
-        ("手续费", "right"),
-    ):
-        table.add_column(column, justify=justify)
-
-    for row in rows:
-        table.add_row(*row)
-    return table
-
-
 # 从持仓汇总表按标的聚合统计行。
 def instrument_stats_rows(output_dir: Path) -> list[tuple[str, ...]]:
     positions = read_report_csv(output_dir, POSITIONS_FILE)
@@ -665,18 +603,6 @@ def instrument_stats_rows(output_dir: Path) -> list[tuple[str, ...]]:
             format_number(group["手续费"].sum()),
         ))
     return sorted(rows, key=lambda row: money_to_float(row[3]), reverse=True)
-
-
-# 从订单和成交表组装执行统计表。
-def build_order_stats_table(output_dir: Path, elapsed_days: float = 0.0) -> Table | None:
-    rows = order_stats_rows(output_dir, elapsed_days)
-
-    table = Table(title="订单执行统计")
-    table.add_column("指标")
-    table.add_column("数值", justify="right")
-    for label, value in rows:
-        table.add_row(label, value)
-    return table
 
 
 # 从订单和成交表组装执行统计行。
@@ -723,9 +649,12 @@ def report_elapsed_days(output_dir: Path) -> float:
 # 读取报告 CSV，文件不存在表示本次没有生成这类报告。
 def read_report_csv(output_dir: Path, filename: str) -> pd.DataFrame:
     path = output_dir / filename
-    if not path.exists():
+    if not path.exists() or path.stat().st_size == 0:
         return pd.DataFrame()
-    return pd.read_csv(path)
+    try:
+        return pd.read_csv(path)
+    except pd.errors.EmptyDataError:
+        return pd.DataFrame()
 
 
 # 报告里所有时间字段统一显示北京时间。

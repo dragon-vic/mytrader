@@ -3,29 +3,46 @@ strategy:
   params:
     assets: [OPENAI, ANTHROPIC]
     instruments: enabled
-    spread_mode: mean_deviation
-    one_sided: true
-    entry_bps: "400"
-    exit_bps: "40"
-    lookback_sec: 1800
+
+    # 启动时用最近 3h 历史成交近似 bid/ask，预热 long_edge 和 short_edge 两条线。
     min_window_sec: 0
-    init_fetch_sec: 1800
+    init_fetch_sec: 10800
     init_fetch_timeout_sec: 90
-    init_blend_sec: 1800
-    initial_mean_bps:
-      OPENAI: 256.55
-      ANTHROPIC: 128.24
-    initial_std_bps:
-      OPENAI: 56.16
-      ANTHROPIC: 45.83
-    entry_z: "2.25"
-    exit_z: "0.0"
-    min_entry_bps: "150"
-    min_entry_jump_bps: "40"
-    add_entry_std_mult: "1.5"
+
+    # 两条 edge 线分别用 3h 时间等权均线；不再使用 30m 均线/波动做信号。
+    grid_center_sec: 10800
+
+    # 每个标的单独配置网格参数，避免顶层默认值和 asset 覆盖值不一致。
+    # grid_band_bps: long_edge 低于均线多少开 long；short_edge 高于均线多少开 short。
+    # grid_step_bps: 同方向加仓的网格间距；新 level 必须高于当前最高 level。
+    # grid_confirm_quotes: 同一方向同一 level 需要连续多少个 quote 确认。
+    # grid_open_gap_sec: 非平仓动作之间的最小间隔；0 表示不做时间冷却。
+    # grid_max_inventory: 每个标的最多持有的净 pair 数。
+    # min_capture_bps: 平仓必须满足对应 pair 的实际 edge capture 下限。
+    asset_grid_params:
+      OPENAI:
+        grid_band_bps: "30"
+        grid_step_bps: "25"
+        grid_confirm_quotes: 2
+        grid_open_gap_sec: 0
+        grid_max_inventory: 4
+        min_capture_bps: "40"
+      ANTHROPIC:
+        grid_band_bps: "30"
+        grid_step_bps: "25"
+        grid_confirm_quotes: 2
+        grid_open_gap_sec: 0
+        grid_max_inventory: 4
+        min_capture_bps: "40"
+
+    # 每次 pair 两边都下同一个最小 qty；trade_notional 只用于启动/开仓前 USDT 检查。
     trade_notional: "20"
     trade_qty: "0.01"
-    max_quote_age_sec: 0
+
+    # quote 过旧会让信号 edge 和实际成交 edge 偏离；0.5s 是当前 bidask1 研究后的默认值。
+    max_quote_age_sec: 0.5
+
+    # live 运行时 snapshot 写到当前 report 目录，monitor/start 会读取这个文件显示 rich 表格。
     snapshot_interval_sec: 1
     snapshot_display: file
     snapshot_path: auto

@@ -3,9 +3,9 @@ from __future__ import annotations
 
 # run.py 的交互模式和命令行模式。
 MODE_OPTIONS = [
+    ("实盘", "live"),
     ("模拟盘", "testnet"),
     ("回测", "backtest"),
-    ("实盘", "live"),
 ]
 RUN_MODES = ("backtest", "testnet", "live")
 
@@ -40,7 +40,7 @@ TIMEFRAME_UNITS = {"s": "SECOND", "m": "MINUTE", "h": "HOUR", "d": "DAY"}
 # 报告文件名。
 ORDERS_FILE = "orders.csv"
 POSITIONS_FILE = "positions.csv"
-SUMMARY_FILE = "summary.md"
+SUMMARY_FILE = "summary.json"
 
 REPORT_FILES = {
     "orders": ORDERS_FILE,
@@ -55,7 +55,6 @@ LIVE_RESULT_FILES = (
     "fills.csv",
     "live_report.csv",
     "live_report_aggregate.csv",
-    "summary.md",
     SUMMARY_FILE,
 )
 
