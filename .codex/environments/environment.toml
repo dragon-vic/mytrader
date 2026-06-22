@@ -8,9 +8,9 @@ script = ""
 [[actions]]
 name = "运行"
 icon = "run"
-command = "nt"
+command = "start"
 
 [[actions]]
 name = "运行"
 icon = "run"
-command = "nt"
+command = "start"

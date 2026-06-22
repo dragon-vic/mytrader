@@ -4,17 +4,17 @@ strategy:
     assets: [OPENAI, ANTHROPIC]
     instruments: enabled
 
-    # 启动时用最近 3h 历史成交近似 bid/ask，预热 long_edge 和 short_edge 两条线。
-    min_window_sec: 0
+    # 启动时读取 collector 保存的最近 3h bid/ask1；不足 3h 就先用已有窗口。
+    # 信号至少需要 2h 窗口，collector 不足 2h 时启动后继续等实时 quote 补齐。
+    min_window_sec: 7200
     init_fetch_sec: 10800
-    init_fetch_timeout_sec: 90
 
     # 两条 edge 线分别用 3h 时间等权均线；不再使用 30m 均线/波动做信号。
     grid_center_sec: 10800
 
     # 每个标的单独配置网格参数，避免顶层默认值和 asset 覆盖值不一致。
     # grid_band_bps: long_edge 低于均线多少开 long；short_edge 高于均线多少开 short。
-    # grid_step_bps: 同方向加仓的网格间距；新 level 必须高于当前最高 level。
+    # grid_step_bps: 同方向加仓的网格间距；short 要比当前最大开仓 edge 更高，long 要比当前最小开仓 edge 更低。
     # grid_confirm_quotes: 同一方向同一 level 需要连续多少个 quote 确认。
     # grid_open_gap_sec: 非平仓动作之间的最小间隔；0 表示不做时间冷却。
     # grid_max_inventory: 每个标的最多持有的净 pair 数。
@@ -26,21 +26,17 @@ strategy:
         grid_confirm_quotes: 2
         grid_open_gap_sec: 0
         grid_max_inventory: 4
-        min_capture_bps: "40"
+        min_capture_bps: "0"
       ANTHROPIC:
         grid_band_bps: "30"
         grid_step_bps: "25"
         grid_confirm_quotes: 2
         grid_open_gap_sec: 0
         grid_max_inventory: 4
-        min_capture_bps: "40"
+        min_capture_bps: "0"
 
-    # 每次 pair 两边都下同一个最小 qty；trade_notional 只用于启动/开仓前 USDT 检查。
-    trade_notional: "20"
-    trade_qty: "0.01"
-
-    # quote 过旧会让信号 edge 和实际成交 edge 偏离；0.5s 是当前 bidask1 研究后的默认值。
-    max_quote_age_sec: 0.5
+    # 每次 pair 两边都下同一个 qty；资金检查按当前 quote * trade_qty 计算。
+    trade_qty: "0.05"
 
     # live 运行时 snapshot 写到当前 report 目录，monitor/start 会读取这个文件显示 rich 表格。
     snapshot_interval_sec: 1

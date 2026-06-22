@@ -9,7 +9,10 @@ data/
 !strategies/maxfunding/data/**
 reports/
 strategies/*/report/
-strategies/*/research/raw/
+strategies/*/research/*
+!strategies/*/research/tools/
+!strategies/*/research/tools/*.py
+!strategies/preipoarb/research/EDGE_CHART_STYLE.md
 logs/
 strategies/preipoarb/preipo_arb_snapshot.json
 .gitignore

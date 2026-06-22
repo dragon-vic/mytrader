@@ -60,57 +60,55 @@ def action_table(rows: list[dict[str, str]]) -> Table:
     columns = (
         ("asset", "标的", "left"),
         ("action", "动作", "center"),
-        ("edge_side", "方向", "left"),
-        ("route", "路线", "left"),
         ("status", "状态", "center"),
         ("qty", "qty", "right"),
         ("signal_edge", "信号edge", "right"),
-        ("actual_edge", "实际edge", "right"),
-        ("edge_slippage", "偏差bps", "right"),
+        ("edge_slippage", "滑点", "right"),
         ("mean", "均值", "right"),
         ("std", "波动", "right"),
-        ("level", "层级", "right"),
         ("close_lot", "平lot", "right"),
-        ("expected_capture", "预期收益", "right"),
-        ("realized_capture", "实际收益", "right"),
         ("inventory", "库存", "right"),
         ("time", "北京时间", "left"),
         ("age_min", "分钟", "right"),
     )
     for key, label, justify in columns:
-        table.add_column(label, justify=justify, no_wrap=key not in {"route", "time"})
+        table.add_column(label, justify=justify, no_wrap=key != "time")
     if not rows:
         table.add_row(*("-" for _ in columns))
         return table
     for row in rows:
-        table.add_row(*(str(row.get(key, "-")) for key, _, _ in columns))
+        table.add_row(*(action_value(row, key) for key, _, _ in columns))
     return table
+
+
+def action_value(row: dict[str, str], key: str) -> str:
+    if key == "action":
+        side = str(row.get("edge_side", ""))
+        if side == "long_edge":
+            return "long"
+        if side == "short_edge":
+            return "short"
+    return str(row.get(key, "-"))
 
 
 def summary_table(rows: dict[str, dict[str, str]]) -> Table:
     table = Table(title="Summary", expand=True)
-    columns = (
-        ("asset", "标的", "left"),
-        ("inventory", "库存", "right"),
-        ("realized_usdt", "已实现USDT", "right"),
-        ("realized_bps", "已实现bps", "right"),
-        ("unrealized_bps", "未实现bps", "right"),
-        ("total_bps", "总计bps", "right"),
+    metrics = (
+        ("inventory", "库存"),
+        ("realized_usdt", "已实现USDT"),
+        ("realized_bps", "已实现bps"),
+        ("unrealized_bps", "未实现bps"),
+        ("total_bps", "总计bps"),
     )
-    for _, label, justify in columns:
-        table.add_column(label, justify=justify, no_wrap=True)
+    assets = list(rows)
+    table.add_column("指标", justify="left", no_wrap=True)
+    for asset in assets:
+        table.add_column(str(asset), justify="right", no_wrap=True)
     if not rows:
-        table.add_row(*("-" for _ in columns))
+        table.add_row("-")
         return table
-    for asset, row in rows.items():
-        table.add_row(
-            str(asset),
-            str(row.get("inventory", "-")),
-            str(row.get("realized_usdt", "-")),
-            str(row.get("realized_bps", "-")),
-            str(row.get("unrealized_bps", "-")),
-            str(row.get("total_bps", "-")),
-        )
+    for key, label in metrics:
+        table.add_row(label, *(str(rows[asset].get(key, "-")) for asset in assets))
     return table
 
 
@@ -124,12 +122,11 @@ def build_view(payload: dict, path: Path, session_name: str | None, stopping: bo
         keys = "q退出监控 | s停止node" if session_name else "q退出监控"
     parts = [Panel.fit(f"PREIPO Arbitrage Live | 北京时间 {beijing_time} | {keys} | {path}", border_style="cyan")]
     tables = [market_table(str(asset), market_tables.get(str(asset), [])) for asset in assets]
-    if len(tables) >= 2:
-        parts.append(Columns(tables[:2], equal=True, expand=True))
+    first_row = tables[:2] + [summary_table(payload.get("summary") or {})]
+    if first_row:
+        parts.append(Columns(first_row, equal=True, expand=True))
+    if len(tables) > 2:
         parts.extend(tables[2:])
-    else:
-        parts.extend(tables)
-    parts.append(summary_table(payload.get("summary") or {}))
     parts.append(action_table(payload.get("action_rows") or []))
     return Group(*parts)
 

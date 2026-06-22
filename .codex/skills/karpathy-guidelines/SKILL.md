@@ -68,7 +68,7 @@ source: https://github.com/forrestchang/andrej-karpathy-skills
 - 不要添加重复 NautilusTrader 正常事件保证的防御性 guard 或 fallback 检查。策略 callback 尽量贴近 NT 示例，除非已经观察到具体失败。
 - 正常开发期间不要捕获异常来隐藏或转换错误。让错误暴露，然后修根因。
 - 不要把 `None` 作为错误状态返回，迫使调用方分支。必需配置、凭据和依赖应直接访问，缺失时让它抛错。
-- 不要设计参数 fallback 或静默默认值。必需的 runtime/trading 参数必须在 YAML 中显式声明，缺失时失败。如果确实需要共享默认值，放在 `strategies/global.yaml`，让策略 set YAML 通过正常分层覆盖。`trade_notional` 这类策略专用值属于 `strategy.params`，并且只在策略 config 声明时传入。
+- 不要设计参数 fallback 或静默默认值。必需的 runtime/trading 参数必须在 YAML 中显式声明，缺失时失败。如果确实需要共享默认值，放在 `strategies/global.yaml`，让策略 set YAML 通过正常分层覆盖。策略专用交易参数属于 `strategy.params`，并且只在策略 config 声明时传入。
 - 构建 node 时，不要在 Python 代码中引入隐式默认值。每个 node/runtime 设置都必须来自合并后的 YAML，使有效配置可检查；共享默认值属于 `strategies/global.yaml`，策略 set YAML 可以显式覆盖。
 - 本项目只在 Windows 上使用配置的 HTTP proxy。Linux 上即使 `strategies/global.yaml` 包含本地 Windows 代理地址，`proxy_url(settings)` 也应返回 `None`。
 - 做功能行为变更前先和用户确认。小的格式、注释、文档式本地清理可以直接做。
@@ -80,6 +80,20 @@ source: https://github.com/forrestchang/andrej-karpathy-skills
 - 本项目运行 Python 时直接使用 nt conda 环境解释器：`D:\app\miniconda\envs\nt\python.exe`。不要使用 base `python` 或 `conda run`，除非用户明确要求。
 - 如果任务需要未安装的 Python 库，清楚说明所需包，或在用户批准后用 `D:\app\miniconda\envs\nt\python.exe -m pip install ...` 安装到 nt 环境。不要静默用更弱的替代库替换用户请求或更合适的库。
 - 服务器可通过本机 SSH alias `remote` 登录；远端项目目录是 `/root/pycharm_nt`，远端 nt 环境 Python 是 `/root/miniconda/envs/nt/bin/python`。涉及线上 report、tmux 运行态、实盘日志、交易所 REST 延迟或服务器网络环境时，默认可在服务器上读取和诊断；不要暴露或改动 SSH key、系统级配置或 live credentials。
+- 从 Windows PowerShell 调远端 bash 时，不要把包含 `2>/dev/null`、`$(...)`、管道、here-doc 或复杂引号的 bash 片段直接写进 `ssh remote "..."`；PowerShell 可能会把重定向解析成本地 `D:\dev\null`，直接 pipe here-string 也可能重新写入 CRLF。复杂脚本统一 base64 后交给远端 bash：
+  ```powershell
+  $script = @'
+  cd /root/pycharm_nt
+  report=$(ls -dt strategies/preipoarb/report/live-* 2>/dev/null | head -1)
+  echo "$report"
+  '@
+  $clean = $script -replace "`r", ""
+  $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($clean))
+  ssh remote "printf '%s' '$b64' | base64 -d | bash"
+  ```
+- 服务器已安装 `ripgrep`，远端项目内搜索优先用 `rg`；如果极少数环境没有 `rg`，再用 `grep/find` 兜底。
+- 清理 `strategies/preipoarb/research/bidask1-live` 或相关 bidask1 collector 数据时，必须保留最近至少 3 小时的数据，包括已合并的 `merged` 小时文件和当前小时 `raw` 分片；策略 warmup 需要这段真实 quote 数据。
+- 画 `preipoarb` 的 edge、quote、订单、回测或 live 复盘图前，必须先阅读 `strategies/preipoarb/research/EDGE_CHART_STYLE.md` 并按其中规范作图。尤其注意：edge 用点，3h 时间加权均线和 signal 线必须连续可见，订单标签只写实际方向、qty 和 edge。
 - 每次成功 push 到远端仓库后，默认登录服务器 `remote`，在 `/root/pycharm_nt` 执行 `git pull --ff-only` 同步代码；如果服务器有本地未提交改动，先 stash 备份再 pull，不要直接覆盖。
 - 涉及框架、runtime、report writer、adapter、配置加载、live/backtest 入口等通用改动时，改完后可以默认在服务器项目目录 `/root/pycharm_nt` 用远端 nt 环境跑 `bintest` 做一次 live/testnet smoke 验证；如果会触碰真实 live credentials、真实下单或需要重启正在运行的生产策略，先说明并等用户确认。
 - Binance aggTrades REST 在当前环境中实际限频较低。大规模历史 tick 拉取必须可恢复并保守限速；遇到 HTTP 429 或 418 后立刻停止，稍后再恢复，不要紧密重试，否则临时封禁可能被延长。

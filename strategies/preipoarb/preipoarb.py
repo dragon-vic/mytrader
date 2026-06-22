@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import sys
 import time
-import requests
 from collections import defaultdict
 from collections import deque
 from dataclasses import dataclass
@@ -18,6 +17,11 @@ from threading import Event as ThreadEvent
 from threading import Lock
 from threading import Thread
 
+import numpy as np
+import pandas as pd
+import pyarrow as pa
+import pyarrow.compute as pc
+import pyarrow.dataset as ds
 from rich.console import Console
 from rich.live import Live
 from rich.table import Table
@@ -43,26 +47,19 @@ FLAT = "FLAT"
 OPENING = "OPENING"
 OPEN = "OPEN"
 CLOSE = "CLOSE"
+FLIP = "FLIP"
 LONG_EDGE = "long_edge"
 SHORT_EDGE = "short_edge"
-INIT_TICK_MATCH_MS = 15_000
 BEIJING_TZ = timezone(timedelta(hours=8))
 MINUTE_NS = 60_000_000_000
+COLLECTOR_RAW_MTIME_SAFETY_SEC = 2
+COLLECTOR_COLUMNS = ("ts_local_ns", "ts_exchange_ms", "venue", "symbol", "bid", "ask", "bid_size", "ask_size")
 
 
 @dataclass
 class ArbLeg:
     instrument_id: InstrumentId
     price: Decimal
-
-
-@dataclass
-class InitialTrade:
-    ts_ms: int
-    asset: str
-    instrument_id: InstrumentId
-    price: Decimal
-    side: str
 
 
 @dataclass
@@ -133,6 +130,9 @@ class PendingBatch:
     grid_level: int | None = None
     close_lot_id: int | None = None
     expected_capture_bps: Decimal | None = None
+    inventory_delta: int = 0
+    open_qty: Decimal = Decimal("0")
+    close_qty: Decimal = Decimal("0")
 
 
 # 按分钟等权统计 edge；缺失分钟沿用上一分钟，避免 quote burst 改变 3h 均线权重。
@@ -210,12 +210,9 @@ class PreipoArbConfig(StrategyConfig, frozen=True):
     assets: list[str]
     min_window_sec: float
     init_fetch_sec: float
-    init_fetch_timeout_sec: float
     grid_center_sec: float
     asset_grid_params: dict[str, dict[str, object]]
-    trade_notional: Decimal
     trade_qty: Decimal
-    max_quote_age_sec: float
     snapshot_interval_sec: float
     snapshot_display: str
     snapshot_path: str
@@ -233,12 +230,9 @@ class PreipoArbStrategy(Strategy):
         self.instrument_venues = {instrument_id: str(instrument_id.venue).upper() for instrument_id in self.instruments}
         self.min_window_ns = int(float(config.min_window_sec) * 1_000_000_000)
         self.init_fetch_sec = float(config.init_fetch_sec)
-        self.init_fetch_timeout_sec = float(config.init_fetch_timeout_sec)
         self.grid_center_ns = int(float(config.grid_center_sec) * 1_000_000_000)
         self.asset_grid_params = {key.upper(): dict(value) for key, value in config.asset_grid_params.items()}
-        self.notional = Decimal(str(config.trade_notional))
         self.trade_qty = Decimal(str(config.trade_qty))
-        self.max_quote_age_ns = int(float(config.max_quote_age_sec) * 1_000_000_000)
         self.snapshot_interval_ns = int(float(config.snapshot_interval_sec) * 1_000_000_000)
         self.snapshot_display = str(config.snapshot_display).lower()
         self.snapshot_path = Path(config.snapshot_path)
@@ -269,8 +263,6 @@ class PreipoArbStrategy(Strategy):
             raise RuntimeError("min_window_sec must be non-negative")
         if self.init_fetch_sec <= 0:
             raise RuntimeError("init_fetch_sec must be positive")
-        if self.init_fetch_timeout_sec <= 0:
-            raise RuntimeError("init_fetch_timeout_sec must be positive")
         if self.grid_center_ns <= 0:
             raise RuntimeError("grid_center_sec must be positive")
         missing_assets = sorted(set(self.assets) - set(self.asset_grid_params))
@@ -289,15 +281,11 @@ class PreipoArbStrategy(Strategy):
                 raise RuntimeError(f"grid_band_bps must be positive for {asset}")
             if self._grid_max_inventory(asset) <= 0:
                 raise RuntimeError(f"grid_max_inventory must be positive for {asset}")
-            if self._min_capture_bps(asset) <= 0:
-                raise RuntimeError(f"min_capture_bps must be positive for {asset}")
+            if self._min_capture_bps(asset) < 0:
+                raise RuntimeError(f"min_capture_bps must be non-negative for {asset}")
         self._warm_initial_windows()
-        if self.notional <= 0:
-            raise RuntimeError("trade_notional must be positive")
         if self.trade_qty <= 0:
             raise RuntimeError("trade_qty must be positive")
-        if self.config.max_quote_age_sec < 0:
-            raise RuntimeError("max_quote_age_sec must be non-negative")
         if self.config.snapshot_interval_sec < 0:
             raise RuntimeError("snapshot_interval_sec must be non-negative")
         if self.snapshot_display not in {"rich", "log", "file", "off"}:
@@ -312,7 +300,7 @@ class PreipoArbStrategy(Strategy):
             f"preipo_arb started assets={','.join(self.assets)} instruments={len(self.instruments)} "
             f"mode=two_line_grid asset_grid_params={self.asset_grid_params} "
             f"warm_windows={len(self.windows)} "
-            f"notional={self.notional} qty={self.trade_qty} snapshot_display={self.snapshot_display} "
+            f"qty={self.trade_qty} snapshot_display={self.snapshot_display} "
             f"snapshot_path={self.snapshot_path} dry_run={self.config.dry_run}",
         )
 
@@ -324,7 +312,7 @@ class PreipoArbStrategy(Strategy):
         if asset is None:
             return
         states = self._update_spreads(asset)
-        self._maybe_update_snapshot(states)
+        self._maybe_update_snapshot()
         self._maybe_open(asset, states)
 
     def on_order_filled(self, event: OrderFilled) -> None:
@@ -396,200 +384,166 @@ class PreipoArbStrategy(Strategy):
         return f"buy_{self._venue(buy_id).lower()}_sell_{self._venue(sell_id).lower()}"
 
     def _warm_initial_windows(self) -> None:
-        start_ms = int((time.time() - self.init_fetch_sec) * 1000)
-        end_ms = int(time.time() * 1000)
-        deadline = time.monotonic() + self.init_fetch_timeout_sec
-        rows = self._fetch_recent_trades(start_ms, end_ms, deadline)
-        warmed = self._warm_windows_from_trades(rows)
+        end_ns = time.time_ns()
+        start_ns = end_ns - int(self.init_fetch_sec * 1_000_000_000)
+        paths = self._collector_quote_files(start_ns, end_ns)
+        started = time.perf_counter()
+        quotes = self._load_collector_quotes(paths, start_ns, end_ns)
+        self.log.info(
+            f"initial_bidask_fetch files={len(paths)} rows={len(quotes)} "
+            f"elapsed_ms={(time.perf_counter() - started) * 1000:.1f}",
+        )
+        warmed = self._warm_windows_from_quotes(quotes, end_ns)
+        self._seed_initial_quotes(quotes)
         for asset in self.assets:
             if not any(key[0] == asset for key in warmed):
                 raise RuntimeError(f"failed to warm initial window for {asset}")
+        active_assets: set[str] = set()
         for key in sorted(warmed, key=lambda item: (item[0], item[1], self._route(item[2], item[3]))):
             asset, edge_side, buy_id, sell_id = key
             samples, mean, std, window_sec = self.windows[key].stats()
             if samples < 2 or std <= 0:
-                raise RuntimeError(f"initial window has no variance for {asset} side={edge_side} route={self._route(buy_id, sell_id)} samples={samples}")
+                self.log.warning(
+                    f"initial_window_skipped {asset} side={edge_side} route={self._route(buy_id, sell_id)} "
+                    f"reason=no_variance samples={samples}",
+                )
+                continue
+            active_assets.add(asset)
             self.log.info(
                 f"initial_window {asset} side={edge_side} route={self._route(buy_id, sell_id)} "
                 f"samples={samples} mean={mean:.2f}bps std={std:.2f}bps window={window_sec:.1f}s",
             )
+        for asset in self.assets:
+            if asset not in active_assets:
+                raise RuntimeError(f"failed to warm usable initial window for {asset}")
+        for asset in self.assets:
+            self._update_spreads(asset)
 
-    def _fetch_recent_trades(self, start_ms: int, end_ms: int, deadline: float) -> list[InitialTrade]:
-        rows: list[InitialTrade] = []
-        for instrument_id in self.instruments:
-            venue = self._venue(instrument_id)
-            asset = self._asset(instrument_id)
-            if asset is None:
+    def _collector_quote_files(self, start_ns: int, end_ns: int) -> list[Path]:
+        base_dir = Path(__file__).resolve().parent / "research" / "bidask1-live"
+        merged_dir = base_dir / "merged"
+        raw_dir = base_dir / "raw"
+        current_key = self._collector_hour_key(time.time_ns())
+        cutoff_mtime = time.time() - COLLECTOR_RAW_MTIME_SAFETY_SEC
+        paths: list[Path] = []
+        for key in self._collector_hour_keys(start_ns, end_ns):
+            merged = merged_dir / f"bidask1-{key}.parquet"
+            if merged.exists():
+                paths.append(merged)
+            hour_dir = raw_dir / key
+            if hour_dir.exists():
+                for path in sorted(hour_dir.glob("*.parquet")):
+                    if key == current_key and path.stat().st_mtime > cutoff_mtime:
+                        continue
+                    paths.append(path)
+        return sorted(set(paths), key=lambda path: str(path))
+
+    def _collector_hour_keys(self, start_ns: int, end_ns: int) -> list[str]:
+        start = datetime.fromtimestamp(start_ns / 1_000_000_000, BEIJING_TZ).replace(minute=0, second=0, microsecond=0)
+        end = datetime.fromtimestamp(end_ns / 1_000_000_000, BEIJING_TZ).replace(minute=0, second=0, microsecond=0)
+        keys = []
+        current = start
+        while current <= end:
+            keys.append(current.strftime("%Y%m%d%H"))
+            current += timedelta(hours=1)
+        return keys
+
+    def _collector_hour_key(self, ts_ns: int) -> str:
+        return datetime.fromtimestamp(ts_ns / 1_000_000_000, BEIJING_TZ).strftime("%Y%m%d%H")
+
+    def _load_collector_quotes(self, paths: list[Path], start_ns: int, end_ns: int) -> pd.DataFrame:
+        if not paths:
+            raise RuntimeError("no bidask1 collector parquet files found for initial window")
+        dataset = ds.dataset([str(path) for path in paths], format="parquet")
+        filt = (pc.field("ts_local_ns") >= pa.scalar(start_ns, pa.int64())) & (
+            pc.field("ts_local_ns") <= pa.scalar(end_ns, pa.int64())
+        )
+        table = dataset.to_table(columns=list(COLLECTOR_COLUMNS), filter=filt)
+        quotes = table.to_pandas()
+        if quotes.empty:
+            raise RuntimeError("no bidask1 collector rows found for initial window")
+        return (
+            quotes.drop_duplicates(["ts_local_ns", "venue", "symbol", "bid", "ask"])
+            .sort_values("ts_local_ns")
+            .reset_index(drop=True)
+        )
+
+    # 用 collector 真实 bid/ask1 初始化 long/short 两条 edge 线。
+    def _warm_windows_from_quotes(self, quotes: pd.DataFrame, end_ns: int) -> set[tuple[str, str, InstrumentId, InstrumentId]]:
+        warmed: set[tuple[str, str, InstrumentId, InstrumentId]] = set()
+        for asset in self.assets:
+            binance_id = self._instrument_id(asset, "BINANCE")
+            other_ids = [instrument_id for instrument_id in self.instruments if self._asset(instrument_id) == asset and self._venue(instrument_id) != "BINANCE"]
+            if binance_id is None or not other_ids:
                 continue
-            if venue == "BINANCE":
-                rows.extend(self._fetch_binance_trades(asset, instrument_id, start_ms, end_ms, deadline))
-            elif venue == "OKX":
-                rows.extend(self._fetch_okx_trades(asset, instrument_id, start_ms, end_ms, deadline))
-            else:
-                self.log.warning(f"initial_stats_skip_venue {instrument_id} venue={venue}")
-        if not rows:
-            raise RuntimeError("no initial trade ticks fetched")
-        rows.sort(key=lambda item: item.ts_ms)
-        return rows
-
-    def _fetch_binance_trades(
-        self,
-        asset: str,
-        instrument_id: InstrumentId,
-        start_ms: int,
-        end_ms: int,
-        deadline: float,
-    ) -> list[InitialTrade]:
-        symbol = str(instrument_id.symbol).upper().replace("-PERP", "")
-        rows: list[InitialTrade] = []
-        next_ms = start_ms
-        while next_ms <= end_ms:
-            self._check_init_deadline(deadline)
-            payload = self._get_json(
-                "https://fapi.binance.com/fapi/v1/aggTrades",
-                {"symbol": symbol, "startTime": next_ms, "endTime": end_ms, "limit": 1000},
-            )
-            if not payload:
-                break
-            for item in payload:
-                ts_ms = int(item["T"])
-                side = "sell" if bool(item.get("m")) else "buy"
-                rows.append(InitialTrade(ts_ms, asset, instrument_id, Decimal(str(item["p"])), side))
-            new_next = int(payload[-1]["T"]) + 1
-            if new_next <= next_ms:
-                break
-            next_ms = new_next
-            time.sleep(0.03)
-        self.log.info(f"initial_fetch {asset} {instrument_id} venue=BINANCE ticks={len(rows)}")
-        return rows
-
-    def _fetch_okx_trades(
-        self,
-        asset: str,
-        instrument_id: InstrumentId,
-        start_ms: int,
-        end_ms: int,
-        deadline: float,
-    ) -> list[InitialTrade]:
-        inst_id = str(instrument_id.symbol).upper()
-        rows: list[InitialTrade] = []
-        seen: set[str] = set()
-        after: str | None = None
-        while True:
-            self._check_init_deadline(deadline)
-            params = {"instId": inst_id, "limit": 100}
-            if after is not None:
-                params["after"] = after
-            payload = self._get_json("https://www.okx.com/api/v5/market/history-trades", params)
-            if payload.get("code") != "0":
-                raise RuntimeError(f"OKX history trades failed for {inst_id}: {payload}")
-            data = payload.get("data") or []
-            if not data:
-                break
-            oldest_ms = min(int(item["ts"]) for item in data)
-            for item in data:
-                trade_id = str(item["tradeId"])
-                ts_ms = int(item["ts"])
-                if ts_ms > end_ms or ts_ms < start_ms or trade_id in seen:
-                    continue
-                seen.add(trade_id)
-                rows.append(
-                    InitialTrade(
-                        ts_ms,
-                        asset,
-                        instrument_id,
-                        Decimal(str(item["px"])),
-                        str(item.get("side", "")).lower(),
-                    ),
-                )
-            after = str(data[-1]["tradeId"])
-            if oldest_ms < start_ms:
-                break
-            time.sleep(0.08)
-        self.log.info(f"initial_fetch {asset} {instrument_id} venue=OKX ticks={len(rows)}")
-        return rows
-
-    def _get_json(self, url: str, params: dict[str, object]) -> object:
-        last_error: Exception | None = None
-        headers = {"User-Agent": "nt_quant_preipo_arb/1.0", "Connection": "close"}
-        for attempt in range(5):
-            try:
-                response = requests.get(url, params=params, headers=headers, timeout=15)
-                if response.status_code == 200:
-                    return response.json()
-                last_error = RuntimeError(f"HTTP {response.status_code}: {response.text[:200]}")
-            except Exception as exc:
-                last_error = exc
-            time.sleep(0.4 * (attempt + 1))
-        raise RuntimeError(f"historical tick request failed: {last_error}")
-
-    def _check_init_deadline(self, deadline: float) -> None:
-        if time.monotonic() > deadline:
-            raise RuntimeError("initial historical tick fetch timed out")
-
-    # 历史成交只能近似 bid/ask；warmup 阶段直接写入 long/short 两条可执行 edge 线。
-    def _warm_windows_from_trades(self, rows: list[InitialTrade]) -> set[tuple[str, str, InstrumentId, InstrumentId]]:
-        quotes: dict[str, dict[InstrumentId, dict[str, tuple[int, Decimal]]]] = {asset: {} for asset in self.assets}
-        warmed: set[tuple[str, InstrumentId, InstrumentId]] = set()
-        max_age_ms = INIT_TICK_MATCH_MS
-        for row in rows:
-            if row.side not in {"buy", "sell"}:
+            part = quotes[quotes["symbol"].eq(asset)].copy()
+            if part.empty:
                 continue
-            side = "ask" if row.side == "buy" else "bid"
-            quotes[row.asset].setdefault(row.instrument_id, {})[side] = (row.ts_ms, row.price)
-            binance_id = next(
-                (instrument_id for instrument_id in quotes[row.asset] if self._venue(instrument_id) == "BINANCE"),
-                None,
-            )
-            if binance_id is None:
-                continue
-            binance_bid = self._fresh_initial_quote(quotes[row.asset][binance_id], "bid", row.ts_ms, max_age_ms)
-            binance_ask = self._fresh_initial_quote(quotes[row.asset][binance_id], "ask", row.ts_ms, max_age_ms)
-            if binance_bid is None or binance_ask is None:
-                continue
-            binance_mid = (binance_bid + binance_ask) / Decimal("2")
-            for instrument_id, book in quotes[row.asset].items():
-                if self._venue(instrument_id) == "BINANCE":
+            timeline = pd.DataFrame({"ts_local_ns": np.sort(part["ts_local_ns"].unique())})
+            for other_id in other_ids:
+                other_venue = self._venue(other_id)
+                edge = timeline
+                for venue in ("BINANCE", other_venue):
+                    venue_quotes = (
+                        part[part["venue"].eq(venue)][["ts_local_ns", "bid", "ask"]]
+                        .sort_values("ts_local_ns")
+                        .rename(columns={"bid": f"{venue.lower()}_bid", "ask": f"{venue.lower()}_ask"})
+                    )
+                    edge = pd.merge_asof(edge.sort_values("ts_local_ns"), venue_quotes, on="ts_local_ns", direction="backward")
+                edge = edge.dropna()
+                if edge.empty:
                     continue
-                other_bid = self._fresh_initial_quote(book, "bid", row.ts_ms, max_age_ms)
-                other_ask = self._fresh_initial_quote(book, "ask", row.ts_ms, max_age_ms)
-                if other_bid is None or other_ask is None:
-                    continue
-                long_edge = self._edge_bps(other_ask - binance_bid, binance_mid)
-                short_edge = self._edge_bps(other_bid - binance_ask, binance_mid)
-                if long_edge is None or short_edge is None:
-                    continue
-                ts_ns = row.ts_ms * 1_000_000
-                long_key = (row.asset, LONG_EDGE, instrument_id, binance_id)
-                short_key = (row.asset, SHORT_EDGE, binance_id, instrument_id)
-                self.windows.setdefault(long_key, SpreadWindow()).add(ts_ns, float(long_edge), self.grid_center_ns)
-                self.windows.setdefault(short_key, SpreadWindow()).add(ts_ns, float(short_edge), self.grid_center_ns)
+                binance_mid = (edge["binance_bid"] + edge["binance_ask"]) / 2.0
+                edge["long_edge"] = (edge[f"{other_venue.lower()}_ask"] - edge["binance_bid"]) / binance_mid * 10000.0
+                edge["short_edge"] = (edge[f"{other_venue.lower()}_bid"] - edge["binance_ask"]) / binance_mid * 10000.0
+                long_key = (asset, LONG_EDGE, other_id, binance_id)
+                short_key = (asset, SHORT_EDGE, binance_id, other_id)
+                for row in edge.itertuples(index=False):
+                    ts_ns = int(row.ts_local_ns)
+                    self.windows.setdefault(long_key, SpreadWindow()).add(ts_ns, float(row.long_edge), self.grid_center_ns)
+                    self.windows.setdefault(short_key, SpreadWindow()).add(ts_ns, float(row.short_edge), self.grid_center_ns)
+                last = edge.iloc[-1]
+                if int(last["ts_local_ns"]) < end_ns:
+                    self.windows.setdefault(long_key, SpreadWindow()).add(end_ns, float(last["long_edge"]), self.grid_center_ns)
+                    self.windows.setdefault(short_key, SpreadWindow()).add(end_ns, float(last["short_edge"]), self.grid_center_ns)
                 warmed.add(long_key)
                 warmed.add(short_key)
         return warmed
 
-    # 用主动成交方向近似初始化阶段的 bid/ask。
-    def _fresh_initial_quote(
-        self,
-        book: dict[str, tuple[int, Decimal]],
-        side: str,
-        ts_ms: int,
-        max_age_ms: int,
-    ) -> Decimal | None:
-        value = book.get(side)
-        if value is None:
-            return None
-        quote_ts_ms, price = value
-        if ts_ms - quote_ts_ms > max_age_ms:
-            return None
-        return price
+    def _seed_initial_quotes(self, quotes: pd.DataFrame) -> None:
+        latest = quotes.sort_values("ts_local_ns").groupby(["symbol", "venue"], sort=False).tail(1)
+        ts_init = self.clock.timestamp_ns()
+        for row in latest.itertuples(index=False):
+            instrument_id = self._instrument_id(str(row.symbol), str(row.venue))
+            if instrument_id is None:
+                continue
+            instrument = self.cache.instrument(instrument_id)
+            bid_size = Decimal(str(row.bid_size))
+            ask_size = Decimal(str(row.ask_size))
+            bid_size = bid_size if bid_size > 0 else self.trade_qty
+            ask_size = ask_size if ask_size > 0 else self.trade_qty
+            ts_event = int(row.ts_exchange_ms) * 1_000_000 if int(row.ts_exchange_ms) > 0 else int(row.ts_local_ns)
+            self.quotes[instrument_id] = QuoteTick(
+                instrument_id=instrument_id,
+                bid_price=instrument.make_price(Decimal(str(row.bid))),
+                ask_price=instrument.make_price(Decimal(str(row.ask))),
+                bid_size=instrument.make_qty(bid_size),
+                ask_size=instrument.make_qty(ask_size),
+                ts_event=ts_event,
+                ts_init=ts_init,
+            )
+
+    def _instrument_id(self, asset: str, venue: str) -> InstrumentId | None:
+        asset = asset.upper()
+        venue = venue.upper()
+        return next(
+            (instrument_id for instrument_id in self.instruments if self._asset(instrument_id) == asset and self._venue(instrument_id) == venue),
+            None,
+        )
 
     def _binance_quote(self, asset: str) -> tuple[InstrumentId, Decimal, Decimal, Decimal] | None:
-        now_ns = self.clock.timestamp_ns()
         for instrument_id, quote in self.quotes.items():
             if self._asset(instrument_id) != asset or self._venue(instrument_id) != "BINANCE":
-                continue
-            if self._quote_stale(quote, now_ns):
                 continue
             bid = Decimal(str(quote.bid_price))
             ask = Decimal(str(quote.ask_price))
@@ -613,8 +567,6 @@ class PreipoArbStrategy(Strategy):
         states: list[SpreadState] = []
         for instrument_id, quote in self.quotes.items():
             if self._asset(instrument_id) != asset or self._venue(instrument_id) == "BINANCE":
-                continue
-            if self._quote_stale(quote, now_ns):
                 continue
             bid = Decimal(str(quote.bid_price))
             ask = Decimal(str(quote.ask_price))
@@ -656,7 +608,8 @@ class PreipoArbStrategy(Strategy):
         states: dict[tuple[str, InstrumentId, InstrumentId], SpreadState] = {}
         for state in self._grid_candidates(asset):
             states[(state.edge_side, state.buy.instrument_id, state.sell.instrument_id)] = state
-        self.last_spread_states[asset] = states
+        if states:
+            self.last_spread_states[asset] = states
         return states
 
     def _active_stats(self, samples: int, mean: float, std: float, window_sec: float) -> tuple[float, float] | None:
@@ -687,7 +640,10 @@ class PreipoArbStrategy(Strategy):
             return
         _, close_lot_id, capture, state, grid_level = max(candidates, key=lambda item: item[0])
         before_inventory = self._asset_inventory(asset, include_pending=True)
-        after_inventory = before_inventory + (1 if state.edge_side == LONG_EDGE else -1)
+        sign = 1 if state.edge_side == LONG_EDGE else -1
+        reducing = self._reduces_inventory(before_inventory, state.edge_side)
+        inventory_delta = sign * (2 if reducing and abs(before_inventory) == 1 else 1)
+        after_inventory = before_inventory + inventory_delta
         self._submit_edge_action(
             asset,
             state.buy,
@@ -701,6 +657,7 @@ class PreipoArbStrategy(Strategy):
             edge_side=state.edge_side,
             before_inventory=before_inventory,
             after_inventory=after_inventory,
+            inventory_delta=inventory_delta,
             close_lot_id=close_lot_id,
             expected_capture_bps=capture,
         )
@@ -740,8 +697,7 @@ class PreipoArbStrategy(Strategy):
         open_gap_ns = self._grid_open_gap_ns(asset)
         if not reducing and open_gap_ns > 0 and now_ns - self.grid_last_open_ns.get(asset, 0) < open_gap_ns:
             return False
-        active_max = self._active_grid_level(asset, state.edge_side)
-        if not reducing and active_max is not None and grid_level <= active_max:
+        if not reducing and not self._passes_grid_step(asset, state.edge_side, state.edge_bps):
             return False
         key = (asset, state.edge_side, state.buy.instrument_id, state.sell.instrument_id, grid_level)
         self._clear_other_confirmations(key)
@@ -805,24 +761,30 @@ class PreipoArbStrategy(Strategy):
         )
         if include_pending:
             inventory += sum(
-                1 if batch.edge_side == LONG_EDGE else -1
+                batch.inventory_delta
                 for batch in self.pending.values()
                 if batch.asset == asset
             )
         return inventory
 
-    def _active_grid_level(self, asset: str, edge_side: str) -> int | None:
-        levels = [
-            pos.grid_level
+    # 加仓网格以已有同方向开仓 edge 为锚，mean 只负责确认仍处于波动区。
+    def _passes_grid_step(self, asset: str, edge_side: str, edge_bps: Decimal) -> bool:
+        edges = [
+            pos.actual_entry_edge_bps or pos.edge_bps
             for pos in self.positions.values()
-            if pos.asset == asset and pos.edge_side == edge_side and pos.grid_level is not None
+            if pos.asset == asset and pos.edge_side == edge_side
         ]
-        levels.extend(
-            batch.grid_level
+        edges.extend(
+            batch.edge_bps
             for batch in self.pending.values()
-            if batch.asset == asset and batch.edge_side == edge_side and batch.grid_level is not None
+            if batch.asset == asset and batch.edge_side == edge_side and batch.open_qty > 0
         )
-        return max(levels) if levels else None
+        if not edges:
+            return True
+        step = self._grid_step_bps(asset)
+        if edge_side == SHORT_EDGE:
+            return edge_bps >= max(edges) + step
+        return edge_bps <= min(edges) - step
 
     def _reduces_inventory(self, inventory: int, edge_side: str) -> bool:
         return (inventory > 0 and edge_side == SHORT_EDGE) or (inventory < 0 and edge_side == LONG_EDGE)
@@ -863,18 +825,25 @@ class PreipoArbStrategy(Strategy):
         edge_side: str = SHORT_EDGE,
         before_inventory: int = 0,
         after_inventory: int = 0,
+        inventory_delta: int = 0,
         close_lot_id: int | None = None,
         expected_capture_bps: Decimal | None = None,
     ) -> None:
         qty = self._shared_open_qty(buy.instrument_id, sell.instrument_id, buy.price, sell.price)
         if qty is None:
             return
+        close_qty = qty if close_lot_id is not None else Decimal("0")
+        open_qty = qty if close_lot_id is None or abs(inventory_delta) == 2 else Decimal("0")
+        order_qty = close_qty + open_qty
+        if order_qty <= 0:
+            return
+        action = FLIP if close_lot_id is not None and open_qty > 0 else CLOSE if close_lot_id is not None else OPEN
         lot_id = self._new_lot_id()
-        action = CLOSE if close_lot_id is not None else OPEN
         self.log.info(
             f"edge_signal {asset} action={action} lot={lot_id} close_lot={close_lot_id or '-'} "
             f"route={self._route(buy.instrument_id, sell.instrument_id)} "
-            f"edge={edge_bps:.2f}bps side={edge_side} mean={mean_bps:.2f}bps std={std_bps:.2f}bps z={z_score:.2f} qty={qty} "
+            f"edge={edge_bps:.2f}bps side={edge_side} mean={mean_bps:.2f}bps std={std_bps:.2f}bps z={z_score:.2f} "
+            f"qty={order_qty} open_qty={open_qty} close_qty={close_qty} "
             f"expected_capture={self._fmt(expected_capture_bps) if expected_capture_bps is not None else '-'}bps "
             f"buy={buy.instrument_id}@{buy.price} sell={sell.instrument_id}@{sell.price}",
         )
@@ -899,8 +868,11 @@ class PreipoArbStrategy(Strategy):
                 grid_level=grid_level,
                 close_lot_id=close_lot_id,
                 expected_capture_bps=expected_capture_bps,
+                inventory_delta=inventory_delta,
+                open_qty=open_qty,
+                close_qty=close_qty,
             )
-            self._apply_grid_action(batch, qty, qty, buy.price, sell.price, Decimal("0"))
+            self._apply_grid_action(batch, order_qty, order_qty, buy.price, sell.price)
             return
         batch = self._submit_batch(
             asset=asset,
@@ -917,16 +889,19 @@ class PreipoArbStrategy(Strategy):
             std_bps=std_bps,
             z_score=z_score,
             now_ns=now_ns,
-            buy_qty=qty,
-            sell_qty=qty,
+            buy_qty=order_qty,
+            sell_qty=order_qty,
             grid_level=grid_level,
             edge_side=edge_side,
             before_inventory=before_inventory,
             after_inventory=after_inventory,
+            inventory_delta=inventory_delta,
+            open_qty=open_qty,
+            close_qty=close_qty,
             close_lot_id=close_lot_id,
             expected_capture_bps=expected_capture_bps,
         )
-        if batch is not None and batch.lot_id in self.pending and action == OPEN:
+        if batch is not None and batch.lot_id in self.pending and open_qty > 0:
             self.grid_last_open_ns[asset] = now_ns
             if grid_level is not None:
                 self.grid_confirmations.pop((asset, edge_side, buy.instrument_id, sell.instrument_id, grid_level), None)
@@ -953,12 +928,15 @@ class PreipoArbStrategy(Strategy):
         edge_side: str = SHORT_EDGE,
         before_inventory: int = 0,
         after_inventory: int = 0,
+        inventory_delta: int = 0,
+        open_qty: Decimal = Decimal("0"),
+        close_qty: Decimal = Decimal("0"),
         close_lot_id: int | None = None,
         expected_capture_bps: Decimal | None = None,
     ) -> PendingBatch | None:
-        buy_order, buy_target = self._make_order(buy_id, buy_side, buy_px, buy_qty)
-        sell_order, sell_target = self._make_order(sell_id, sell_side, sell_px, sell_qty)
-        if action == OPEN and not self._check_open_balances(asset, buy_id, buy_px, buy_target, sell_id, sell_px, sell_target):
+        buy_order, buy_target = self._make_order(buy_id, buy_side, buy_qty)
+        sell_order, sell_target = self._make_order(sell_id, sell_side, sell_qty)
+        if open_qty > 0 and not self._check_open_balances(asset, buy_id, buy_px, open_qty, sell_id, sell_px, open_qty):
             self.log.warning(f"open_skipped {asset} lot={lot_id} reason=insufficient_usdt")
             return None
         buy_order_id = str(buy_order.client_order_id)
@@ -988,6 +966,9 @@ class PreipoArbStrategy(Strategy):
             grid_level=grid_level,
             close_lot_id=close_lot_id,
             expected_capture_bps=expected_capture_bps,
+            inventory_delta=inventory_delta,
+            open_qty=open_qty,
+            close_qty=close_qty,
         )
         self.pending[lot_id] = batch
         self.log.info(
@@ -1025,17 +1006,23 @@ class PreipoArbStrategy(Strategy):
             self.log.error("start_check_failed accounts=0")
             self._request_stop("preipo 启动检查没有账户数据")
             return
-        for venue in sorted({self._venue(instrument_id) for instrument_id in self.instruments}):
-            account = self._account_for_venue(venue)
-            if account is None:
-                self.log.error(f"start_check_failed venue={venue} account=missing")
-                self._request_stop(f"preipo 启动检查缺少 {venue} 账户")
+        for asset in self.assets:
+            requirements = self._next_open_requirements(asset)
+            if not requirements:
+                self.log.error(f"start_check_failed {asset} reason=missing_quotes")
+                self._request_stop(f"preipo 启动检查 {asset} 缺少报价")
                 return
-            free = self._free_usdt(account)
-            if free < self.notional:
-                self.log.error(f"start_check_failed venue={venue} account={account.id} free_usdt={free} required={self.notional}")
-                self._request_stop(f"preipo 启动检查 {venue} USDT 不足")
-                return
+            for account_id, need in requirements.items():
+                account = self._account_by_id(account_id)
+                if account is None:
+                    self.log.error(f"start_check_failed {asset} account={account_id} missing")
+                    self._request_stop(f"preipo 启动检查缺少 {account_id} 账户")
+                    return
+                free = self._free_usdt(account)
+                if free < need:
+                    self.log.error(f"start_check_failed {asset} account={account.id} free_usdt={free} required={need}")
+                    self._request_stop(f"preipo 启动检查 {account.id} USDT 不足")
+                    return
 
     # 开仓前按两条腿所在账户合并检查可用 USDT。
     def _check_open_balances(
@@ -1071,23 +1058,48 @@ class PreipoArbStrategy(Strategy):
 
     # 每次状态变化后记录是否还有足够 USDT 支持下一次开仓。
     def _log_next_notional(self, asset: str) -> None:
-        for venue in sorted({self._venue(instrument_id) for instrument_id in self.instruments if self._asset(instrument_id) == asset}):
-            account = self._account_for_venue(venue)
+        requirements = self._next_open_requirements(asset)
+        if not requirements:
+            self.log.warning(f"next_open_balance_blocked {asset} reason=missing_quotes")
+            return
+        for account_id, required in requirements.items():
+            account = self._account_by_id(account_id)
             if account is None:
-                self.log.error(f"next_open_balance_blocked {asset} venue={venue} account=missing")
+                self.log.error(f"next_open_balance_blocked {asset} account={account_id} missing")
                 continue
             free = self._free_usdt(account)
-            required = self.notional
             if free < required:
-                self.log.warning(f"next_open_balance_blocked {asset} venue={venue} account={account.id} free_usdt={free} required={required}")
+                self.log.warning(f"next_open_balance_blocked {asset} account={account.id} free_usdt={free} required={required}")
             else:
-                self.log.info(f"next_open_balance_ok {asset} venue={venue} account={account.id} free_usdt={free} required={required}")
+                self.log.info(f"next_open_balance_ok {asset} account={account.id} free_usdt={free} required={required}")
+
+    def _next_open_requirements(self, asset: str) -> dict[str, Decimal]:
+        required: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+        for instrument_id in self.instruments:
+            if self._asset(instrument_id) != asset:
+                continue
+            quote = self.quotes.get(instrument_id)
+            if quote is None:
+                return {}
+            price = max(Decimal(str(quote.bid_price)), Decimal(str(quote.ask_price)))
+            qty = self._round_qty(instrument_id, self.trade_qty)
+            account = self._account_for_venue(self._venue(instrument_id))
+            if account is None:
+                return {}
+            required[str(account.id)] += price * qty
+        return dict(required)
 
     # 按 Instrument venue 匹配 NT 账户。
     def _account_for_venue(self, venue: str):
         venue_text = venue.upper()
         for account in self.cache.accounts():
             if str(account.id).upper().startswith(venue_text):
+                return account
+        return None
+
+    def _account_by_id(self, account_id: str):
+        for account in self.cache.accounts():
+            if str(account.id) == account_id:
                 return account
         return None
 
@@ -1125,9 +1137,9 @@ class PreipoArbStrategy(Strategy):
             self._try_submit_emergency(pos.buy_id, OrderSide.SELL, pos.buy_qty)
             self._try_submit_emergency(pos.sell_id, OrderSide.BUY, pos.sell_qty)
 
-    def _make_order(self, instrument_id: InstrumentId, side: OrderSide, price: Decimal, qty: Decimal | None = None) -> tuple[MarketOrder, Decimal]:
+    def _make_order(self, instrument_id: InstrumentId, side: OrderSide, qty: Decimal) -> tuple[MarketOrder, Decimal]:
         instrument = self.cache.instrument(instrument_id)
-        quantity = instrument.make_qty(qty if qty is not None else self.notional / price)
+        quantity = instrument.make_qty(qty)
         order = self.order_factory.market(
             instrument_id=instrument_id,
             order_side=side,
@@ -1163,7 +1175,7 @@ class PreipoArbStrategy(Strategy):
         sell_qty = self._filled_qty(batch, batch.sell_id)
         buy_avg = self._filled_avg_px(batch, batch.buy_id)
         sell_avg = self._filled_avg_px(batch, batch.sell_id)
-        self._apply_grid_action(batch, buy_qty, sell_qty, buy_avg, sell_avg, self._filled_fee(batch))
+        self._apply_grid_action(batch, buy_qty, sell_qty, buy_avg, sell_avg)
 
     def _apply_grid_action(
         self,
@@ -1172,12 +1184,13 @@ class PreipoArbStrategy(Strategy):
         sell_qty: Decimal,
         buy_avg: Decimal | None,
         sell_avg: Decimal | None,
-        fee: Decimal,
     ) -> None:
         actual_edge = self._actual_entry_edge_bps(batch)
         current_inventory = self._asset_inventory(batch.asset)
         reducing = self._reduces_inventory(current_inventory, batch.edge_side)
         reduced_pos = None
+        close_fee = self._filled_fee_share(batch, batch.close_qty)
+        open_fee = self._filled_fee_share(batch, batch.open_qty)
         if reducing:
             reduced_pos = self._remove_closed_position(batch)
             if reduced_pos is not None:
@@ -1185,9 +1198,9 @@ class PreipoArbStrategy(Strategy):
                     batch.asset,
                     reduced_pos,
                     actual_edge if actual_edge is not None else batch.edge_bps,
-                    self._round_trip_pnl_usdt(reduced_pos, batch),
+                    self._round_trip_pnl_usdt(reduced_pos, batch, close_fee),
                 )
-        else:
+        if batch.open_qty > 0 and (not reducing or reduced_pos is not None):
             self.positions[batch.lot_id] = ArbPos(
                 lot_id=batch.lot_id,
                 asset=batch.asset,
@@ -1197,9 +1210,9 @@ class PreipoArbStrategy(Strategy):
                 sell_px=batch.sell_px,
                 entry_buy_avg_px=buy_avg,
                 entry_sell_avg_px=sell_avg,
-                entry_fee=fee,
-                buy_qty=buy_qty,
-                sell_qty=sell_qty,
+                entry_fee=open_fee,
+                buy_qty=batch.open_qty,
+                sell_qty=batch.open_qty,
                 edge_bps=batch.edge_bps,
                 actual_entry_edge_bps=actual_edge,
                 mean_bps=batch.mean_bps,
@@ -1272,6 +1285,14 @@ class PreipoArbStrategy(Strategy):
             return exit_edge - entry_edge
         return entry_edge - exit_edge
 
+    # 滑点按交易方向归一化；负数表示实际成交比信号差。
+    def _edge_slippage_bps(self, edge_side: str, signal_edge: Decimal, actual_edge: Decimal | None) -> Decimal | None:
+        if actual_edge is None:
+            return None
+        if edge_side == LONG_EDGE:
+            return signal_edge - actual_edge
+        return actual_edge - signal_edge
+
     def _filled_qty(self, batch: PendingBatch, instrument_id: InstrumentId) -> Decimal:
         total = Decimal("0")
         for leg in batch.legs.values():
@@ -1293,6 +1314,14 @@ class PreipoArbStrategy(Strategy):
     def _filled_fee(self, batch: PendingBatch) -> Decimal:
         return sum((leg.filled_fee for leg in batch.legs.values()), Decimal("0"))
 
+    def _filled_fee_share(self, batch: PendingBatch, qty: Decimal) -> Decimal:
+        if qty <= 0:
+            return Decimal("0")
+        target_qty = next((leg.target_qty for leg in batch.legs.values() if leg.target_qty > 0), Decimal("0"))
+        if target_qty <= 0:
+            return Decimal("0")
+        return self._filled_fee(batch) * qty / target_qty
+
     # 实际入场 edge 用两腿成交均价计算，分母使用 Binance 腿成交价。
     def _actual_entry_edge_bps(self, batch: PendingBatch) -> Decimal | None:
         buy_avg = self._filled_avg_px(batch, batch.buy_id)
@@ -1308,7 +1337,7 @@ class PreipoArbStrategy(Strategy):
         denom = sell_avg if self._venue(batch.sell_id) == "BINANCE" else buy_avg
         return self._edge_bps(buy_avg - sell_avg, denom)
 
-    def _round_trip_pnl_usdt(self, pos: ArbPos, batch: PendingBatch) -> Decimal | None:
+    def _round_trip_pnl_usdt(self, pos: ArbPos, batch: PendingBatch, exit_fee: Decimal) -> Decimal | None:
         exit_sell_avg = self._filled_avg_px(batch, pos.buy_id)
         exit_buy_avg = self._filled_avg_px(batch, pos.sell_id)
         if pos.entry_buy_avg_px is None or pos.entry_sell_avg_px is None:
@@ -1317,7 +1346,7 @@ class PreipoArbStrategy(Strategy):
             return None
         long_pnl = (exit_sell_avg - pos.entry_buy_avg_px) * pos.buy_qty
         short_pnl = (pos.entry_sell_avg_px - exit_buy_avg) * pos.sell_qty
-        return long_pnl + short_pnl - pos.entry_fee - self._filled_fee(batch)
+        return long_pnl + short_pnl - pos.entry_fee - exit_fee
 
     def _event_px(self, event: OrderFilled) -> Decimal:
         text = str(event.last_px).split()[0].replace("_", "")
@@ -1414,7 +1443,7 @@ class PreipoArbStrategy(Strategy):
         ts_sec = ts_ns / 1_000_000_000
         return datetime.fromtimestamp(ts_sec, tz=timezone.utc).astimezone(BEIJING_TZ).strftime("%m-%d %H:%M:%S")
 
-    def _maybe_update_snapshot(self, current_states: dict[tuple[str, InstrumentId, InstrumentId], SpreadState]) -> None:
+    def _maybe_update_snapshot(self) -> None:
         if self.snapshot_interval_ns <= 0 or self.snapshot_display == "off":
             return
         now_ns = self.clock.timestamp_ns()
@@ -1425,13 +1454,14 @@ class PreipoArbStrategy(Strategy):
         market_tables: dict[str, list[dict[str, str]]] = {}
         log_parts = []
         for asset in self.assets:
-            asset_states = self.last_spread_states.get(asset, current_states)
+            asset_states = self.last_spread_states.get(asset, {})
             asset_state = self._asset_state(asset)
             pending_count = sum(1 for batch in self.pending.values() if batch.asset == asset)
             inventory = self._asset_inventory(asset)
             active_count = abs(inventory)
             state = max(asset_states.values(), key=lambda item: abs(float(item.edge_bps) - item.mean_bps), default=None)
             if state is None:
+                quotes = self._quote_text(asset) or "waiting"
                 rows[asset] = {
                     "asset": asset,
                     "state": asset_state,
@@ -1447,10 +1477,10 @@ class PreipoArbStrategy(Strategy):
                     "std": "-",
                     "samples": "0",
                     "window": "0s",
-                    "quotes": "waiting",
+                    "quotes": quotes,
                 }
                 market_tables[asset] = self._market_rows(asset, asset_states)
-                log_parts.append(f"{asset} state={asset_state} inventory={inventory} pending={pending_count} quotes=waiting")
+                log_parts.append(f"{asset} state={asset_state} inventory={inventory} pending={pending_count} quotes=[{quotes}]")
                 continue
             buy, sell = state.buy, state.sell
             quotes = self._quote_text(asset)
@@ -1496,40 +1526,50 @@ class PreipoArbStrategy(Strategy):
             "bid",
             "ask",
             "age",
-            "spread",
+            "spread_bps",
             "long_edge",
-            "long_signal",
             "long_mean",
             "long_std",
-            "long_z",
             "short_edge",
-            "short_signal",
             "short_mean",
             "short_std",
-            "short_z",
         )
         rows = [{"metric": metric, **{venue: "-" for venue in venues}} for metric in metrics]
         by_metric = {row["metric"]: row for row in rows}
         binance_id = next((instrument_id for instrument_id in instrument_ids if self._venue(instrument_id) == "BINANCE"), None)
         binance_quote = self.quotes.get(binance_id) if binance_id is not None else None
-        if binance_quote is None or self._quote_stale(binance_quote, now_ns):
-            return rows
-        binance_bid = Decimal(str(binance_quote.bid_price))
-        binance_ask = Decimal(str(binance_quote.ask_price))
-        binance_mid = (binance_bid + binance_ask) / Decimal("2")
+        quotes: dict[InstrumentId, tuple[Decimal, Decimal]] = {}
         for instrument_id in instrument_ids:
             venue = self._venue(instrument_id)
             quote = self.quotes.get(instrument_id)
-            if quote is None or self._quote_stale(quote, now_ns):
+            if quote is None:
                 continue
             bid = Decimal(str(quote.bid_price))
             ask = Decimal(str(quote.ask_price))
+            if bid <= 0 or ask <= 0:
+                continue
+            quotes[instrument_id] = (bid, ask)
+            age_sec = (now_ns - quote.ts_event) / 1_000_000_000
             by_metric["bid"][venue] = self._fmt(bid)
             by_metric["ask"][venue] = self._fmt(ask)
-            by_metric["age"][venue] = self._fmt((now_ns - quote.ts_event) / 1_000_000_000, "s")
+            by_metric["age"][venue] = self._fmt(age_sec, "s")
+        if binance_quote is None:
+            return rows
+        binance_prices = quotes.get(binance_id)
+        if binance_prices is None:
+            return rows
+        binance_bid, binance_ask = binance_prices
+        binance_mid = (binance_bid + binance_ask) / Decimal("2")
+        for instrument_id in instrument_ids:
+            venue = self._venue(instrument_id)
+            prices = quotes.get(instrument_id)
+            if prices is None:
+                continue
+            bid, ask = prices
+            mid = (bid + ask) / Decimal("2")
+            spread = self._edge_bps(ask - bid, mid)
+            by_metric["spread_bps"][venue] = self._fmt(spread) if spread is not None else "-"
             if venue == "BINANCE":
-                spread = self._edge_bps(binance_ask - binance_bid, binance_mid)
-                by_metric["spread"][venue] = self._fmt(spread) if spread is not None else "-"
                 continue
             long_edge = self._edge_bps(ask - binance_bid, binance_mid)
             short_edge = self._edge_bps(bid - binance_ask, binance_mid)
@@ -1537,18 +1577,12 @@ class PreipoArbStrategy(Strategy):
             by_metric["short_edge"][venue] = self._fmt(short_edge) if short_edge is not None else "-"
             long_state = states.get((LONG_EDGE, instrument_id, binance_id))
             if long_state is not None:
-                signal = self._grid_signal(asset, long_state)
-                by_metric["long_signal"][venue] = f"L{signal}" if signal is not None else "-"
                 by_metric["long_mean"][venue] = self._fmt(long_state.mean_bps)
                 by_metric["long_std"][venue] = self._fmt(long_state.std_bps)
-                by_metric["long_z"][venue] = self._fmt(long_state.z_score)
             short_state = states.get((SHORT_EDGE, binance_id, instrument_id))
             if short_state is not None:
-                signal = self._grid_signal(asset, short_state)
-                by_metric["short_signal"][venue] = f"L{signal}" if signal is not None else "-"
                 by_metric["short_mean"][venue] = self._fmt(short_state.mean_bps)
                 by_metric["short_std"][venue] = self._fmt(short_state.std_bps)
-                by_metric["short_z"][venue] = self._fmt(short_state.z_score)
         return rows
 
     def _action_history_rows(self, now_ns: int) -> list[dict[str, str]]:
@@ -1595,7 +1629,7 @@ class PreipoArbStrategy(Strategy):
             "qty": self._fmt(qty),
             "signal_edge": self._fmt(signal_edge),
             "actual_edge": self._fmt(actual_edge) if actual_edge is not None else "-",
-            "edge_slippage": self._fmt(actual_edge - signal_edge) if actual_edge is not None else "-",
+            "edge_slippage": self._fmt(self._edge_slippage_bps(edge_side, signal_edge, actual_edge)) if actual_edge is not None else "-",
             "mean": self._fmt(mean_bps),
             "std": self._fmt(std_bps),
             "level": str(grid_level) if grid_level is not None else "-",
@@ -1615,7 +1649,7 @@ class PreipoArbStrategy(Strategy):
             "edge_side": batch.edge_side,
             "route": self._route(batch.buy_id, batch.sell_id),
             "status": "pending",
-            "qty": "-",
+            "qty": self._fmt(self._batch_target_qty(batch)),
             "signal_edge": self._fmt(batch.edge_bps),
             "actual_edge": "-",
             "edge_slippage": "-",
@@ -1629,6 +1663,9 @@ class PreipoArbStrategy(Strategy):
             "time": self._beijing_time_short(batch.created_ns),
             "age_min": self._fmt(max((self.clock.timestamp_ns() - batch.created_ns) / 60_000_000_000, 0.0)),
         }
+
+    def _batch_target_qty(self, batch: PendingBatch) -> Decimal:
+        return next((leg.target_qty for leg in batch.legs.values()), batch.open_qty + batch.close_qty)
 
     def _summary_rows(self) -> dict[str, dict[str, str]]:
         rows = {}
@@ -1673,9 +1710,6 @@ class PreipoArbStrategy(Strategy):
             age_sec = (now_ns - quote.ts_event) / 1_000_000_000
             rows.append(f"{self._venue(instrument_id)} bid={self._fmt(quote.bid_price)} ask={self._fmt(quote.ask_price)} age={self._fmt(age_sec, 's')}")
         return "; ".join(rows)
-
-    def _quote_stale(self, quote: QuoteTick, now_ns: int) -> bool:
-        return self.max_quote_age_ns > 0 and now_ns - quote.ts_event > self.max_quote_age_ns
 
     def _asset_state(self, asset: str) -> str:
         for batch in self.pending.values():
@@ -1767,29 +1801,32 @@ class PreipoArbStrategy(Strategy):
         table = Table(title=title, expand=True)
         columns = (
             ("asset", "asset", "left"),
-            ("edge_side", "side", "left"),
-            ("route", "route", "left"),
             ("status", "status", "center"),
             ("qty", "qty", "right"),
             ("signal_edge", "signal_edge", "right"),
-            ("actual_edge", "actual_edge", "right"),
-            ("edge_slippage", "slip_bps", "right"),
+            ("edge_slippage", "slippage", "right"),
             ("mean", "mean", "right"),
             ("std", "std", "right"),
-            ("level", "level", "right"),
             ("close_lot", "close_lot", "right"),
-            ("expected_capture", "exp_cap", "right"),
-            ("realized_capture", "real_cap", "right"),
             ("inventory", "inventory", "right"),
             ("time", "time", "left"),
             ("age_min", "age_min", "right"),
         )
         for key, label, justify in columns:
-            table.add_column(label, justify=justify, no_wrap=key not in {"route", "time"})
+            table.add_column(label, justify=justify, no_wrap=key != "time")
         action_rows = rows.get("__action_rows__") or []
         if not action_rows:
             table.add_row(*("-" for _ in columns))
             return table
         for row in action_rows:
-            table.add_row(*(str(row.get(key, "-")) for key, _, _ in columns))
+            table.add_row(*(self._snapshot_action_value(row, key) for key, _, _ in columns))
         return table
+
+    def _snapshot_action_value(self, row: dict[str, str], key: str) -> str:
+        if key == "action":
+            side = str(row.get("edge_side", ""))
+            if side == LONG_EDGE:
+                return "long"
+            if side == SHORT_EDGE:
+                return "short"
+        return str(row.get(key, "-"))
