@@ -1125,6 +1125,13 @@ class PreipoArbStrategy(Strategy):
                 return account
         return None
 
+    def _account_venue(self, account: object, venues: set[str]) -> str | None:
+        account_id = str(account.id).upper()
+        for venue in sorted(venues, key=len, reverse=True):
+            if account_id.startswith(venue.upper()):
+                return venue
+        return None
+
     # 从账户对象读取 USDT 可用余额，兼容 cash/margin 账户暴露方式差异。
     def _free_usdt(self, account) -> Decimal:
         money = None
@@ -1243,7 +1250,7 @@ class PreipoArbStrategy(Strategy):
                 "missing_quotes": 0,
             }
         for account in self.cache.accounts():
-            venue = str(account.id).split("-")[0].upper()
+            venue = self._account_venue(account, set(rows))
             if venue not in rows:
                 continue
             rows[venue] = {
