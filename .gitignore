@@ -12,6 +12,7 @@ strategies/*/report/
 **/report/
 **/reports/
 strategies/*/research/*
+**/research/*
 !strategies/*/research/tools/
 !strategies/*/research/tools/*.py
 !strategies/preipoarb/research/EDGE_CHART_STYLE.md
