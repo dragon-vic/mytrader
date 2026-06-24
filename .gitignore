@@ -13,9 +13,6 @@ strategies/*/report/
 **/reports/
 strategies/*/research/*
 **/research/*
-!strategies/*/research/tools/
-!strategies/*/research/tools/*.py
-!strategies/preipoarb/research/EDGE_CHART_STYLE.md
 logs/
 strategies/preipoarb/preipo_arb_snapshot.json
 .gitignore
