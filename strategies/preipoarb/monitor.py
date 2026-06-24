@@ -36,6 +36,7 @@ def load_snapshot(path: Path) -> dict:
             "market_tables": {},
             "action_rows": [],
             "summary": {},
+            "risk": {},
             "inventories": {},
         }
     return json.loads(path.read_text(encoding="utf-8"))
@@ -112,6 +113,27 @@ def summary_table(rows: dict[str, dict[str, str]]) -> Table:
     return table
 
 
+def risk_table(rows: dict[str, dict[str, str]]) -> Table:
+    table = Table(title="Risk", expand=True)
+    metrics = (
+        ("wallet_usdt", "钱包USDT"),
+        ("unrealized_usdt", "未实现USDT"),
+        ("risk_rate", "风险率"),
+        ("positions", "持仓数"),
+        ("status", "状态"),
+    )
+    venues = list(rows)
+    table.add_column("指标", justify="left", no_wrap=True)
+    for venue in venues:
+        table.add_column(str(venue), justify="right", no_wrap=True)
+    if not rows:
+        table.add_row("-")
+        return table
+    for key, label in metrics:
+        table.add_row(label, *(str(rows[venue].get(key, "-")) for venue in venues))
+    return table
+
+
 def build_view(payload: dict, path: Path, session_name: str | None, stopping: bool = False) -> Group:
     market_tables = payload.get("market_tables") or {}
     assets = payload.get("assets") or sorted(market_tables)
@@ -122,7 +144,7 @@ def build_view(payload: dict, path: Path, session_name: str | None, stopping: bo
         keys = "q退出监控 | s停止node" if session_name else "q退出监控"
     parts = [Panel.fit(f"PREIPO Arbitrage Live | 北京时间 {beijing_time} | {keys} | {path}", border_style="cyan")]
     tables = [market_table(str(asset), market_tables.get(str(asset), [])) for asset in assets]
-    first_row = tables[:2] + [summary_table(payload.get("summary") or {})]
+    first_row = tables[:2] + [summary_table(payload.get("summary") or {}), risk_table(payload.get("risk") or {})]
     if first_row:
         parts.append(Columns(first_row, equal=True, expand=True))
     if len(tables) > 2:

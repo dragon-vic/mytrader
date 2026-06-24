@@ -20,6 +20,7 @@ from utils.arguments import POSITIONS_FILE
 from utils.arguments import REPORT_COLUMNS
 from utils.arguments import REPORT_FILES
 from utils.arguments import SUMMARY_FILE
+from utils.funding_fees import add_funding_income
 from utils.report_labels import to_chinese_columns
 
 
@@ -147,10 +148,17 @@ def report_columns(name: str, df: pd.DataFrame) -> pd.DataFrame:
 
 
 class TraderReportWriter:
-    def __init__(self, output_dir: Path, enabled: bool = True, run_start_ns: int | None = None) -> None:
+    def __init__(
+        self,
+        output_dir: Path,
+        enabled: bool = True,
+        run_start_ns: int | None = None,
+        settings: dict[str, Any] | None = None,
+    ) -> None:
         self.output_dir = output_dir
         self.enabled = enabled
         self.run_start_ns = run_start_ns
+        self.settings = settings
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     # 从配置创建当前运行类型的报告整理器。
@@ -160,6 +168,7 @@ class TraderReportWriter:
             run_reports_dir(settings, run_type),
             bool(settings["reports"]["enabled"]),
             runtime_start_ns(settings),
+            settings,
         )
 
     # 保存 NT trader 在运行结束后生成的订单，并用订单流重建仓位表。
@@ -234,6 +243,8 @@ class TraderReportWriter:
     def write_positions_from_orders(self, orders: pd.DataFrame) -> None:
         positions = self.build_positions_from_orders(orders)
         if not positions.empty:
+            if self.settings is not None and self.settings["mode"] in {"live", "testnet"}:
+                positions = add_funding_income(positions, self.settings)
             self.write_csv(positions, POSITIONS_FILE)
 
     # 同一标的和仓位 ID 的连续同向成交合成一个净仓位，归零时写一行。
@@ -540,6 +551,7 @@ def trade_stats_rows(output_dir: Path, elapsed_days: float) -> list[tuple[str, s
             ("完成仓位数", "0"),
             ("胜率", "0%"),
             ("净收益", "0"),
+            ("资金费收入", "0"),
             ("平均仓位收益", "0"),
             ("总手续费", "0"),
             ("平均持仓分钟", "0"),
@@ -547,21 +559,24 @@ def trade_stats_rows(output_dir: Path, elapsed_days: float) -> list[tuple[str, s
         ]
 
     pnl = positions["已实现盈亏"].map(money_to_float)
+    funding = report_funding_income(positions)
+    total_pnl = pnl + funding
     fees = positions["手续费合计"].map(commissions_to_float)
     duration_min = pd.to_numeric(positions["持仓分钟"], errors="coerce")
-    wins = pnl[pnl > 0]
-    losses = pnl[pnl < 0]
-    gross_profit = wins.sum()
+    wins = total_pnl[total_pnl > 0]
+    losses = total_pnl[total_pnl < 0]
+    gross_profit = total_pnl[total_pnl > 0].sum()
     return [
         ("完成仓位数", format_int(len(positions))),
-        ("胜率", format_percent((pnl > 0).mean())),
+        ("胜率", format_percent((total_pnl > 0).mean())),
         ("净收益", format_number(net_pnl(output_dir))),
-        ("平均仓位收益", format_number(pnl.mean())),
-        ("仓位收益中位数", format_number(pnl.median())),
+        ("资金费收入", format_number(funding.sum())),
+        ("平均仓位收益", format_number(total_pnl.mean())),
+        ("仓位收益中位数", format_number(total_pnl.median())),
         ("盈利仓位平均收益", format_number(wins.mean())),
         ("亏损仓位平均亏损", format_number(losses.mean())),
-        ("最大盈利", format_number(pnl.max())),
-        ("最大亏损", format_number(pnl.min())),
+        ("最大盈利", format_number(total_pnl.max())),
+        ("最大亏损", format_number(total_pnl.min())),
         ("总手续费", format_number(fees.sum())),
         ("手续费/毛利润", format_percent(fees.sum() / gross_profit if gross_profit else 0)),
         ("平均持仓分钟", format_number(duration_min.mean())),
@@ -574,7 +589,14 @@ def net_pnl(output_dir: Path) -> float:
     positions = read_report_csv(output_dir, POSITIONS_FILE)
     if positions.empty:
         return 0.0
-    return positions["已实现盈亏"].map(money_to_float).sum()
+    return (positions["已实现盈亏"].map(money_to_float) + report_funding_income(positions)).sum()
+
+
+# positions.csv 可能来自旧报告；没有资金费列时按 0 处理。
+def report_funding_income(positions: pd.DataFrame) -> pd.Series:
+    if "资金费收入" not in positions.columns:
+        return pd.Series(0.0, index=positions.index)
+    return pd.to_numeric(positions["资金费收入"], errors="coerce").fillna(0.0)
 
 
 # 从持仓汇总表按标的聚合统计行。
@@ -584,7 +606,7 @@ def instrument_stats_rows(output_dir: Path) -> list[tuple[str, ...]]:
         return [("无成交", "0", "0%", "0", "0%", "0", "0", "0", "0")]
 
     data = positions.copy()
-    data["净收益"] = data["已实现盈亏"].map(money_to_float)
+    data["净收益"] = data["已实现盈亏"].map(money_to_float) + report_funding_income(data)
     data["手续费"] = data["手续费合计"].map(commissions_to_float)
     data["开仓名义额"] = pd.to_numeric(data["数量"], errors="coerce") * pd.to_numeric(data["开仓均价"], errors="coerce")
     rows = []

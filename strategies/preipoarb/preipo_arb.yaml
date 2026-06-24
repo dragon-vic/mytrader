@@ -19,23 +19,26 @@ strategy:
     # grid_open_gap_sec: 非平仓动作之间的最小间隔；0 表示不做时间冷却。
     # grid_max_inventory: 每个标的最多持有的净 pair 数。
     # min_capture_bps: 平仓必须满足对应 pair 的实际 edge capture 下限。
+    # trade_qty: 单个标的每次开仓 qty；设为 "0" 时只监控该标的，不提交交易。
     asset_grid_params:
       OPENAI:
-        grid_band_bps: "30"
+        trade_qty: "0.01"
+        grid_band_bps: "50"
         grid_step_bps: "25"
-        grid_confirm_quotes: 2
+        grid_confirm_quotes: 1
         grid_open_gap_sec: 0
-        grid_max_inventory: 4
+        grid_max_inventory: 1
         min_capture_bps: "0"
       ANTHROPIC:
-        grid_band_bps: "30"
+        trade_qty: "0.5"
+        grid_band_bps: "50"
         grid_step_bps: "25"
-        grid_confirm_quotes: 2
+        grid_confirm_quotes: 1
         grid_open_gap_sec: 0
-        grid_max_inventory: 4
+        grid_max_inventory: 1
         min_capture_bps: "0"
 
-    # 每次 pair 两边都下同一个 qty；资金检查按当前 quote * trade_qty 计算。
+    # 默认每次 pair 两边都下同一个 qty；asset_grid_params.{asset}.trade_qty 可以覆盖。
     trade_qty: "0.05"
 
     # live 运行时 snapshot 写到当前 report 目录，monitor/start 会读取这个文件显示 rich 表格。
@@ -43,6 +46,12 @@ strategy:
     snapshot_display: file
     snapshot_path: auto
     slippage_bps: "2"
+    # 只用于策略开仓前的可用 USDT 检查：required_margin = price * qty / margin_leverage * 1.1。
+    # 交易所账户侧杠杆需要单独通过 API/界面保持一致。
+    margin_leverage: "5"
+    # 每个 quote 后按交易所聚合持仓风险；未实现亏损超过钱包余额 80% 时全平并停止。
+    risk_enabled: true
+    risk_max_unrealized_loss_ratio: "0.8"
     use_hyphens_in_client_order_ids: false
     fee_bps:
       BINANCE: 5

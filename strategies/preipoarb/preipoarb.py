@@ -217,6 +217,9 @@ class PreipoArbConfig(StrategyConfig, frozen=True):
     snapshot_display: str
     snapshot_path: str
     slippage_bps: Decimal
+    margin_leverage: Decimal
+    risk_enabled: bool
+    risk_max_unrealized_loss_ratio: Decimal
     fee_bps: dict[str, float]
     dry_run: bool
 
@@ -236,6 +239,9 @@ class PreipoArbStrategy(Strategy):
         self.snapshot_interval_ns = int(float(config.snapshot_interval_sec) * 1_000_000_000)
         self.snapshot_display = str(config.snapshot_display).lower()
         self.snapshot_path = Path(config.snapshot_path)
+        self.margin_leverage = Decimal(str(config.margin_leverage))
+        self.risk_enabled = bool(config.risk_enabled)
+        self.risk_max_unrealized_loss_ratio = Decimal(str(config.risk_max_unrealized_loss_ratio))
         self.quotes: dict[InstrumentId, QuoteTick] = {}
         self.windows: dict[tuple[str, str, InstrumentId, InstrumentId], SpreadWindow] = {}
         self.stopped = False
@@ -283,13 +289,19 @@ class PreipoArbStrategy(Strategy):
                 raise RuntimeError(f"grid_max_inventory must be positive for {asset}")
             if self._min_capture_bps(asset) < 0:
                 raise RuntimeError(f"min_capture_bps must be non-negative for {asset}")
+            if self._asset_trade_qty(asset) < 0:
+                raise RuntimeError(f"trade_qty must be non-negative for {asset}")
         self._warm_initial_windows()
-        if self.trade_qty <= 0:
-            raise RuntimeError("trade_qty must be positive")
+        if self.trade_qty < 0:
+            raise RuntimeError("trade_qty must be non-negative")
         if self.config.snapshot_interval_sec < 0:
             raise RuntimeError("snapshot_interval_sec must be non-negative")
         if self.snapshot_display not in {"rich", "log", "file", "off"}:
             raise RuntimeError("snapshot_display must be rich, log, file, or off")
+        if self.margin_leverage <= 0:
+            raise RuntimeError("margin_leverage must be positive")
+        if self.risk_enabled and not Decimal("0") < self.risk_max_unrealized_loss_ratio <= Decimal("1"):
+            raise RuntimeError("risk_max_unrealized_loss_ratio must be in (0, 1]")
         self._check_start_account_state()
         if self.stopped:
             return
@@ -300,7 +312,7 @@ class PreipoArbStrategy(Strategy):
             f"preipo_arb started assets={','.join(self.assets)} instruments={len(self.instruments)} "
             f"mode=two_line_grid asset_grid_params={self.asset_grid_params} "
             f"warm_windows={len(self.windows)} "
-            f"qty={self.trade_qty} snapshot_display={self.snapshot_display} "
+            f"default_qty={self.trade_qty} asset_qty={self._asset_qty_log()} snapshot_display={self.snapshot_display} "
             f"snapshot_path={self.snapshot_path} dry_run={self.config.dry_run}",
         )
 
@@ -312,6 +324,10 @@ class PreipoArbStrategy(Strategy):
         if asset is None:
             return
         states = self._update_spreads(asset)
+        self._check_risk_limits()
+        if self.stopped:
+            self._maybe_update_snapshot()
+            return
         self._maybe_update_snapshot()
         self._maybe_open(asset, states)
 
@@ -518,10 +534,13 @@ class PreipoArbStrategy(Strategy):
             if instrument_id is None:
                 continue
             instrument = self.cache.instrument(instrument_id)
+            fallback_qty = self._asset_trade_qty(str(row.symbol))
+            if fallback_qty <= 0:
+                fallback_qty = Decimal("1")
             bid_size = Decimal(str(row.bid_size))
             ask_size = Decimal(str(row.ask_size))
-            bid_size = bid_size if bid_size > 0 else self.trade_qty
-            ask_size = ask_size if ask_size > 0 else self.trade_qty
+            bid_size = bid_size if bid_size > 0 else fallback_qty
+            ask_size = ask_size if ask_size > 0 else fallback_qty
             ts_event = int(row.ts_exchange_ms) * 1_000_000 if int(row.ts_exchange_ms) > 0 else int(row.ts_local_ns)
             self.quotes[instrument_id] = QuoteTick(
                 instrument_id=instrument_id,
@@ -625,6 +644,10 @@ class PreipoArbStrategy(Strategy):
         self._maybe_apply_grid(asset, states, self.clock.timestamp_ns())
 
     def _maybe_apply_grid(self, asset: str, states: dict[tuple[str, InstrumentId, InstrumentId], SpreadState], now_ns: int) -> None:
+        if self._asset_trade_qty(asset) <= 0:
+            self._clear_confirmations(asset, LONG_EDGE)
+            self._clear_confirmations(asset, SHORT_EDGE)
+            return
         if any(batch.asset == asset for batch in self.pending.values()):
             return
         candidates: list[tuple[float, int | None, Decimal | None, SpreadState, int]] = []
@@ -753,6 +776,12 @@ class PreipoArbStrategy(Strategy):
     def _min_capture_bps(self, asset: str) -> Decimal:
         return self._grid_decimal(asset, "min_capture_bps")
 
+    def _asset_trade_qty(self, asset: str) -> Decimal:
+        return Decimal(str(self._asset_grid(asset).get("trade_qty", self.trade_qty)))
+
+    def _asset_qty_log(self) -> dict[str, str]:
+        return {asset: str(self._asset_trade_qty(asset)) for asset in self.assets}
+
     def _asset_inventory(self, asset: str, include_pending: bool = False) -> int:
         inventory = sum(
             1 if pos.edge_side == LONG_EDGE else -1
@@ -829,7 +858,7 @@ class PreipoArbStrategy(Strategy):
         close_lot_id: int | None = None,
         expected_capture_bps: Decimal | None = None,
     ) -> None:
-        qty = self._shared_open_qty(buy.instrument_id, sell.instrument_id, buy.price, sell.price)
+        qty = self._shared_open_qty(asset, buy.instrument_id, sell.instrument_id, buy.price, sell.price)
         if qty is None:
             return
         close_qty = qty if close_lot_id is not None else Decimal("0")
@@ -984,7 +1013,7 @@ class PreipoArbStrategy(Strategy):
             self._fail_batch(batch, f"submit exception: {exc}")
         return batch
 
-    # 启动时确认没有遗留持仓，并且每个执行账户至少够开一条腿。
+    # 启动时只确认没有遗留持仓并且账户数据已加载；余额只在开仓前检查。
     def _check_start_account_state(self) -> None:
         open_positions = []
         for instrument_id in self.instruments:
@@ -1006,23 +1035,10 @@ class PreipoArbStrategy(Strategy):
             self.log.error("start_check_failed accounts=0")
             self._request_stop("preipo 启动检查没有账户数据")
             return
-        for asset in self.assets:
-            requirements = self._next_open_requirements(asset)
-            if not requirements:
-                self.log.error(f"start_check_failed {asset} reason=missing_quotes")
-                self._request_stop(f"preipo 启动检查 {asset} 缺少报价")
-                return
-            for account_id, need in requirements.items():
-                account = self._account_by_id(account_id)
-                if account is None:
-                    self.log.error(f"start_check_failed {asset} account={account_id} missing")
-                    self._request_stop(f"preipo 启动检查缺少 {account_id} 账户")
-                    return
-                free = self._free_usdt(account)
-                if free < need:
-                    self.log.error(f"start_check_failed {asset} account={account.id} free_usdt={free} required={need}")
-                    self._request_stop(f"preipo 启动检查 {account.id} USDT 不足")
-                    return
+
+    # 开仓检查按配置杠杆估算初始保证金，再加 10% 缓冲覆盖手续费和盘口滑动。
+    def _required_margin(self, price: Decimal, qty: Decimal) -> Decimal:
+        return price * qty / self.margin_leverage * Decimal("1.1")
 
     # 开仓前按两条腿所在账户合并检查可用 USDT。
     def _check_open_balances(
@@ -1045,7 +1061,7 @@ class PreipoArbStrategy(Strategy):
                 return False
             account_id = str(account.id)
             accounts[account_id] = account
-            required[account_id] += price * qty
+            required[account_id] += self._required_margin(price, qty)
         ok = True
         for account_id, need in required.items():
             free = self._free_usdt(accounts[account_id])
@@ -1058,6 +1074,9 @@ class PreipoArbStrategy(Strategy):
 
     # 每次状态变化后记录是否还有足够 USDT 支持下一次开仓。
     def _log_next_notional(self, asset: str) -> None:
+        if self._asset_trade_qty(asset) <= 0:
+            self.log.info(f"next_open_balance_skip {asset} reason=trade_qty_zero")
+            return
         requirements = self._next_open_requirements(asset)
         if not requirements:
             self.log.warning(f"next_open_balance_blocked {asset} reason=missing_quotes")
@@ -1075,6 +1094,9 @@ class PreipoArbStrategy(Strategy):
 
     def _next_open_requirements(self, asset: str) -> dict[str, Decimal]:
         required: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+        trade_qty = self._asset_trade_qty(asset)
+        if trade_qty <= 0:
+            return {}
         for instrument_id in self.instruments:
             if self._asset(instrument_id) != asset:
                 continue
@@ -1082,11 +1104,11 @@ class PreipoArbStrategy(Strategy):
             if quote is None:
                 return {}
             price = max(Decimal(str(quote.bid_price)), Decimal(str(quote.ask_price)))
-            qty = self._round_qty(instrument_id, self.trade_qty)
+            qty = self._round_qty(instrument_id, trade_qty)
             account = self._account_for_venue(self._venue(instrument_id))
             if account is None:
                 return {}
-            required[str(account.id)] += price * qty
+            required[str(account.id)] += self._required_margin(price, qty)
         return dict(required)
 
     # 按 Instrument venue 匹配 NT 账户。
@@ -1128,6 +1150,163 @@ class PreipoArbStrategy(Strategy):
             return Decimal(str(money.as_decimal()))
         return Decimal(str(money).replace("_", "").split()[0])
 
+    # 从账户对象读取 USDT 钱包余额，风险阈值按 total/wallet 口径计算。
+    def _total_usdt(self, account) -> Decimal:
+        money = None
+        if hasattr(account, "balance_total"):
+            try:
+                money = account.balance_total(USDT)
+            except Exception:
+                money = None
+        if money is None and hasattr(account, "balances_total"):
+            try:
+                balances = account.balances_total()
+            except Exception:
+                balances = {}
+            money = balances.get(USDT)
+            if money is None:
+                for currency, value in balances.items():
+                    if str(currency) == "USDT":
+                        money = value
+                        break
+        if money is None:
+            return Decimal("0")
+        if hasattr(money, "as_decimal"):
+            return Decimal(str(money.as_decimal()))
+        return Decimal(str(money).replace("_", "").split()[0])
+
+    def _strategy_open_positions(self) -> list[object]:
+        result = []
+        seen = set()
+        for instrument_id in self.instruments:
+            try:
+                positions = self.cache.positions_open(instrument_id=instrument_id)
+            except TypeError:
+                positions = [position for position in self.cache.positions_open() if position.instrument_id == instrument_id]
+            for position in positions:
+                key = str(getattr(position, "id", position))
+                if key in seen:
+                    continue
+                seen.add(key)
+                result.append(position)
+        return result
+
+    def _position_qty(self, position: object) -> Decimal:
+        return abs(Decimal(str(position.quantity)))
+
+    def _position_avg_px(self, position: object) -> Decimal:
+        return Decimal(str(position.avg_px_open))
+
+    def _position_mid(self, instrument_id: InstrumentId) -> Decimal | None:
+        quote = self.quotes.get(instrument_id)
+        if quote is None:
+            return None
+        bid = Decimal(str(quote.bid_price))
+        ask = Decimal(str(quote.ask_price))
+        if bid <= 0 or ask <= 0:
+            return None
+        return (bid + ask) / Decimal("2")
+
+    def _position_unrealized_pnl(self, position: object) -> Decimal | None:
+        mid = self._position_mid(position.instrument_id)
+        if mid is None:
+            return None
+        qty = self._position_qty(position)
+        avg_px = self._position_avg_px(position)
+        if bool(position.is_long):
+            return (mid - avg_px) * qty
+        return (avg_px - mid) * qty
+
+    def _risk_rows(self) -> dict[str, dict[str, str]]:
+        data = self._risk_state()
+        rows = {}
+        for venue, item in data.items():
+            rows[venue] = {
+                "wallet_usdt": self._fmt(item["wallet_usdt"]),
+                "unrealized_usdt": self._fmt(item["unrealized_usdt"]),
+                "risk_rate": self._fmt(item["risk_rate"] * Decimal("100"), "%") if item["wallet_usdt"] > 0 else "-",
+                "positions": str(item["positions"]),
+                "status": "HIGH" if item["high_risk"] else "OK",
+            }
+        return rows
+
+    def _risk_state(self) -> dict[str, dict[str, object]]:
+        rows: dict[str, dict[str, object]] = {}
+        venues = sorted({self._venue(instrument_id) for instrument_id in self.instruments})
+        for venue in venues:
+            rows[venue] = {
+                "wallet_usdt": Decimal("0"),
+                "unrealized_usdt": Decimal("0"),
+                "risk_rate": Decimal("0"),
+                "positions": 0,
+                "high_risk": False,
+                "missing_quotes": 0,
+            }
+        for account in self.cache.accounts():
+            venue = str(account.id).split("-")[0].upper()
+            if venue not in rows:
+                continue
+            rows[venue] = {
+                "wallet_usdt": self._total_usdt(account),
+                "unrealized_usdt": Decimal("0"),
+                "risk_rate": Decimal("0"),
+                "positions": 0,
+                "high_risk": False,
+                "missing_quotes": 0,
+            }
+        for position in self._strategy_open_positions():
+            venue = self._venue(position.instrument_id)
+            account = self._account_for_venue(venue)
+            if account is None:
+                continue
+            row = rows.setdefault(
+                venue,
+                {
+                    "wallet_usdt": self._total_usdt(account),
+                    "unrealized_usdt": Decimal("0"),
+                    "risk_rate": Decimal("0"),
+                    "positions": 0,
+                    "high_risk": False,
+                    "missing_quotes": 0,
+                },
+            )
+            row["positions"] = int(row["positions"]) + 1
+            pnl = self._position_unrealized_pnl(position)
+            if pnl is None:
+                row["missing_quotes"] = int(row["missing_quotes"]) + 1
+                continue
+            row["unrealized_usdt"] = Decimal(str(row["unrealized_usdt"])) + pnl
+        for row in rows.values():
+            wallet = Decimal(str(row["wallet_usdt"]))
+            unrealized = Decimal(str(row["unrealized_usdt"]))
+            if wallet > 0 and unrealized < 0:
+                row["risk_rate"] = abs(unrealized) / wallet
+                row["high_risk"] = row["risk_rate"] >= self.risk_max_unrealized_loss_ratio
+        return rows
+
+    def _check_risk_limits(self) -> None:
+        if not self.risk_enabled or self.config.dry_run:
+            return
+        for venue, row in self._risk_state().items():
+            if int(row["positions"]) <= 0:
+                continue
+            wallet = Decimal(str(row["wallet_usdt"]))
+            unrealized = Decimal(str(row["unrealized_usdt"]))
+            risk_rate = Decimal(str(row["risk_rate"]))
+            if wallet <= 0:
+                self.log.error(f"risk_check_failed venue={venue} wallet_usdt={wallet}")
+                self._flatten_cache_positions(f"risk wallet missing {venue}")
+                self._request_stop(f"preipo 风控 {venue} 钱包余额异常")
+                return
+            if bool(row["high_risk"]):
+                self.log.error(
+                    f"risk_limit_triggered venue={venue} wallet_usdt={wallet} unrealized_usdt={unrealized} "
+                    f"risk_rate={risk_rate * Decimal('100'):.2f}% threshold={self.risk_max_unrealized_loss_ratio * Decimal('100'):.2f}%",
+                )
+                self._flatten_cache_positions(f"risk limit {venue}")
+                self._request_stop(f"preipo 风控 {venue} 未实现亏损超过阈值")
+                return
+
     # 策略停止时按内部持仓记录提交反向市价单。
     def _flatten_on_stop(self) -> None:
         if self.config.dry_run or not self.positions:
@@ -1136,6 +1315,16 @@ class PreipoArbStrategy(Strategy):
             self.log.warning(f"flatten_action_inventory {pos.asset} lot={lot_id} reason=strategy_stop")
             self._try_submit_emergency(pos.buy_id, OrderSide.SELL, pos.buy_qty)
             self._try_submit_emergency(pos.sell_id, OrderSide.BUY, pos.sell_qty)
+
+    # 风控触发时以交易系统真实持仓为准，避免内部 pair 状态不完整。
+    def _flatten_cache_positions(self, reason: str) -> None:
+        if self.config.dry_run:
+            return
+        for position in self._strategy_open_positions():
+            side = OrderSide.SELL if bool(position.is_long) else OrderSide.BUY
+            qty = self._position_qty(position)
+            self.log.warning(f"flatten_cache_position reason={reason} instrument={position.instrument_id} side={side} qty={qty}")
+            self._try_submit_emergency(position.instrument_id, side, qty)
 
     def _make_order(self, instrument_id: InstrumentId, side: OrderSide, qty: Decimal) -> tuple[MarketOrder, Decimal]:
         instrument = self.cache.instrument(instrument_id)
@@ -1152,14 +1341,18 @@ class PreipoArbStrategy(Strategy):
         instrument = self.cache.instrument(instrument_id)
         return Decimal(str(instrument.make_qty(qty)))
 
-    def _shared_open_qty(self, buy_id: InstrumentId, sell_id: InstrumentId, buy_px: Decimal, sell_px: Decimal) -> Decimal | None:
-        buy_qty = self._round_qty(buy_id, self.trade_qty)
-        sell_qty = self._round_qty(sell_id, self.trade_qty)
+    def _shared_open_qty(self, asset: str, buy_id: InstrumentId, sell_id: InstrumentId, buy_px: Decimal, sell_px: Decimal) -> Decimal | None:
+        trade_qty = self._asset_trade_qty(asset)
+        if trade_qty <= 0:
+            self.log.info(f"skip_asset_trade_disabled {asset} buy={buy_id} sell={sell_id} trade_qty={trade_qty}")
+            return None
+        buy_qty = self._round_qty(buy_id, trade_qty)
+        sell_qty = self._round_qty(sell_id, trade_qty)
         if buy_qty != sell_qty:
-            self.log.warning(f"skip_open_qty_mismatch buy={buy_id} qty={buy_qty} sell={sell_id} qty={sell_qty} trade_qty={self.trade_qty}")
+            self.log.warning(f"skip_open_qty_mismatch {asset} buy={buy_id} qty={buy_qty} sell={sell_id} qty={sell_qty} trade_qty={trade_qty}")
             return None
         if buy_qty <= 0:
-            self.log.warning(f"skip_open_qty_too_small buy={buy_id} sell={sell_id} trade_qty={self.trade_qty}")
+            self.log.warning(f"skip_open_qty_too_small {asset} buy={buy_id} sell={sell_id} trade_qty={trade_qty}")
             return None
         return buy_qty
 
@@ -1515,6 +1708,7 @@ class PreipoArbStrategy(Strategy):
             self.snapshot_rows.update(rows)
             self.snapshot_rows["__market_tables__"] = market_tables
             self.snapshot_rows["__action_rows__"] = action_rows
+            self.snapshot_rows["__risk_rows__"] = self._risk_rows()
             self.snapshot_rows["__beijing_time__"] = self._beijing_time(now_ns)
 
     def _market_rows(self, asset: str, states: dict[tuple[str, InstrumentId, InstrumentId], SpreadState]) -> list[dict[str, str]]:
@@ -1790,6 +1984,7 @@ class PreipoArbStrategy(Strategy):
             "market_tables": market_tables,
             "action_rows": action_rows,
             "summary": self._summary_rows(),
+            "risk": rows.get("__risk_rows__", self._risk_rows()),
             "inventories": {asset: self._asset_inventory(asset) for asset in self.assets},
         }
         tmp = self.snapshot_path.with_suffix(f"{self.snapshot_path.suffix}.tmp")

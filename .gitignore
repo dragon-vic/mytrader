@@ -20,3 +20,5 @@ strategies/preipoarb/preipo_arb_snapshot.json
 .venv/
 .ipynb_checkpoints/
 strategies/maxfunding/data/
+/strategies/*/research/
+
