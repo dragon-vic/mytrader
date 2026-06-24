@@ -9,6 +9,8 @@ data/
 !strategies/maxfunding/data/**
 reports/
 strategies/*/report/
+**/report/
+**/reports/
 strategies/*/research/*
 !strategies/*/research/tools/
 !strategies/*/research/tools/*.py
@@ -21,4 +23,3 @@ strategies/preipoarb/preipo_arb_snapshot.json
 .ipynb_checkpoints/
 strategies/maxfunding/data/
 /strategies/*/research/
-
