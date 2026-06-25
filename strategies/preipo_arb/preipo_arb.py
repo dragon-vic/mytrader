@@ -106,6 +106,8 @@ class PendingLeg:
     target_qty: Decimal
     filled_qty: Decimal
     filled_value: Decimal
+    fill_best_qty: Decimal
+    fill_best_value: Decimal
     filled_fee: Decimal
 
 
@@ -339,6 +341,10 @@ class PreipoArbStrategy(Strategy):
                 fill_qty = Decimal(str(event.last_qty))
                 leg.filled_qty += fill_qty
                 leg.filled_value += self._event_px(event) * fill_qty
+                best_px = self._fill_best_px(leg.instrument_id, leg.side, event)
+                if best_px is not None:
+                    leg.fill_best_qty += fill_qty
+                    leg.fill_best_value += best_px * fill_qty
                 leg.filled_fee += self._event_fee(event)
                 self.log.error(
                     f"failed_action_late_fill {failed_batch.asset} action={failed_batch.action} "
@@ -356,6 +362,10 @@ class PreipoArbStrategy(Strategy):
         fill_qty = Decimal(str(event.last_qty))
         leg.filled_qty += fill_qty
         leg.filled_value += self._event_px(event) * fill_qty
+        best_px = self._fill_best_px(leg.instrument_id, leg.side, event)
+        if best_px is not None:
+            leg.fill_best_qty += fill_qty
+            leg.fill_best_value += best_px * fill_qty
         leg.filled_fee += self._event_fee(event)
         fill_state = "filled" if self._leg_filled(leg) else "partial"
         self.log.info(
@@ -958,8 +968,28 @@ class PreipoArbStrategy(Strategy):
             z_score=z_score,
             created_ns=now_ns,
             legs={
-                buy_order_id: PendingLeg(buy_id, buy_side, buy_order, buy_target, Decimal("0"), Decimal("0"), Decimal("0")),
-                sell_order_id: PendingLeg(sell_id, sell_side, sell_order, sell_target, Decimal("0"), Decimal("0"), Decimal("0")),
+                buy_order_id: PendingLeg(
+                    instrument_id=buy_id,
+                    side=buy_side,
+                    order=buy_order,
+                    target_qty=buy_target,
+                    filled_qty=Decimal("0"),
+                    filled_value=Decimal("0"),
+                    fill_best_qty=Decimal("0"),
+                    fill_best_value=Decimal("0"),
+                    filled_fee=Decimal("0"),
+                ),
+                sell_order_id: PendingLeg(
+                    instrument_id=sell_id,
+                    side=sell_side,
+                    order=sell_order,
+                    target_qty=sell_target,
+                    filled_qty=Decimal("0"),
+                    filled_value=Decimal("0"),
+                    fill_best_qty=Decimal("0"),
+                    fill_best_value=Decimal("0"),
+                    filled_fee=Decimal("0"),
+                ),
             },
             edge_side=edge_side,
             before_inventory=before_inventory,
@@ -1455,13 +1485,13 @@ class PreipoArbStrategy(Strategy):
             return exit_edge - entry_edge
         return entry_edge - exit_edge
 
-    # 滑点按交易方向归一化；负数表示实际成交比信号差。
-    def _edge_slippage_bps(self, edge_side: str, signal_edge: Decimal, actual_edge: Decimal | None) -> Decimal | None:
-        if actual_edge is None:
+    # 滑点沿用旧符号：正数表示变好，负数表示变差。
+    def _slippage_bps(self, edge_side: str, from_edge: Decimal, to_edge: Decimal | None) -> Decimal | None:
+        if to_edge is None:
             return None
         if edge_side == LONG_EDGE:
-            return signal_edge - actual_edge
-        return actual_edge - signal_edge
+            return from_edge - to_edge
+        return to_edge - from_edge
 
     def _filled_qty(self, batch: PendingBatch, instrument_id: InstrumentId) -> Decimal:
         total = Decimal("0")
@@ -1477,6 +1507,17 @@ class PreipoArbStrategy(Strategy):
             if leg.instrument_id == instrument_id:
                 qty += leg.filled_qty
                 value += leg.filled_value
+        if qty <= 0:
+            return None
+        return value / qty
+
+    def _filled_best_avg_px(self, batch: PendingBatch, instrument_id: InstrumentId) -> Decimal | None:
+        qty = Decimal("0")
+        value = Decimal("0")
+        for leg in batch.legs.values():
+            if leg.instrument_id == instrument_id:
+                qty += leg.fill_best_qty
+                value += leg.fill_best_value
         if qty <= 0:
             return None
         return value / qty
@@ -1506,6 +1547,40 @@ class PreipoArbStrategy(Strategy):
             return self._edge_bps(sell_avg - buy_avg, denom)
         denom = sell_avg if self._venue(batch.sell_id) == "BINANCE" else buy_avg
         return self._edge_bps(buy_avg - sell_avg, denom)
+
+    # fill 时刻 cache 内最近 bid/ask1 edge，用来把延迟滑点和成交深度滑点拆开。
+    def _best_entry_edge_bps(self, batch: PendingBatch) -> Decimal | None:
+        buy_best = self._filled_best_avg_px(batch, batch.buy_id)
+        sell_best = self._filled_best_avg_px(batch, batch.sell_id)
+        if buy_best is None or sell_best is None:
+            return None
+        if batch.edge_side == SHORT_EDGE:
+            denom = buy_best if self._venue(batch.buy_id) == "BINANCE" else sell_best
+            return self._edge_bps(sell_best - buy_best, denom)
+        denom = sell_best if self._venue(batch.sell_id) == "BINANCE" else buy_best
+        return self._edge_bps(buy_best - sell_best, denom)
+
+    def _fill_best_px(self, instrument_id: InstrumentId, side: OrderSide, event: OrderFilled) -> Decimal | None:
+        quote = self._cached_quote_at(instrument_id, self._event_ts_ns(event))
+        if quote is None:
+            return None
+        if side == OrderSide.BUY:
+            return Decimal(str(quote.ask_price))
+        return Decimal(str(quote.bid_price))
+
+    def _cached_quote_at(self, instrument_id: InstrumentId, ts_ns: int) -> QuoteTick | None:
+        best_tick = None
+        best_ns = -1
+        ticks = self.cache.quote_ticks(instrument_id)
+        for tick in ticks:
+            tick_ns = int(tick.ts_event)
+            if best_ns < tick_ns <= ts_ns:
+                best_tick = tick
+                best_ns = tick_ns
+        return best_tick
+
+    def _event_ts_ns(self, event: OrderFilled) -> int:
+        return int(event.ts_event)
 
     def _round_trip_pnl_usdt(self, pos: ArbPos, batch: PendingBatch, exit_fee: Decimal) -> Decimal | None:
         exit_sell_avg = self._filled_avg_px(batch, pos.buy_id)
@@ -1788,6 +1863,7 @@ class PreipoArbStrategy(Strategy):
         expected_capture_bps: Decimal | None = None,
         realized_capture_bps: Decimal | None = None,
     ) -> dict[str, str]:
+        best_edge = self._best_entry_edge_bps(batch) if batch is not None else None
         return {
             "created_ns": str(created_ns),
             "asset": asset,
@@ -1797,8 +1873,10 @@ class PreipoArbStrategy(Strategy):
             "status": "filled",
             "qty": self._fmt(qty),
             "signal_edge": self._fmt(signal_edge),
+            "best_edge": self._fmt(best_edge) if best_edge is not None else "-",
             "actual_edge": self._fmt(actual_edge) if actual_edge is not None else "-",
-            "edge_slippage": self._fmt(self._edge_slippage_bps(edge_side, signal_edge, actual_edge)) if actual_edge is not None else "-",
+            "edge_slippage": self._fmt(self._slippage_bps(edge_side, signal_edge, best_edge)) if best_edge is not None else "-",
+            "fill_slippage": self._fmt(self._slippage_bps(edge_side, best_edge, actual_edge)) if best_edge is not None and actual_edge is not None else "-",
             "mean": self._fmt(mean_bps),
             "std": self._fmt(std_bps),
             "level": str(grid_level) if grid_level is not None else "-",
@@ -1820,8 +1898,10 @@ class PreipoArbStrategy(Strategy):
             "status": "pending",
             "qty": self._fmt(self._batch_target_qty(batch)),
             "signal_edge": self._fmt(batch.edge_bps),
+            "best_edge": "-",
             "actual_edge": "-",
             "edge_slippage": "-",
+            "fill_slippage": "-",
             "mean": self._fmt(batch.mean_bps),
             "std": self._fmt(batch.std_bps),
             "level": str(batch.grid_level) if batch.grid_level is not None else "-",
@@ -1974,7 +2054,8 @@ class PreipoArbStrategy(Strategy):
             ("status", "status", "center"),
             ("qty", "qty", "right"),
             ("signal_edge", "signal_edge", "right"),
-            ("edge_slippage", "slippage", "right"),
+            ("edge_slippage", "edge_slip", "right"),
+            ("fill_slippage", "fill_slip", "right"),
             ("mean", "mean", "right"),
             ("std", "std", "right"),
             ("close_lot", "close_lot", "right"),
