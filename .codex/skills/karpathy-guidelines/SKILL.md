@@ -84,7 +84,7 @@ source: https://github.com/forrestchang/andrej-karpathy-skills
   ```powershell
   $script = @'
   cd /root/pycharm_nt
-  report=$(ls -dt strategies/preipoarb/report/live-* 2>/dev/null | head -1)
+  report=$(ls -dt strategies/preipo_arb/report/live-* 2>/dev/null | head -1)
   echo "$report"
   '@
   $clean = $script -replace "`r", ""
@@ -92,8 +92,8 @@ source: https://github.com/forrestchang/andrej-karpathy-skills
   ssh remote "printf '%s' '$b64' | base64 -d | bash"
   ```
 - 服务器已安装 `ripgrep`，远端项目内搜索优先用 `rg`；如果极少数环境没有 `rg`，再用 `grep/find` 兜底。
-- 清理 `strategies/preipoarb/research/bidask1-live` 或相关 bidask1 collector 数据时，必须保留最近至少 3 小时的数据，包括已合并的 `merged` 小时文件和当前小时 `raw` 分片；策略 warmup 需要这段真实 quote 数据。
-- 画 `preipoarb` 的 edge、quote、订单、回测或 live 复盘图前，必须先阅读 `strategies/preipoarb/research/EDGE_CHART_STYLE.md` 并按其中规范作图。尤其注意：edge 用点，3h 时间加权均线和 signal 线必须连续可见，订单标签只写实际方向、qty 和 edge。
+- 清理 `strategies/preipo_arb/research/bidask1-live` 或相关 bidask1 collector 数据时，必须保留最近至少 3 小时的数据，包括已合并的 `merged` 小时文件和当前小时 `raw` 分片；策略 warmup 需要这段真实 quote 数据。
+- 画 `preipo_arb` 的 edge、quote、订单、回测或 live 复盘图前，必须先阅读 `strategies/preipo_arb/research/EDGE_CHART_STYLE.md` 并按其中规范作图。尤其注意：edge 用点，3h 时间加权均线和 signal 线必须连续可见，订单标签只写实际方向、qty 和 edge。
 - 每次成功 push 到远端仓库后，默认登录服务器 `remote`，在 `/root/pycharm_nt` 执行 `git pull --ff-only` 同步代码；如果服务器有本地未提交改动，先 stash 备份再 pull，不要直接覆盖。
 - 涉及框架、runtime、report writer、adapter、配置加载、live/backtest 入口等通用改动时，改完后可以默认在服务器项目目录 `/root/pycharm_nt` 用远端 nt 环境跑 `bintest` 做一次 live/testnet smoke 验证；如果会触碰真实 live credentials、真实下单或需要重启正在运行的生产策略，先说明并等用户确认。
 - Binance aggTrades REST 在当前环境中实际限频较低。大规模历史 tick 拉取必须可恢复并保守限速；遇到 HTTP 429 或 418 后立刻停止，稍后再恢复，不要紧密重试，否则临时封禁可能被延长。

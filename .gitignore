@@ -5,8 +5,8 @@ __pycache__/
 *.pyd
 models/
 data/
-!strategies/maxfunding/data/
-!strategies/maxfunding/data/**
+!strategies/max_funding/data/
+!strategies/max_funding/data/**
 reports/
 strategies/*/report/
 **/report/
@@ -15,9 +15,9 @@ strategies/*/research/*
 **/research/*
 strategies/*/collector/bidask1-live/
 logs/
-strategies/preipoarb/preipo_arb_snapshot.json
+strategies/preipo_arb/preipo_arb_snapshot.json
 .gitignore
 .env
 .venv/
 .ipynb_checkpoints/
-strategies/maxfunding/data/
+strategies/max_funding/data/

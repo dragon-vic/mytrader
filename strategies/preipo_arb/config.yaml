@@ -25,7 +25,7 @@ strategy:
     asset_grid_params:
       OPENAI:
         trade_qty: "0.01"
-        grid_band_bps: "50"
+        grid_band_bps: "40"
         grid_step_bps: "25"
         grid_confirm_quotes: 1
         grid_open_gap_sec: 0
@@ -33,7 +33,7 @@ strategy:
         min_capture_bps: "0"
       ANTHROPIC:
         trade_qty: "0.5"
-        grid_band_bps: "50"
+        grid_band_bps: "40"
         grid_step_bps: "25"
         grid_confirm_quotes: 1
         grid_open_gap_sec: 0
