@@ -53,7 +53,6 @@ data:
       instrument_types: [SPOT]
       contract_types: null
       instrument_families: null
-      is_demo: false
 
     okx_swap:
       enabled: false
@@ -61,7 +60,6 @@ data:
       instrument_types: [SWAP]
       contract_types: [LINEAR]
       instrument_families: null
-      is_demo: false
 
     kraken_spot:
       enabled: false
@@ -151,7 +149,6 @@ exec:
       instrument_types: [SPOT]
       contract_types: null
       instrument_families: null
-      is_demo: false
       margin_mode: NONE
 
     okx_swap:
@@ -160,7 +157,6 @@ exec:
       instrument_types: [SWAP]
       contract_types: [LINEAR]
       instrument_families: null
-      is_demo: false
       margin_mode: CROSS
 
     kraken_spot:

@@ -436,9 +436,9 @@ class PreipoArbStrategy(Strategy):
             self._update_spreads(asset)
 
     def _collector_quote_files(self, start_ns: int, end_ns: int) -> list[Path]:
-        base_dir = Path(__file__).resolve().parent / "research" / "bidask1-live"
-        merged_dir = base_dir / "merged"
-        raw_dir = base_dir / "raw"
+        base_dir = Path(__file__).resolve().parent / "collector" / "bidask1-live"
+        merged_dir = base_dir / "quote_merged"
+        raw_dir = base_dir / "quote_raw"
         current_key = self._collector_hour_key(time.time_ns())
         cutoff_mtime = time.time() - COLLECTOR_RAW_MTIME_SAFETY_SEC
         paths: list[Path] = []

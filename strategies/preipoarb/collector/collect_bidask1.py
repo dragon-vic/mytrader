@@ -27,12 +27,12 @@ COMPACT_SEC = 300
 MAX_ROWS = 50_000
 
 STRATEGY_DIR = Path(__file__).resolve().parents[1]
-BASE_DIR = STRATEGY_DIR / "research" / "bidask1-live"
-# 策略 warmup 和本地合并脚本已依赖 raw/merged quote 路径，trade tick 只能放旁边新目录。
-QUOTE_RAW_DIR = BASE_DIR / "raw"
-QUOTE_MERGED_DIR = BASE_DIR / "merged"
-TRADE_RAW_DIR = BASE_DIR / "trade_raw"
-TRADE_MERGED_DIR = BASE_DIR / "trade_merged"
+BASE_DIR = STRATEGY_DIR / "collector" / "bidask1-live"
+# 策略 warmup 依赖 quote_raw/quote_merged，成交 tick 放旁边独立目录。
+QUOTE_RAW_DIR = BASE_DIR / "quote_raw"
+QUOTE_MERGED_DIR = BASE_DIR / "quote_merged"
+TRADE_RAW_DIR = BASE_DIR / "tick_raw"
+TRADE_MERGED_DIR = BASE_DIR / "tick_merged"
 LOG_PATH = BASE_DIR / "collector.log"
 
 QUOTE_SCHEMA = pa.schema([
