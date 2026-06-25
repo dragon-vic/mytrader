@@ -14,7 +14,7 @@ from utils.report_writer import run_reports_dir
 def build_strategy(settings: dict[str, Any], run_type: str = "backtest"):
     strategy = settings["strategy"]
     module = importlib.import_module(strategy["module"])
-    config_cls = getattr(module, strategy["config_class"])
+    config_cls = getattr(module, strategy["config"])
     params = strategy_params(settings, config_cls, run_type)
     config = config_cls(**params)
     return getattr(module, strategy["class"])(config)

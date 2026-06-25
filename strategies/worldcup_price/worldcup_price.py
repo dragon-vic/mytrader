@@ -19,10 +19,10 @@ from nautilus_trader.trading.strategy import Strategy
 
 from utils.arguments import NODE_STOP_TOPIC
 from utils.config_loader import ROOT
-from strategies.worldcupprice.history import fetch_events
-from strategies.worldcupprice.history import fetch_trades
-from strategies.worldcupprice.polymarket_worldcup import next_match_yes_windows
-from strategies.worldcupprice.webview import ViewServer
+from strategies.worldcup_price.history import fetch_events
+from strategies.worldcup_price.history import fetch_trades
+from strategies.worldcup_price.polymarket_worldcup import next_match_yes_windows
+from strategies.worldcup_price.webview import ViewServer
 
 
 LOCAL_TZ = ZoneInfo("Asia/Shanghai")

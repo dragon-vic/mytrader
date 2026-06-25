@@ -1,5 +1,7 @@
 strategy:
-  name: worldcup_price
+  module: worldcup_price
+  class: WorldcupPriceStrategy
+  config: WorldcupPriceConfig
   params:
     max_ticks: 0
     timeout_sec: 0
@@ -15,7 +17,7 @@ strategy:
     backfill_pause_ms: 80
     event_refresh_sec: 30
     persist_ticks: true
-    tick_path: strategies/worldcupprice/data/poly_worldcup_ticks.parquet
+    tick_path: strategies/worldcup_price/data/poly_worldcup_ticks.parquet
 
 data:
   clients:
@@ -23,7 +25,7 @@ data:
       enabled: true
       markets: all
       instrument_provider:
-        event_slug_builder: strategies.worldcupprice.polymarket_worldcup:build_event_slugs
+        event_slug_builder: strategies.worldcup_price.polymarket_worldcup:build_event_slugs
 
 exec:
   engine:

@@ -1,5 +1,7 @@
 strategy:
-  name: preipo_arb
+  module: preipo_arb
+  class: PreipoArbStrategy
+  config: PreipoArbConfig
   params:
     assets: [OPENAI, ANTHROPIC]
     instruments: enabled

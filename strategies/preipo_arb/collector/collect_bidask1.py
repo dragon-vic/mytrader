@@ -403,6 +403,6 @@ def write_log(text: str) -> None:
 
 if __name__ == "__main__":
     # 0 表示持续采集；临时测试可传秒数，例如：
-    # python strategies/preipoarb/collector/collect_bidask1.py 120
+    # python strategies/preipo_arb/collector/collect_bidask1.py 120
     seconds = int(sys.argv[1]) if len(sys.argv) > 1 else 0
     asyncio.run(main(seconds))

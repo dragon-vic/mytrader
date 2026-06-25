@@ -95,7 +95,7 @@ def tmux_sessions() -> list[str]:
 
 
 def strategy_name(config_name: str) -> str:
-    return str(load_settings(config_name, mode="live")["strategy"]["name"])
+    return config_name
 
 
 def strategy_dirs() -> dict[str, Path]:

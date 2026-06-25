@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 def claim_run(settings: dict[str, Any]) -> dict[str, Any]:
     run_kind = "backtest" if settings["mode"] == "backtest" else "live"
     start_time = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d%H%M%S")
-    strategy_name = settings["strategy"]["name"]
+    strategy_name = settings["project"]["config_name"]
 
     runtime = dict(settings.get("runtime", {}))
     runtime["node_id"] = strategy_name
@@ -20,4 +20,3 @@ def claim_run(settings: dict[str, Any]) -> dict[str, Any]:
     runtime["trader_id"] = f"TRADER-{strategy_name.upper().replace('_', '-')}"
     settings["runtime"] = runtime
     return settings
-

@@ -1,5 +1,7 @@
 ﻿strategy:
-  name: max_funding
+  module: max_funding
+  class: MaxFundingStrategy
+  config: MaxFundingConfig
   params:
     instrument_client: binance_futures
     notional_min: "6"
@@ -11,7 +13,7 @@
     xgb_primary: node_2000_ensemble_live
     xgb_models:
       - name: node_2000_ensemble_live
-        path: strategies/maxfunding/data/node_select_2000ms_ensemble_live.joblib
+        path: strategies/max_funding/data/node_select_2000ms_ensemble_live.joblib
         kind: ensemble_node_select
         score: ens_avg_adj20
     trade_symbols: all

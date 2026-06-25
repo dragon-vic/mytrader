@@ -31,7 +31,7 @@ from nautilus_trader.model.instruments import Instrument
 from nautilus_trader.model.orders import StopMarketOrder
 from nautilus_trader.trading.strategy import Strategy
 
-from .maxfunding_xgb import MaxFundingXgbScorer
+from .max_funding_xgb import MaxFundingXgbScorer
 
 
 @dataclass

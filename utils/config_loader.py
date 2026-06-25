@@ -84,29 +84,26 @@ CLIENTS = {
 }
 
 
-# 返回所有策略目录下的具名配置。
+# 返回所有带 config.yaml 的策略目录配置。
 def config_paths() -> list[Path]:
     return sorted(
-        path
-        for path in STRATEGIES_DIR.glob("*/*.yaml")
-        if path.name != "global.yaml"
+        path / "config.yaml"
+        for path in STRATEGIES_DIR.iterdir()
+        if path.is_dir() and (path / "config.yaml").exists()
     )
 
 
-# 返回交互入口可选择的配置名。
+# 返回交互入口可选择的策略目录名。
 def config_names() -> list[str]:
-    return sorted(path.stem for path in config_paths())
+    return sorted(path.parent.name for path in config_paths())
 
 
-# 在策略目录内查找一个具名 set。
+# 查找策略目录内固定的 config.yaml。
 def config_path(config_name: str) -> Path:
-    matches = [path for path in config_paths() if path.stem == config_name]
-    if not matches:
-        raise FileNotFoundError(f"Config not found under strategies/*/: {config_name}.yaml")
-    if len(matches) > 1:
-        values = ", ".join(str(path.relative_to(ROOT)) for path in matches)
-        raise ValueError(f"Duplicate config name {config_name}: {values}")
-    return matches[0]
+    path = STRATEGIES_DIR / config_name / "config.yaml"
+    if not path.exists():
+        raise FileNotFoundError(f"Config not found: strategies/{config_name}/config.yaml")
+    return path
 
 
 # 加载一个具名 set，让每个策略保留自己的市场和参数。
@@ -137,37 +134,17 @@ def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]
     return merged
 
 
-# 把 snake_case 名字转成策略类名。
-def snake_to_pascal(name: str) -> str:
-    return "".join(part.capitalize() for part in name.split("_"))
-
-
-# 把 snake_case 策略名转成全小写模块名。
-def strategy_module_name(name: str) -> str:
-    return name.replace("_", "").lower()
-
-
-def strategy_module_path(name: str) -> str:
-    module_name = strategy_module_name(name)
-    strategy_dir = ROOT / "strategies"
-    if (strategy_dir / f"{module_name}.py").exists():
-        return f"strategies.{module_name}"
-    nested = strategy_dir / module_name / f"{module_name}.py"
-    if nested.exists():
-        return f"strategies.{module_name}.{module_name}"
-    if (strategy_dir / module_name / "__init__.py").exists():
-        return f"strategies.{module_name}"
-    return f"strategies.{module_name}"
-
-
-# 补齐策略模块名、类名和配置类名。
+# 校验并展开策略模块路径；module 写当前策略目录内的 py 文件名。
 def normalize_strategy(settings: dict[str, Any]) -> None:
     strategy = settings["strategy"]
-    name = strategy["name"]
-    class_name = snake_to_pascal(name)
-    strategy.setdefault("module", strategy_module_path(name))
-    strategy.setdefault("class", f"{class_name}Strategy")
-    strategy.setdefault("config_class", f"{class_name}Config")
+    folder = Path(settings["project"]["strategy_dir"]).name
+    for key in ("module", "class", "config"):
+        if key not in strategy:
+            raise KeyError(f"strategy.{key} is required in strategies/{folder}/config.yaml")
+    module = str(strategy["module"])
+    if module.startswith("strategies."):
+        raise ValueError("strategy.module should be relative to its strategy folder, for example: preipo_arb")
+    strategy["module"] = f"strategies.{folder}.{module}"
 
 
 def client_meta(key: str) -> dict[str, str]:

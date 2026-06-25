@@ -484,7 +484,7 @@ def backtest_overview_rows(payload: dict[str, Any], settings: dict[str, Any]) ->
 
     return [
         ("配置名", settings["project"]["config_name"]),
-        ("策略名", settings["strategy"]["name"]),
+        ("策略名", settings["project"]["config_name"]),
         ("markets", symbols),
         ("交易标的", traded_symbol_count(output_dir)),
         ("K线周期", timeframes),
@@ -507,7 +507,7 @@ def live_overview_rows(settings: dict[str, Any], output_dir: Path) -> list[tuple
     symbols = market_symbols(settings, "live")
     return [
         ("配置名", settings["project"]["config_name"]),
-        ("策略名", settings["strategy"]["name"]),
+        ("策略名", settings["project"]["config_name"]),
         ("运行模式", settings["mode"]),
         ("报告目录", output_dir.name),
         ("markets", symbols),
