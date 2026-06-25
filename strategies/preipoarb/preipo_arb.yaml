@@ -58,7 +58,6 @@ strategy:
       OKX: 5
       KRAKEN: 10
       HYPERLIQUID: 5
-    dry_run: false
 
 logging:
   component_levels:

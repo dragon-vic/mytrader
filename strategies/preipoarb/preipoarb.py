@@ -221,7 +221,6 @@ class PreipoArbConfig(StrategyConfig, frozen=True):
     risk_enabled: bool
     risk_max_unrealized_loss_ratio: Decimal
     fee_bps: dict[str, float]
-    dry_run: bool
 
 
 class PreipoArbStrategy(Strategy):
@@ -313,7 +312,7 @@ class PreipoArbStrategy(Strategy):
             f"mode=two_line_grid asset_grid_params={self.asset_grid_params} "
             f"warm_windows={len(self.windows)} "
             f"default_qty={self.trade_qty} asset_qty={self._asset_qty_log()} snapshot_display={self.snapshot_display} "
-            f"snapshot_path={self.snapshot_path} dry_run={self.config.dry_run}",
+            f"snapshot_path={self.snapshot_path}",
         )
 
     def on_quote_tick(self, tick: QuoteTick) -> None:
@@ -876,33 +875,6 @@ class PreipoArbStrategy(Strategy):
             f"expected_capture={self._fmt(expected_capture_bps) if expected_capture_bps is not None else '-'}bps "
             f"buy={buy.instrument_id}@{buy.price} sell={sell.instrument_id}@{sell.price}",
         )
-        if self.config.dry_run:
-            batch = PendingBatch(
-                asset=asset,
-                action=action,
-                lot_id=lot_id,
-                buy_id=buy.instrument_id,
-                sell_id=sell.instrument_id,
-                buy_px=buy.price,
-                sell_px=sell.price,
-                edge_bps=edge_bps,
-                mean_bps=mean_bps,
-                std_bps=std_bps,
-                z_score=z_score,
-                created_ns=now_ns,
-                legs={},
-                edge_side=edge_side,
-                before_inventory=before_inventory,
-                after_inventory=after_inventory,
-                grid_level=grid_level,
-                close_lot_id=close_lot_id,
-                expected_capture_bps=expected_capture_bps,
-                inventory_delta=inventory_delta,
-                open_qty=open_qty,
-                close_qty=close_qty,
-            )
-            self._apply_grid_action(batch, order_qty, order_qty, buy.price, sell.price)
-            return
         batch = self._submit_batch(
             asset=asset,
             action=action,
@@ -1292,7 +1264,7 @@ class PreipoArbStrategy(Strategy):
         return rows
 
     def _check_risk_limits(self) -> None:
-        if not self.risk_enabled or self.config.dry_run:
+        if not self.risk_enabled:
             return
         for venue, row in self._risk_state().items():
             if int(row["positions"]) <= 0:
@@ -1316,7 +1288,7 @@ class PreipoArbStrategy(Strategy):
 
     # 策略停止时按内部持仓记录提交反向市价单。
     def _flatten_on_stop(self) -> None:
-        if self.config.dry_run or not self.positions:
+        if not self.positions:
             return
         for lot_id, pos in list(self.positions.items()):
             self.log.warning(f"flatten_action_inventory {pos.asset} lot={lot_id} reason=strategy_stop")
@@ -1325,8 +1297,6 @@ class PreipoArbStrategy(Strategy):
 
     # 风控触发时以交易系统真实持仓为准，避免内部 pair 状态不完整。
     def _flatten_cache_positions(self, reason: str) -> None:
-        if self.config.dry_run:
-            return
         for position in self._strategy_open_positions():
             side = OrderSide.SELL if bool(position.is_long) else OrderSide.BUY
             qty = self._position_qty(position)
@@ -1588,8 +1558,6 @@ class PreipoArbStrategy(Strategy):
         self.msgbus.publish(NODE_STOP_TOPIC, {"source": "preipo_arb", "reason": reason})
 
     def _emergency_flatten(self, batch: PendingBatch) -> None:
-        if self.config.dry_run:
-            return
         for leg in batch.legs.values():
             if leg.filled_qty > 0:
                 self._try_submit_emergency(leg.instrument_id, self._opposite(leg.side), leg.filled_qty)
