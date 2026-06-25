@@ -20,7 +20,7 @@ from rich.table import Table
 
 BEIJING_TZ = timezone(timedelta(hours=8))
 SNAPSHOT_NAME = "preipo_arb_snapshot.json"
-ACTION_PAGE_SIZE = 10
+MONITOR_PAGES = 2
 
 
 def snapshot_path(value: str) -> Path:
@@ -57,12 +57,8 @@ def market_table(asset: str, rows: list[dict[str, str]]) -> Table:
     return table
 
 
-def action_table(rows: list[dict[str, str]], page: int, page_size: int) -> Table:
-    total_pages = action_pages(rows, page_size)
-    page = clamp_page(page, rows, page_size)
-    start = page * page_size
-    page_rows = rows[start : start + page_size]
-    table = Table(title=f"Actions {page + 1}/{total_pages}", expand=True)
+def action_table(rows: list[dict[str, str]]) -> Table:
+    table = Table(title="Actions", expand=True)
     columns = (
         ("asset", "标的", "left"),
         ("action", "动作", "center"),
@@ -80,22 +76,12 @@ def action_table(rows: list[dict[str, str]], page: int, page_size: int) -> Table
     )
     for key, label, justify in columns:
         table.add_column(label, justify=justify, no_wrap=key != "time")
-    if not page_rows:
+    if not rows:
         table.add_row(*("-" for _ in columns))
         return table
-    for row in page_rows:
+    for row in rows:
         table.add_row(*(action_value(row, key) for key, _, _ in columns))
     return table
-
-
-def action_pages(rows: list[dict[str, str]], page_size: int) -> int:
-    if not rows:
-        return 1
-    return max((len(rows) + page_size - 1) // page_size, 1)
-
-
-def clamp_page(page: int, rows: list[dict[str, str]], page_size: int) -> int:
-    return max(0, min(page, action_pages(rows, page_size) - 1))
 
 
 def action_value(row: dict[str, str], key: str) -> str:
@@ -150,22 +136,25 @@ def risk_table(rows: dict[str, dict[str, str]]) -> Table:
     return table
 
 
-def build_view(payload: dict, path: Path, session_name: str | None, action_page: int = 0, stopping: bool = False) -> Group:
+def build_view(payload: dict, path: Path, session_name: str | None, page: int = 0, stopping: bool = False) -> Group:
     market_tables = payload.get("market_tables") or {}
     assets = payload.get("assets") or sorted(market_tables)
     beijing_time = datetime.now(tz=BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
     if stopping:
         keys = "正在停止node..."
     else:
-        keys = "↑/↓翻订单 | Esc退出监控 | s停止node" if session_name else "↑/↓翻订单 | Esc退出监控"
-    parts = [Panel.fit(f"PREIPO Arbitrage Live | 北京时间 {beijing_time} | {keys} | {path}", border_style="cyan")]
+        keys = "↑/↓翻页 | Esc退出监控 | s停止node" if session_name else "↑/↓翻页 | Esc退出监控"
+    parts = [Panel.fit(f"PREIPO Arbitrage Live | Page {page + 1}/{MONITOR_PAGES} | 北京时间 {beijing_time} | {keys} | {path}", border_style="cyan")]
+    if page == 1:
+        parts.append(action_table(payload.get("action_rows") or []))
+        return Group(*parts)
     tables = [market_table(str(asset), market_tables.get(str(asset), [])) for asset in assets]
-    first_row = tables[:2] + [summary_table(payload.get("summary") or {}), risk_table(payload.get("risk") or {})]
+    first_row = tables[:3]
     if first_row:
         parts.append(Columns(first_row, equal=True, expand=True))
-    if len(tables) > 2:
-        parts.extend(tables[2:])
-    parts.append(action_table(payload.get("action_rows") or [], action_page, ACTION_PAGE_SIZE))
+    if len(tables) > 3:
+        parts.extend(tables[3:])
+    parts.append(Columns([risk_table(payload.get("risk") or {}), summary_table(payload.get("summary") or {})], equal=True, expand=True))
     return Group(*parts)
 
 
@@ -201,20 +190,25 @@ def read_key(timeout_sec: float) -> str:
     old = termios.tcgetattr(fd)
     try:
         tty.setcbreak(fd)
-        ready, _, _ = select.select([sys.stdin], [], [], timeout_sec)
+        ready, _, _ = select.select([fd], [], [], timeout_sec)
         if ready:
-            key = sys.stdin.read(1)
+            key = os.read(fd, 1).decode(errors="ignore")
             if key == "\x1b":
-                ready, _, _ = select.select([sys.stdin], [], [], 0.05)
+                # 方向键在 Linux/tmux 下是 ESC 开头的多字节序列；SSH 延迟下 0.05s
+                # 容易把 ↑ 的 ESC 误判成退出。
+                ready, _, _ = select.select([fd], [], [], 0.2)
                 if not ready:
                     return "escape"
-                seq = sys.stdin.read(1)
-                ready, _, _ = select.select([sys.stdin], [], [], 0.05)
-                if ready:
-                    seq += sys.stdin.read(1)
-                if seq == "[A":
+                seq = os.read(fd, 1).decode(errors="ignore")
+                deadline = time.monotonic() + 0.1
+                while time.monotonic() < deadline:
+                    ready, _, _ = select.select([fd], [], [], 0.02)
+                    if not ready:
+                        break
+                    seq += os.read(fd, 1).decode(errors="ignore")
+                if seq.startswith("[A"):
                     return "up"
-                if seq == "[B":
+                if seq.startswith("[B"):
                     return "down"
                 return ""
             return key.lower()
@@ -237,15 +231,13 @@ def node_running(session_name: str) -> bool:
 def main(path: Path, refresh_sec: float, session_name: str | None = None) -> None:
     console = Console()
     stopping = False
-    action_page = 0
+    page = 0
     try:
         payload = load_snapshot(path)
-        action_page = clamp_page(action_page, payload.get("action_rows") or [], ACTION_PAGE_SIZE)
-        with Live(build_view(payload, path, session_name, action_page), console=console, screen=True, refresh_per_second=1) as live:
+        with Live(build_view(payload, path, session_name, page), console=console, screen=True, refresh_per_second=1) as live:
             while True:
                 payload = load_snapshot(path)
-                action_page = clamp_page(action_page, payload.get("action_rows") or [], ACTION_PAGE_SIZE)
-                live.update(build_view(payload, path, session_name, action_page, stopping), refresh=True)
+                live.update(build_view(payload, path, session_name, page, stopping), refresh=True)
                 if stopping:
                     if session_name is None or not node_running(session_name):
                         return
@@ -255,9 +247,9 @@ def main(path: Path, refresh_sec: float, session_name: str | None = None) -> Non
                 if key == "escape":
                     return
                 if key == "up":
-                    action_page = max(action_page - 1, 0)
+                    page = max(page - 1, 0)
                 if key == "down":
-                    action_page = min(action_page + 1, action_pages(payload.get("action_rows") or [], ACTION_PAGE_SIZE) - 1)
+                    page = min(page + 1, MONITOR_PAGES - 1)
                 if key == "s" and session_name:
                     stop_node(session_name)
                     stopping = True

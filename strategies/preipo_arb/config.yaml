@@ -3,7 +3,7 @@ strategy:
   class: PreipoArbStrategy
   config: PreipoArbConfig
   params:
-    assets: [OPENAI, ANTHROPIC]
+    assets: [OPENAI, ANTHROPIC, KORU]
     instruments: enabled
 
     # 启动时读取 collector 保存的最近 3h bid/ask1；不足 3h 就先用已有窗口。
@@ -33,6 +33,14 @@ strategy:
         min_capture_bps: "0"
       ANTHROPIC:
         trade_qty: "0.5"
+        grid_band_bps: "40"
+        grid_step_bps: "25"
+        grid_confirm_quotes: 1
+        grid_open_gap_sec: 0
+        grid_max_inventory: 1
+        min_capture_bps: "0"
+      KORU:
+        trade_qty: "0.2"
         grid_band_bps: "40"
         grid_step_bps: "25"
         grid_confirm_quotes: 1
@@ -72,12 +80,14 @@ data:
       markets:
         - OPENAI
         - ANTHROPIC
+        - KORU
 
     okx_swap:
       enabled: true
       markets:
         - OPENAI
         - ANTHROPIC
+        - KORU
 
     kraken_futures:
       enabled: false
@@ -111,12 +121,14 @@ exec:
       markets:
         - OPENAI
         - ANTHROPIC
+        - KORU
 
     okx_swap:
       enabled: true
       markets:
         - OPENAI
         - ANTHROPIC
+        - KORU
 
     kraken_futures:
       enabled: false
