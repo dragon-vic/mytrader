@@ -299,8 +299,9 @@ def run_background(config_name: str, mode: str) -> None:
 
 def timestamp_name() -> str:
     from datetime import datetime
+    from zoneinfo import ZoneInfo
 
-    return datetime.now().strftime("%Y%m%d%H%M%S")
+    return datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d%H%M%S")
 
 
 def shlex_quote(value: str) -> str:
