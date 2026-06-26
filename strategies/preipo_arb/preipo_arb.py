@@ -106,9 +106,8 @@ class PendingLeg:
     target_qty: Decimal
     filled_qty: Decimal
     filled_value: Decimal
-    fill_best_qty: Decimal
-    fill_best_value: Decimal
     filled_fee: Decimal
+    best_px: Decimal | None = None
 
 
 @dataclass
@@ -243,6 +242,7 @@ class PreipoArbStrategy(Strategy):
         self.margin_leverage = Decimal(str(config.margin_leverage))
         self.risk_enabled = bool(config.risk_enabled)
         self.risk_max_unrealized_loss_ratio = Decimal(str(config.risk_max_unrealized_loss_ratio))
+        self.fee_bps = {key.upper(): Decimal(str(value)) for key, value in config.fee_bps.items()}
         self.quotes: dict[InstrumentId, QuoteTick] = {}
         self.windows: dict[tuple[str, str, InstrumentId, InstrumentId], SpreadWindow] = {}
         self.stopped = False
@@ -339,12 +339,10 @@ class PreipoArbStrategy(Strategy):
             leg = failed_batch.legs.get(order_id)
             if leg is not None:
                 fill_qty = Decimal(str(event.last_qty))
+                fill_px = self._event_px(event)
                 leg.filled_qty += fill_qty
-                leg.filled_value += self._event_px(event) * fill_qty
-                best_px = self._fill_best_px(leg.instrument_id, leg.side, event)
-                if best_px is not None:
-                    leg.fill_best_qty += fill_qty
-                    leg.fill_best_value += best_px * fill_qty
+                leg.filled_value += fill_px * fill_qty
+                self._update_best_fill_px(leg, fill_px)
                 leg.filled_fee += self._event_fee(event)
                 self.log.error(
                     f"failed_action_late_fill {failed_batch.asset} action={failed_batch.action} "
@@ -360,12 +358,10 @@ class PreipoArbStrategy(Strategy):
             return
         leg = batch.legs[order_id]
         fill_qty = Decimal(str(event.last_qty))
+        fill_px = self._event_px(event)
         leg.filled_qty += fill_qty
-        leg.filled_value += self._event_px(event) * fill_qty
-        best_px = self._fill_best_px(leg.instrument_id, leg.side, event)
-        if best_px is not None:
-            leg.fill_best_qty += fill_qty
-            leg.fill_best_value += best_px * fill_qty
+        leg.filled_value += fill_px * fill_qty
+        self._update_best_fill_px(leg, fill_px)
         leg.filled_fee += self._event_fee(event)
         fill_state = "filled" if self._leg_filled(leg) else "partial"
         self.log.info(
@@ -872,6 +868,7 @@ class PreipoArbStrategy(Strategy):
             return
         close_qty = qty if close_lot_id is not None else Decimal("0")
         open_qty = qty if close_lot_id is None or abs(inventory_delta) == 2 else Decimal("0")
+        balance_qty = qty * Decimal(max(abs(after_inventory) - abs(before_inventory), 0))
         order_qty = close_qty + open_qty
         if order_qty <= 0:
             return
@@ -910,6 +907,7 @@ class PreipoArbStrategy(Strategy):
             open_qty=open_qty,
             close_qty=close_qty,
             close_lot_id=close_lot_id,
+            balance_qty=balance_qty,
             expected_capture_bps=expected_capture_bps,
         )
         if batch is not None and batch.lot_id in self.pending and open_qty > 0:
@@ -943,11 +941,20 @@ class PreipoArbStrategy(Strategy):
         open_qty: Decimal = Decimal("0"),
         close_qty: Decimal = Decimal("0"),
         close_lot_id: int | None = None,
+        balance_qty: Decimal = Decimal("0"),
         expected_capture_bps: Decimal | None = None,
     ) -> PendingBatch | None:
         buy_order, buy_target = self._make_order(buy_id, buy_side, buy_qty)
         sell_order, sell_target = self._make_order(sell_id, sell_side, sell_qty)
-        if open_qty > 0 and not self._check_open_balances(asset, buy_id, buy_px, open_qty, sell_id, sell_px, open_qty):
+        if balance_qty > 0 and not self._check_open_balances(
+            asset,
+            buy_id,
+            buy_px,
+            balance_qty,
+            sell_id,
+            sell_px,
+            balance_qty,
+        ):
             self.log.warning(f"open_skipped {asset} lot={lot_id} reason=insufficient_usdt")
             return None
         buy_order_id = str(buy_order.client_order_id)
@@ -975,8 +982,6 @@ class PreipoArbStrategy(Strategy):
                     target_qty=buy_target,
                     filled_qty=Decimal("0"),
                     filled_value=Decimal("0"),
-                    fill_best_qty=Decimal("0"),
-                    fill_best_value=Decimal("0"),
                     filled_fee=Decimal("0"),
                 ),
                 sell_order_id: PendingLeg(
@@ -986,8 +991,6 @@ class PreipoArbStrategy(Strategy):
                     target_qty=sell_target,
                     filled_qty=Decimal("0"),
                     filled_value=Decimal("0"),
-                    fill_best_qty=Decimal("0"),
-                    fill_best_value=Decimal("0"),
                     filled_fee=Decimal("0"),
                 ),
             },
@@ -1206,25 +1209,29 @@ class PreipoArbStrategy(Strategy):
     def _position_avg_px(self, position: object) -> Decimal:
         return Decimal(str(position.avg_px_open))
 
-    def _position_mid(self, instrument_id: InstrumentId) -> Decimal | None:
-        quote = self.quotes.get(instrument_id)
+    # 风险表按当前可平仓价估算，不用 mid，避免低估真实退出成本。
+    def _position_exit_px(self, position: object) -> Decimal | None:
+        quote = self.quotes.get(position.instrument_id)
         if quote is None:
             return None
         bid = Decimal(str(quote.bid_price))
         ask = Decimal(str(quote.ask_price))
         if bid <= 0 or ask <= 0:
             return None
-        return (bid + ask) / Decimal("2")
+        if bool(position.is_long):
+            return bid
+        return ask
 
     def _position_unrealized_pnl(self, position: object) -> Decimal | None:
-        mid = self._position_mid(position.instrument_id)
-        if mid is None:
+        exit_px = self._position_exit_px(position)
+        if exit_px is None:
             return None
         qty = self._position_qty(position)
         avg_px = self._position_avg_px(position)
+        fee = exit_px * qty * self.fee_bps[self._venue(position.instrument_id)] / Decimal("10000")
         if bool(position.is_long):
-            return (mid - avg_px) * qty
-        return (avg_px - mid) * qty
+            return (exit_px - avg_px) * qty - fee
+        return (avg_px - exit_px) * qty - fee
 
     def _risk_rows(self) -> dict[str, dict[str, str]]:
         data = self._risk_state()
@@ -1512,15 +1519,19 @@ class PreipoArbStrategy(Strategy):
         return value / qty
 
     def _filled_best_avg_px(self, batch: PendingBatch, instrument_id: InstrumentId) -> Decimal | None:
-        qty = Decimal("0")
-        value = Decimal("0")
         for leg in batch.legs.values():
-            if leg.instrument_id == instrument_id:
-                qty += leg.fill_best_qty
-                value += leg.fill_best_value
-        if qty <= 0:
-            return None
-        return value / qty
+            if leg.instrument_id == instrument_id and leg.best_px is not None:
+                return leg.best_px
+        return None
+
+    def _update_best_fill_px(self, leg: PendingLeg, px: Decimal) -> None:
+        if leg.best_px is None:
+            leg.best_px = px
+            return
+        if leg.side == OrderSide.BUY:
+            leg.best_px = min(leg.best_px, px)
+        else:
+            leg.best_px = max(leg.best_px, px)
 
     def _filled_fee(self, batch: PendingBatch) -> Decimal:
         return sum((leg.filled_fee for leg in batch.legs.values()), Decimal("0"))
@@ -1548,7 +1559,7 @@ class PreipoArbStrategy(Strategy):
         denom = sell_avg if self._venue(batch.sell_id) == "BINANCE" else buy_avg
         return self._edge_bps(buy_avg - sell_avg, denom)
 
-    # fill 时刻 cache 内最近 bid/ask1 edge，用来把延迟滑点和成交深度滑点拆开。
+    # 用实际撮合里的最优价格计算理论最优成交 edge；成交均价相对它的偏离才是成交滑点。
     def _best_entry_edge_bps(self, batch: PendingBatch) -> Decimal | None:
         buy_best = self._filled_best_avg_px(batch, batch.buy_id)
         sell_best = self._filled_best_avg_px(batch, batch.sell_id)
@@ -1559,28 +1570,6 @@ class PreipoArbStrategy(Strategy):
             return self._edge_bps(sell_best - buy_best, denom)
         denom = sell_best if self._venue(batch.sell_id) == "BINANCE" else buy_best
         return self._edge_bps(buy_best - sell_best, denom)
-
-    def _fill_best_px(self, instrument_id: InstrumentId, side: OrderSide, event: OrderFilled) -> Decimal | None:
-        quote = self._cached_quote_at(instrument_id, self._event_ts_ns(event))
-        if quote is None:
-            return None
-        if side == OrderSide.BUY:
-            return Decimal(str(quote.ask_price))
-        return Decimal(str(quote.bid_price))
-
-    def _cached_quote_at(self, instrument_id: InstrumentId, ts_ns: int) -> QuoteTick | None:
-        best_tick = None
-        best_ns = -1
-        ticks = self.cache.quote_ticks(instrument_id)
-        for tick in ticks:
-            tick_ns = int(tick.ts_event)
-            if best_ns < tick_ns <= ts_ns:
-                best_tick = tick
-                best_ns = tick_ns
-        return best_tick
-
-    def _event_ts_ns(self, event: OrderFilled) -> int:
-        return int(event.ts_event)
 
     def _round_trip_pnl_usdt(self, pos: ArbPos, batch: PendingBatch, exit_fee: Decimal) -> Decimal | None:
         exit_sell_avg = self._filled_avg_px(batch, pos.buy_id)
@@ -1866,6 +1855,7 @@ class PreipoArbStrategy(Strategy):
         best_edge = self._best_entry_edge_bps(batch) if batch is not None else None
         return {
             "created_ns": str(created_ns),
+            "lot": str(batch.lot_id) if batch is not None else "-",
             "asset": asset,
             "action": action,
             "edge_side": edge_side,
@@ -1880,7 +1870,6 @@ class PreipoArbStrategy(Strategy):
             "mean": self._fmt(mean_bps),
             "std": self._fmt(std_bps),
             "level": str(grid_level) if grid_level is not None else "-",
-            "close_lot": str(close_lot_id) if close_lot_id is not None else "-",
             "expected_capture": self._fmt(expected_capture_bps) if expected_capture_bps is not None else "-",
             "realized_capture": self._fmt(realized_capture_bps) if realized_capture_bps is not None else "-",
             "inventory": f"{before_inventory}->{after_inventory}",
@@ -1891,6 +1880,7 @@ class PreipoArbStrategy(Strategy):
     def _pending_action_row(self, batch: PendingBatch) -> dict[str, str]:
         return {
             "created_ns": str(batch.created_ns),
+            "lot": str(batch.lot_id),
             "asset": batch.asset,
             "action": batch.action,
             "edge_side": batch.edge_side,
@@ -1905,7 +1895,6 @@ class PreipoArbStrategy(Strategy):
             "mean": self._fmt(batch.mean_bps),
             "std": self._fmt(batch.std_bps),
             "level": str(batch.grid_level) if batch.grid_level is not None else "-",
-            "close_lot": str(batch.close_lot_id) if batch.close_lot_id is not None else "-",
             "expected_capture": self._fmt(batch.expected_capture_bps) if batch.expected_capture_bps is not None else "-",
             "realized_capture": "-",
             "inventory": f"{batch.before_inventory}->{batch.after_inventory}",
@@ -2050,6 +2039,7 @@ class PreipoArbStrategy(Strategy):
         title = f"PREIPO Arbitrage Actions | 北京时间 {rows.get('__beijing_time__') or self._beijing_time()}"
         table = Table(title=title, expand=True)
         columns = (
+            ("lot", "lot", "right"),
             ("asset", "asset", "left"),
             ("status", "status", "center"),
             ("qty", "qty", "right"),
@@ -2058,7 +2048,6 @@ class PreipoArbStrategy(Strategy):
             ("fill_slippage", "fill_slip", "right"),
             ("mean", "mean", "right"),
             ("std", "std", "right"),
-            ("close_lot", "close_lot", "right"),
             ("inventory", "inventory", "right"),
             ("time", "time", "left"),
             ("age_min", "age_min", "right"),

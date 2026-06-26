@@ -60,6 +60,7 @@ def market_table(asset: str, rows: list[dict[str, str]]) -> Table:
 def action_table(rows: list[dict[str, str]]) -> Table:
     table = Table(title="Actions", expand=True)
     columns = (
+        ("lot", "lot", "right"),
         ("asset", "标的", "left"),
         ("action", "动作", "center"),
         ("status", "状态", "center"),
@@ -69,7 +70,6 @@ def action_table(rows: list[dict[str, str]]) -> Table:
         ("fill_slippage", "成交滑点", "right"),
         ("mean", "均值", "right"),
         ("std", "波动", "right"),
-        ("close_lot", "平lot", "right"),
         ("inventory", "库存", "right"),
         ("time", "北京时间", "left"),
         ("age_min", "分钟", "right"),
@@ -103,15 +103,14 @@ def summary_table(rows: dict[str, dict[str, str]]) -> Table:
         ("unrealized_bps", "未实现bps"),
         ("total_bps", "总计bps"),
     )
-    assets = list(rows)
-    table.add_column("指标", justify="left", no_wrap=True)
-    for asset in assets:
-        table.add_column(str(asset), justify="right", no_wrap=True)
+    table.add_column("标的", justify="left", no_wrap=True)
+    for _, label in metrics:
+        table.add_column(label, justify="right", no_wrap=True)
     if not rows:
         table.add_row("-")
         return table
-    for key, label in metrics:
-        table.add_row(label, *(str(rows[asset].get(key, "-")) for asset in assets))
+    for asset, values in rows.items():
+        table.add_row(str(asset), *(str(values.get(key, "-")) for key, _ in metrics))
     return table
 
 
@@ -124,15 +123,14 @@ def risk_table(rows: dict[str, dict[str, str]]) -> Table:
         ("positions", "持仓数"),
         ("status", "状态"),
     )
-    venues = list(rows)
-    table.add_column("指标", justify="left", no_wrap=True)
-    for venue in venues:
-        table.add_column(str(venue), justify="right", no_wrap=True)
+    table.add_column("交易所", justify="left", no_wrap=True)
+    for _, label in metrics:
+        table.add_column(label, justify="right", no_wrap=True)
     if not rows:
         table.add_row("-")
         return table
-    for key, label in metrics:
-        table.add_row(label, *(str(rows[venue].get(key, "-")) for venue in venues))
+    for venue, values in rows.items():
+        table.add_row(str(venue), *(str(values.get(key, "-")) for key, _ in metrics))
     return table
 
 

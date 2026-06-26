@@ -40,8 +40,8 @@ strategy:
         grid_max_inventory: 1
         min_capture_bps: "0"
       KORU:
-        trade_qty: "0.2"
-        grid_band_bps: "40"
+        trade_qty: "0.01"
+        grid_band_bps: "50"
         grid_step_bps: "25"
         grid_confirm_quotes: 1
         grid_open_gap_sec: 0
