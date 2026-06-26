@@ -11,7 +11,7 @@ reports/
 strategies/*/report/
 **/report/
 **/reports/
-strategies/*/research/*
+strategies/*/research
 **/research/*
 strategies/*/collector/bidask1-live/
 logs/

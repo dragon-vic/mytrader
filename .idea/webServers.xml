@@ -3,7 +3,14 @@
   <component name="WebServers">
     <option name="servers">
       <webServer id="ae22c496-2bc6-4138-b83a-0603f511d4ce" name="阿里云">
-        <fileTransfer accessType="SFTP" host="43.108.36.151" port="22" sshConfigId="d6dfb5c0-c39a-4226-9001-69e4163e00a0" sshConfig="云" />
+        <fileTransfer accessType="SFTP" host="43.108.36.151" port="22" sshConfigId="d6dfb5c0-c39a-4226-9001-69e4163e00a0" sshConfig="root@43.108.36.151:22 password" />
+      </webServer>
+      <webServer id="d7d7b3ea-a6b4-42b5-ac5d-b5b617dc167b" name="aws">
+        <fileTransfer rootFolder="/home/ubuntu" accessType="SFTP" host="52.195.159.105" port="22" sshConfigId="e9ccf280-671a-4c1e-bd0d-6168c91b3a4a" sshConfig="ubuntu@52.195.159.105:22 key" keyPair="true">
+          <advancedOptions>
+            <advancedOptions dataProtectionLevel="Private" keepAliveTimeout="0" passiveMode="true" shareSSLContext="true" />
+          </advancedOptions>
+        </fileTransfer>
       </webServer>
     </option>
   </component>

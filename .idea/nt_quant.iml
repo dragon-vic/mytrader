@@ -6,8 +6,9 @@
       <excludeFolder url="file://$MODULE_DIR$/models" />
       <excludeFolder url="file://$MODULE_DIR$/reports" />
       <excludeFolder url="file://$MODULE_DIR$/strategies/preipo_arb/report" />
+      <excludeFolder url="file://$MODULE_DIR$/strategies/preipo_arb/research" />
     </content>
-    <orderEntry type="jdk" jdkName="阿里云" jdkType="Python SDK" />
+    <orderEntry type="jdk" jdkName="nt" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
   </component>
   <component name="PyDocumentationSettings">

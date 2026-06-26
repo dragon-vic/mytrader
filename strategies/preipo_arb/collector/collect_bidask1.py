@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import shlex
 import signal
+import shutil
+import subprocess
 import sys
 import time
 from datetime import datetime
@@ -27,6 +31,7 @@ COMPACT_SEC = 300
 MAX_ROWS = 50_000
 
 STRATEGY_DIR = Path(__file__).resolve().parents[1]
+PROJECT_DIR = Path(__file__).resolve().parents[3]
 BASE_DIR = STRATEGY_DIR / "collector" / "bidask1-live"
 # 策略 warmup 依赖 quote_raw/quote_merged，成交 tick 放旁边独立目录。
 QUOTE_RAW_DIR = BASE_DIR / "quote_raw"
@@ -34,6 +39,8 @@ QUOTE_MERGED_DIR = BASE_DIR / "quote_merged"
 TRADE_RAW_DIR = BASE_DIR / "tick_raw"
 TRADE_MERGED_DIR = BASE_DIR / "tick_merged"
 LOG_PATH = BASE_DIR / "collector.log"
+TMUX_SESSION = "preipo_bidask1_collector"
+TMUX_CHILD_ENV = "PREIPO_BIDASK1_TMUX_CHILD"
 
 QUOTE_SCHEMA = pa.schema([
     ("ts_local_ns", pa.int64()),
@@ -401,8 +408,34 @@ def write_log(text: str) -> None:
         f.write(line + "\n")
 
 
+def launch_tmux_if_needed(args: list[str]) -> bool:
+    if os.environ.get(TMUX_CHILD_ENV) == "1" or os.environ.get("TMUX"):
+        return False
+
+    tmux = shutil.which("tmux")
+    if tmux is None:
+        print("tmux not found; running collector in foreground.", flush=True)
+        return False
+
+    if subprocess.run([tmux, "has-session", "-t", TMUX_SESSION], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+        print(f"tmux session already exists: {TMUX_SESSION}", flush=True)
+        print(f"attach: tmux attach -t {TMUX_SESSION}", flush=True)
+        return True
+
+    script = Path(__file__).resolve()
+    run_args = args if args else ["0"]
+    command = " ".join(shlex.quote(part) for part in [sys.executable, "-u", str(script), *run_args])
+    command = f"{TMUX_CHILD_ENV}=1 exec {command}"
+    subprocess.run([tmux, "new-session", "-d", "-s", TMUX_SESSION, "-c", str(PROJECT_DIR), command], check=True)
+    print(f"started tmux session: {TMUX_SESSION}", flush=True)
+    print(f"attach: tmux attach -t {TMUX_SESSION}", flush=True)
+    return True
+
+
 if __name__ == "__main__":
     # 0 表示持续采集；临时测试可传秒数，例如：
     # python strategies/preipo_arb/collector/collect_bidask1.py 120
+    if launch_tmux_if_needed(sys.argv[1:]):
+        raise SystemExit(0)
     seconds = int(sys.argv[1]) if len(sys.argv) > 1 else 0
     asyncio.run(main(seconds))

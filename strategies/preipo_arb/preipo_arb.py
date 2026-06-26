@@ -221,6 +221,7 @@ class PreipoArbConfig(StrategyConfig, frozen=True):
     margin_leverage: Decimal
     risk_enabled: bool
     risk_max_unrealized_loss_ratio: Decimal
+    max_quote_delay_ms: float
     fee_bps: dict[str, float]
 
 
@@ -242,6 +243,7 @@ class PreipoArbStrategy(Strategy):
         self.margin_leverage = Decimal(str(config.margin_leverage))
         self.risk_enabled = bool(config.risk_enabled)
         self.risk_max_unrealized_loss_ratio = Decimal(str(config.risk_max_unrealized_loss_ratio))
+        self.max_quote_delay_ns = int(float(config.max_quote_delay_ms) * 1_000_000)
         self.fee_bps = {key.upper(): Decimal(str(value)) for key, value in config.fee_bps.items()}
         self.quotes: dict[InstrumentId, QuoteTick] = {}
         self.windows: dict[tuple[str, str, InstrumentId, InstrumentId], SpreadWindow] = {}
@@ -252,7 +254,9 @@ class PreipoArbStrategy(Strategy):
         self.pending: dict[int, PendingBatch] = {}
         self.failed_orders: dict[str, PendingBatch] = {}
         self.order_lot: dict[str, int] = {}
-        self.grid_confirmations: dict[tuple[str, str, InstrumentId, InstrumentId, int], deque[int]] = defaultdict(deque)
+        self.signal_alerts: set[str] = set()
+        self.signal_alert_versions: dict[str, int] = defaultdict(int)
+        self.signal_alert_sides: dict[str, str] = {}
         self.grid_last_open_ns: dict[str, int] = {asset: 0 for asset in self.assets}
         self.action_rows: list[dict[str, str]] = []
         self.realized_pnl_usdt: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
@@ -280,12 +284,13 @@ class PreipoArbStrategy(Strategy):
                 raise RuntimeError(f"asset_grid_params contains unknown asset: {asset}")
             if self._grid_step_bps(asset) <= 0:
                 raise RuntimeError(f"grid_step_bps must be positive for {asset}")
-            if self._grid_confirm_quotes(asset) <= 0:
-                raise RuntimeError(f"grid_confirm_quotes must be positive for {asset}")
             if self._grid_open_gap_ns(asset) < 0:
                 raise RuntimeError(f"grid_open_gap_sec must be non-negative for {asset}")
-            if self._grid_band_bps(asset) <= 0:
-                raise RuntimeError(f"grid_band_bps must be positive for {asset}")
+            for edge_side in (LONG_EDGE, SHORT_EDGE):
+                if self._grid_band_bps(asset, edge_side) <= 0:
+                    raise RuntimeError(f"grid_band_bps.{self._edge_side_key(edge_side)} must be positive for {asset}")
+                if self._grid_signal_delay_ns(asset, edge_side) < 0:
+                    raise RuntimeError(f"grid_signal_delay_ms.{self._edge_side_key(edge_side)} must be non-negative for {asset}")
             if self._grid_max_inventory(asset) <= 0:
                 raise RuntimeError(f"grid_max_inventory must be positive for {asset}")
             if self._min_capture_bps(asset) < 0:
@@ -303,6 +308,8 @@ class PreipoArbStrategy(Strategy):
             raise RuntimeError("margin_leverage must be positive")
         if self.risk_enabled and not Decimal("0") < self.risk_max_unrealized_loss_ratio <= Decimal("1"):
             raise RuntimeError("risk_max_unrealized_loss_ratio must be in (0, 1]")
+        if self.max_quote_delay_ns < 0:
+            raise RuntimeError("max_quote_delay_ms must be non-negative")
         self._check_start_account_state()
         if self.stopped:
             return
@@ -320,6 +327,8 @@ class PreipoArbStrategy(Strategy):
     def on_quote_tick(self, tick: QuoteTick) -> None:
         if self.stopped:
             return
+        if self._quote_delay_blocked(tick):
+            return
         self.quotes[tick.instrument_id] = tick
         asset = self._asset(tick.instrument_id)
         if asset is None:
@@ -331,6 +340,18 @@ class PreipoArbStrategy(Strategy):
             return
         self._maybe_update_snapshot()
         self._maybe_open(asset, states)
+
+    def _quote_delay_blocked(self, tick: QuoteTick) -> bool:
+        if self.max_quote_delay_ns <= 0:
+            return False
+        delay_ns = self.clock.timestamp_ns() - int(tick.ts_event)
+        if delay_ns <= self.max_quote_delay_ns:
+            return False
+        self.log.warning(
+            f"quote_delay_skip {tick.instrument_id} delay_ms={delay_ns / 1_000_000:.3f} "
+            f"threshold_ms={self.max_quote_delay_ns / 1_000_000:.3f}",
+        )
+        return True
 
     def on_order_filled(self, event: OrderFilled) -> None:
         order_id = str(event.client_order_id)
@@ -650,23 +671,48 @@ class PreipoArbStrategy(Strategy):
 
     def _maybe_apply_grid(self, asset: str, states: dict[tuple[str, InstrumentId, InstrumentId], SpreadState], now_ns: int) -> None:
         if self._asset_trade_qty(asset) <= 0:
-            self._clear_confirmations(asset, LONG_EDGE)
-            self._clear_confirmations(asset, SHORT_EDGE)
+            self._cancel_signal_alert(asset)
             return
         if any(batch.asset == asset for batch in self.pending.values()):
+            self._cancel_signal_alert(asset)
             return
+        candidates = self._grid_action_candidates(asset, states, now_ns)
+        if not candidates:
+            self._cancel_signal_alert(asset)
+            return
+        if asset in self.signal_alerts:
+            return
+        candidate = max(candidates, key=lambda item: item[0])
+        edge_side = candidate[3].edge_side
+        if self._candidate_has_open_balance(asset, candidate):
+            self._schedule_signal_alert(asset, edge_side, now_ns)
+
+    def _grid_action_candidates(
+        self,
+        asset: str,
+        states: dict[tuple[str, InstrumentId, InstrumentId], SpreadState],
+        now_ns: int,
+        edge_side: str | None = None,
+    ) -> list[tuple[float, int | None, Decimal | None, SpreadState, int]]:
         candidates: list[tuple[float, int | None, Decimal | None, SpreadState, int]] = []
         for state in states.values():
+            if edge_side is not None and state.edge_side != edge_side:
+                continue
             grid_level = self._grid_signal(asset, state)
             if grid_level is None:
-                self._clear_confirmations(asset, state.edge_side)
                 continue
             close_pos, capture = self._close_candidate(asset, state.edge_side, state.edge_bps)
             if self._can_apply_grid_signal(asset, state, grid_level, now_ns, close_pos, capture):
                 candidates.append((abs(float(state.edge_bps) - state.mean_bps), close_pos.lot_id if close_pos else None, capture, state, grid_level))
-        if not candidates:
-            return
-        _, close_lot_id, capture, state, grid_level = max(candidates, key=lambda item: item[0])
+        return candidates
+
+    def _submit_grid_candidate(
+        self,
+        asset: str,
+        candidate: tuple[float, int | None, Decimal | None, SpreadState, int],
+        now_ns: int,
+    ) -> None:
+        _, close_lot_id, capture, state, grid_level = candidate
         before_inventory = self._asset_inventory(asset, include_pending=True)
         sign = 1 if state.edge_side == LONG_EDGE else -1
         reducing = self._reduces_inventory(before_inventory, state.edge_side)
@@ -690,8 +736,77 @@ class PreipoArbStrategy(Strategy):
             expected_capture_bps=capture,
         )
 
+    def _candidate_has_open_balance(self, asset: str, candidate: tuple[float, int | None, Decimal | None, SpreadState, int]) -> bool:
+        _, close_lot_id, _, state, _ = candidate
+        before_inventory = self._asset_inventory(asset, include_pending=True)
+        sign = 1 if state.edge_side == LONG_EDGE else -1
+        reducing = self._reduces_inventory(before_inventory, state.edge_side)
+        inventory_delta = sign * (2 if reducing and abs(before_inventory) == 1 else 1)
+        after_inventory = before_inventory + inventory_delta
+        qty = self._shared_open_qty(asset, state.buy.instrument_id, state.sell.instrument_id, state.buy.price, state.sell.price)
+        if qty is None:
+            return False
+        balance_qty = qty * Decimal(max(abs(after_inventory) - abs(before_inventory), 0))
+        if close_lot_id is not None or balance_qty <= 0:
+            return True
+        return self._check_open_balances(
+            asset,
+            state.buy.instrument_id,
+            state.buy.price,
+            balance_qty,
+            state.sell.instrument_id,
+            state.sell.price,
+            balance_qty,
+        )
+
+    def _schedule_signal_alert(self, asset: str, edge_side: str, now_ns: int) -> None:
+        if asset in self.signal_alerts:
+            return
+        self.signal_alert_versions[asset] += 1
+        version = self.signal_alert_versions[asset]
+        self.signal_alerts.add(asset)
+        self.signal_alert_sides[asset] = edge_side
+        alert_name = self._signal_alert_name(asset)
+        alert_ns = now_ns + self._grid_signal_delay_ns(asset, edge_side)
+        self.clock.set_time_alert_ns(
+            alert_name,
+            alert_ns,
+            callback=lambda _event, asset=asset, edge_side=edge_side, version=version: self._on_signal_alert(asset, edge_side, version),
+            allow_past=True,
+        )
+
+    def _on_signal_alert(self, asset: str, edge_side: str, version: int) -> None:
+        if self.signal_alert_versions.get(asset) != version or asset not in self.signal_alerts:
+            return
+        self.signal_alerts.discard(asset)
+        self.signal_alert_sides.pop(asset, None)
+        if self.stopped:
+            return
+        if self._asset_trade_qty(asset) <= 0:
+            return
+        if any(batch.asset == asset for batch in self.pending.values()):
+            return
+        # Quote 回调已经刷新最新 edge；alert 只读取最新状态，不再写窗口。
+        states = self.last_spread_states.get(asset, {})
+        now_ns = self.clock.timestamp_ns()
+        candidates = self._grid_action_candidates(asset, states, now_ns, edge_side=edge_side)
+        if not candidates:
+            return
+        self._submit_grid_candidate(asset, max(candidates, key=lambda item: item[0]), now_ns)
+
+    def _cancel_signal_alert(self, asset: str) -> None:
+        if asset not in self.signal_alerts:
+            return
+        self.signal_alerts.discard(asset)
+        self.signal_alert_sides.pop(asset, None)
+        self.signal_alert_versions[asset] += 1
+        self.clock.cancel_timer(self._signal_alert_name(asset))
+
+    def _signal_alert_name(self, asset: str) -> str:
+        return f"preipo_grid_signal_{asset}"
+
     def _grid_signal(self, asset: str, state: SpreadState) -> int | None:
-        band = float(self._grid_band_bps(asset))
+        band = float(self._grid_band_bps(asset, state.edge_side))
         step = float(self._grid_step_bps(asset))
         if step <= 0:
             return None
@@ -727,24 +842,7 @@ class PreipoArbStrategy(Strategy):
             return False
         if not reducing and not self._passes_grid_step(asset, state.edge_side, state.edge_bps):
             return False
-        key = (asset, state.edge_side, state.buy.instrument_id, state.sell.instrument_id, grid_level)
-        self._clear_other_confirmations(key)
-        queue = self.grid_confirmations[key]
-        queue.append(now_ns)
-        confirm_quotes = self._grid_confirm_quotes(asset)
-        while len(queue) > confirm_quotes:
-            queue.popleft()
-        return len(queue) >= confirm_quotes
-
-    def _clear_confirmations(self, asset: str, edge_side: str) -> None:
-        for key in list(self.grid_confirmations):
-            if key[0] == asset and key[1] == edge_side:
-                self.grid_confirmations.pop(key, None)
-
-    def _clear_other_confirmations(self, active_key: tuple[str, str, InstrumentId, InstrumentId, int]) -> None:
-        for key in list(self.grid_confirmations):
-            if key[:4] == active_key[:4] and key != active_key:
-                self.grid_confirmations.pop(key, None)
+        return True
 
     def _asset_grid(self, asset: str) -> dict[str, object]:
         if asset is None:
@@ -766,20 +864,35 @@ class PreipoArbStrategy(Strategy):
     def _grid_step_bps(self, asset: str) -> Decimal:
         return self._grid_decimal(asset, "grid_step_bps")
 
-    def _grid_confirm_quotes(self, asset: str) -> int:
-        return self._grid_int(asset, "grid_confirm_quotes")
-
     def _grid_open_gap_ns(self, asset: str) -> int:
         return int(self._grid_float(asset, "grid_open_gap_sec") * 1_000_000_000)
 
-    def _grid_band_bps(self, asset: str) -> Decimal:
-        return self._grid_decimal(asset, "grid_band_bps")
+    def _grid_band_bps(self, asset: str, edge_side: str) -> Decimal:
+        return self._grid_side_decimal(asset, "grid_band_bps", edge_side)
+
+    def _grid_signal_delay_ns(self, asset: str, edge_side: str) -> int:
+        return int(self._grid_side_float(asset, "grid_signal_delay_ms", edge_side) * 1_000_000)
 
     def _grid_max_inventory(self, asset: str) -> int:
         return self._grid_int(asset, "grid_max_inventory")
 
     def _min_capture_bps(self, asset: str) -> Decimal:
         return self._grid_decimal(asset, "min_capture_bps")
+
+    def _grid_side_decimal(self, asset: str, key: str, edge_side: str) -> Decimal:
+        params = self._asset_grid(asset)
+        return Decimal(str(params[key][self._edge_side_key(edge_side)]))
+
+    def _grid_side_float(self, asset: str, key: str, edge_side: str) -> float:
+        params = self._asset_grid(asset)
+        return float(params[key][self._edge_side_key(edge_side)])
+
+    def _edge_side_key(self, edge_side: str) -> str:
+        if edge_side == LONG_EDGE:
+            return "long"
+        if edge_side == SHORT_EDGE:
+            return "short"
+        raise RuntimeError(f"unknown edge_side: {edge_side}")
 
     def _asset_trade_qty(self, asset: str) -> Decimal:
         return Decimal(str(self._asset_grid(asset).get("trade_qty", self.trade_qty)))
@@ -912,8 +1025,6 @@ class PreipoArbStrategy(Strategy):
         )
         if batch is not None and batch.lot_id in self.pending and open_qty > 0:
             self.grid_last_open_ns[asset] = now_ns
-            if grid_level is not None:
-                self.grid_confirmations.pop((asset, edge_side, buy.instrument_id, sell.instrument_id, grid_level), None)
 
     def _submit_batch(
         self,

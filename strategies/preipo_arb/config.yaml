@@ -16,8 +16,8 @@ strategy:
 
     # 每个标的单独配置网格参数，避免顶层默认值和 asset 覆盖值不一致。
     # grid_band_bps: long_edge 低于均线多少开 long；short_edge 高于均线多少开 short。
+    # grid_signal_delay_ms: 第一次过线后等待多少毫秒，再用最新 quote 复查；仍过线才交易。
     # grid_step_bps: 同方向加仓的网格间距；short 要比当前最大开仓 edge 更高，long 要比当前最小开仓 edge 更低。
-    # grid_confirm_quotes: 同一方向同一 level 需要连续多少个 quote 确认。
     # grid_open_gap_sec: 非平仓动作之间的最小间隔；0 表示不做时间冷却。
     # grid_max_inventory: 每个标的最多持有的净 pair 数。
     # min_capture_bps: 平仓必须满足对应 pair 的实际 edge capture 下限。
@@ -25,31 +25,40 @@ strategy:
     asset_grid_params:
       OPENAI:
         trade_qty: "0.01"
-        grid_band_bps: "40"
+        grid_band_bps:
+          long: "24"
+          short: "29"
+        grid_signal_delay_ms:
+          long: 60
+          short: 10
         grid_step_bps: "25"
-        grid_confirm_quotes: 1
         grid_open_gap_sec: 0
         grid_max_inventory: 1
         min_capture_bps: "0"
       ANTHROPIC:
         trade_qty: "0.5"
-        grid_band_bps: "40"
+        grid_band_bps:
+          long: "41"
+          short: "41"
+        grid_signal_delay_ms:
+          long: 70
+          short: 70
         grid_step_bps: "25"
-        grid_confirm_quotes: 1
         grid_open_gap_sec: 0
         grid_max_inventory: 1
         min_capture_bps: "0"
       KORU:
         trade_qty: "0.01"
-        grid_band_bps: "50"
+        grid_band_bps:
+          long: "37"
+          short: "47"
+        grid_signal_delay_ms:
+          long: 100
+          short: 80
         grid_step_bps: "25"
-        grid_confirm_quotes: 1
         grid_open_gap_sec: 0
         grid_max_inventory: 1
         min_capture_bps: "0"
-
-    # 默认每次 pair 两边都下同一个 qty；asset_grid_params.{asset}.trade_qty 可以覆盖。
-    trade_qty: "0.05"
 
     # live 运行时 snapshot 写到当前 report 目录，monitor/start 会读取这个文件显示 rich 表格。
     snapshot_interval_sec: 1
@@ -62,6 +71,8 @@ strategy:
     # 每个 quote 后按交易所聚合持仓风险；未实现亏损超过钱包余额 80% 时全平并停止。
     risk_enabled: true
     risk_max_unrealized_loss_ratio: "0.8"
+    # quote 交易所事件时间和本地收到时间差超过该值时跳过，避免旧盘口触发信号。
+    max_quote_delay_ms: 10
     use_hyphens_in_client_order_ids: false
     fee_bps:
       BINANCE: 5
