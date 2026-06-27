@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import random
 import sys
 import time
 from collections import defaultdict
@@ -222,6 +223,8 @@ class PreipoArbConfig(StrategyConfig, frozen=True):
     risk_enabled: bool
     risk_max_unrealized_loss_ratio: Decimal
     max_quote_delay_ms: float
+    quote_summary_interval_sec: float
+    quote_sample_rates: dict[str, float]
     fee_bps: dict[str, float]
 
 
@@ -244,6 +247,8 @@ class PreipoArbStrategy(Strategy):
         self.risk_enabled = bool(config.risk_enabled)
         self.risk_max_unrealized_loss_ratio = Decimal(str(config.risk_max_unrealized_loss_ratio))
         self.max_quote_delay_ns = int(float(config.max_quote_delay_ms) * 1_000_000)
+        self.quote_summary_interval_ns = int(float(config.quote_summary_interval_sec) * 1_000_000_000)
+        self.quote_sample_rates = {key.upper(): float(value) for key, value in config.quote_sample_rates.items()}
         self.fee_bps = {key.upper(): Decimal(str(value)) for key, value in config.fee_bps.items()}
         self.quotes: dict[InstrumentId, QuoteTick] = {}
         self.windows: dict[tuple[str, str, InstrumentId, InstrumentId], SpreadWindow] = {}
@@ -268,6 +273,11 @@ class PreipoArbStrategy(Strategy):
         self.snapshot_stop = ThreadEvent()
         self.snapshot_thread: Thread | None = None
         self.snapshot_live: Live | None = None
+        self.quote_delay_stats: dict[InstrumentId, list[int]] = defaultdict(list)
+        self.quote_profile_stats: dict[str, dict[str, list[int]]] = defaultdict(lambda: defaultdict(list))
+        self.quote_sample_counts: dict[str, list[int]] = defaultdict(lambda: [0, 0])
+        self.last_quote_summary_ns = 0
+        self.housekeeping_alert_seq = 0
 
     def on_start(self) -> None:
         if self.min_window_ns < 0:
@@ -310,12 +320,20 @@ class PreipoArbStrategy(Strategy):
             raise RuntimeError("risk_max_unrealized_loss_ratio must be in (0, 1]")
         if self.max_quote_delay_ns < 0:
             raise RuntimeError("max_quote_delay_ms must be non-negative")
+        if self.quote_summary_interval_ns < 0:
+            raise RuntimeError("quote_summary_interval_sec must be non-negative")
+        for asset, sample_rate in self.quote_sample_rates.items():
+            if asset not in self.assets:
+                raise RuntimeError(f"quote_sample_rates contains unknown asset: {asset}")
+            if not 0 < sample_rate <= 1:
+                raise RuntimeError(f"quote_sample_rates must be in (0, 1] for {asset}")
         self._check_start_account_state()
         if self.stopped:
             return
         for instrument_id in self.instruments:
             self.subscribe_quote_ticks(instrument_id)
         self._start_snapshot_display()
+        self._schedule_housekeeping_alert()
         self.log.info(
             f"preipo_arb started assets={','.join(self.assets)} instruments={len(self.instruments)} "
             f"mode=two_line_grid asset_grid_params={self.asset_grid_params} "
@@ -327,31 +345,121 @@ class PreipoArbStrategy(Strategy):
     def on_quote_tick(self, tick: QuoteTick) -> None:
         if self.stopped:
             return
-        if self._quote_delay_blocked(tick):
-            return
-        self.quotes[tick.instrument_id] = tick
         asset = self._asset(tick.instrument_id)
+        if asset is not None and self._drop_quote(asset):
+            self._maybe_log_quote_summary()
+            return
+        total_start = time.perf_counter_ns()
+        section_start = total_start
+        self._record_quote_delay(tick)
+        self._record_quote_profile(tick.instrument_id, "delay_check", time.perf_counter_ns() - section_start)
+        section_start = time.perf_counter_ns()
+        self.quotes[tick.instrument_id] = tick
+        self._record_quote_profile(tick.instrument_id, "cache_quote", time.perf_counter_ns() - section_start)
         if asset is None:
+            self._record_quote_profile(tick.instrument_id, "total", time.perf_counter_ns() - total_start)
+            self._maybe_log_quote_summary()
             return
-        states = self._update_spreads(asset)
-        self._check_risk_limits()
-        if self.stopped:
-            self._maybe_update_snapshot()
-            return
-        self._maybe_update_snapshot()
+        section_start = time.perf_counter_ns()
+        states = self._update_spreads(asset, update_window=False)
+        self._record_quote_profile(tick.instrument_id, "edge_state", time.perf_counter_ns() - section_start)
+        section_start = time.perf_counter_ns()
         self._maybe_open(asset, states)
+        self._record_quote_profile(tick.instrument_id, "signal_and_order_check", time.perf_counter_ns() - section_start)
+        self._record_quote_profile(tick.instrument_id, "total", time.perf_counter_ns() - total_start)
+        self._maybe_log_quote_summary()
 
-    def _quote_delay_blocked(self, tick: QuoteTick) -> bool:
-        if self.max_quote_delay_ns <= 0:
+    def _drop_quote(self, asset: str) -> bool:
+        if asset.upper() != "KORU":
             return False
-        delay_ns = self.clock.timestamp_ns() - int(tick.ts_event)
-        if delay_ns <= self.max_quote_delay_ns:
+        sample_rate = self.quote_sample_rates.get(asset.upper(), 1.0)
+        counts = self.quote_sample_counts[asset.upper()]
+        counts[0] += 1
+        if random.random() < sample_rate:
             return False
-        self.log.warning(
-            f"quote_delay_skip {tick.instrument_id} delay_ms={delay_ns / 1_000_000:.3f} "
-            f"threshold_ms={self.max_quote_delay_ns / 1_000_000:.3f}",
-        )
+        counts[1] += 1
         return True
+
+    def _record_quote_delay(self, tick: QuoteTick) -> None:
+        if self.max_quote_delay_ns <= 0:
+            return
+        delay_ns = self.clock.timestamp_ns() - int(tick.ts_init)
+        self.quote_delay_stats[tick.instrument_id].append(delay_ns)
+
+    def _record_quote_profile(self, instrument_id: InstrumentId, section: str, elapsed_ns: int) -> None:
+        self.quote_profile_stats[str(instrument_id)][section].append(elapsed_ns)
+
+    def _maybe_log_quote_summary(self) -> None:
+        if self.quote_summary_interval_ns <= 0:
+            return
+        now_ns = self.clock.timestamp_ns()
+        if now_ns - self.last_quote_summary_ns < self.quote_summary_interval_ns:
+            return
+        self.last_quote_summary_ns = now_ns
+        self._log_quote_delay_summary()
+        self._log_quote_profile_summary()
+        self._log_quote_sample_summary()
+        self.quote_delay_stats.clear()
+        self.quote_profile_stats.clear()
+        self.quote_sample_counts.clear()
+
+    def _log_quote_delay_summary(self) -> None:
+        threshold_ms = self.max_quote_delay_ns / 1_000_000
+        for instrument_id, values in sorted(self.quote_delay_stats.items(), key=lambda item: str(item[0])):
+            high = [value for value in values if value > self.max_quote_delay_ns]
+            if not high:
+                continue
+            sorted_values = sorted(values)
+            self.log.error(
+                f"quote_delay_summary {instrument_id} n={len(values)} high_n={len(high)} "
+                f"threshold_ms={threshold_ms:.3f} "
+                f"p50_ms={self._quote_percentile_ms(sorted_values, 0.50):.3f} "
+                f"p95_ms={self._quote_percentile_ms(sorted_values, 0.95):.3f} "
+                f"p99_ms={self._quote_percentile_ms(sorted_values, 0.99):.3f} "
+                f"max_ms={max(values) / 1_000_000:.3f}",
+            )
+
+    def _log_quote_profile_summary(self) -> None:
+        section_labels = {
+            "delay_check": "延迟计算/内存聚合",
+            "cache_quote": "更新最新盘口缓存",
+            "edge_state": "实时刷新edge状态",
+            "signal_and_order_check": "信号复查和下单判断",
+            "total": "未drop总耗时",
+        }
+        for instrument_id, sections in sorted(self.quote_profile_stats.items()):
+            parts = []
+            for section in (
+                "total",
+                "delay_check",
+                "cache_quote",
+                "edge_state",
+                "signal_and_order_check",
+            ):
+                values = sections.get(section)
+                if not values:
+                    continue
+                avg_us = sum(values) / len(values) / 1_000
+                max_us = max(values) / 1_000
+                parts.append(f"{section}({section_labels[section]})=n{len(values)} avg_us={avg_us:.1f} max_us={max_us:.1f}")
+            if parts:
+                self.log.info(f"quote_profile_summary {instrument_id} {' | '.join(parts)}")
+
+    def _log_quote_sample_summary(self) -> None:
+        for asset, counts in sorted(self.quote_sample_counts.items()):
+            seen, dropped = counts
+            if seen == 0 or dropped == 0:
+                continue
+            self.log.info(
+                f"quote_sample_summary {asset} seen={seen} dropped={dropped} "
+                f"processed={seen - dropped} drop_pct={dropped / seen * 100:.1f}",
+            )
+
+    def _quote_percentile_ms(self, sorted_values: list[int], pct: float) -> float:
+        if not sorted_values:
+            return 0.0
+        index = min(len(sorted_values) - 1, int((len(sorted_values) - 1) * pct))
+        return sorted_values[index] / 1_000_000
 
     def on_order_filled(self, event: OrderFilled) -> None:
         order_id = str(event.client_order_id)
@@ -603,7 +711,7 @@ class PreipoArbStrategy(Strategy):
         return numerator / price * Decimal("10000")
 
     # two-line grid 分别维护可成交 long_edge 和 short_edge，避免 mid 信号低估真实价差。
-    def _grid_candidates(self, asset: str) -> list[SpreadState]:
+    def _grid_candidates(self, asset: str, update_window: bool) -> list[SpreadState]:
         binance = self._binance_quote(asset)
         if binance is None:
             return []
@@ -627,7 +735,8 @@ class PreipoArbStrategy(Strategy):
             ):
                 key = (asset, edge_side, buy.instrument_id, sell.instrument_id)
                 window = self.windows.setdefault(key, SpreadWindow())
-                window.add(now_ns, float(edge), self.grid_center_ns)
+                if update_window:
+                    window.add(now_ns, float(edge), self.grid_center_ns)
                 samples, mean, std, window_sec = window.stats()
                 stats = self._active_stats(samples, mean, std, window_sec)
                 if stats is None:
@@ -649,13 +758,35 @@ class PreipoArbStrategy(Strategy):
                 )
         return states
 
-    def _update_spreads(self, asset: str) -> dict[tuple[str, InstrumentId, InstrumentId], SpreadState]:
+    def _update_spreads(self, asset: str, update_window: bool = True) -> dict[tuple[str, InstrumentId, InstrumentId], SpreadState]:
         states: dict[tuple[str, InstrumentId, InstrumentId], SpreadState] = {}
-        for state in self._grid_candidates(asset):
+        for state in self._grid_candidates(asset, update_window):
             states[(state.edge_side, state.buy.instrument_id, state.sell.instrument_id)] = state
         if states:
             self.last_spread_states[asset] = states
         return states
+
+    # 低频维护任务：rolling window、风控和 snapshot 不占用 quote 热路径。
+    def _schedule_housekeeping_alert(self) -> None:
+        if self.stopped:
+            return
+        self.housekeeping_alert_seq += 1
+        self.clock.set_time_alert_ns(
+            f"preipo_housekeeping_{self.housekeeping_alert_seq}",
+            self.clock.timestamp_ns() + 1_000_000_000,
+            callback=lambda _event: self._on_housekeeping_alert(),
+            allow_past=True,
+        )
+
+    def _on_housekeeping_alert(self) -> None:
+        if self.stopped:
+            return
+        for asset in self.assets:
+            self._update_spreads(asset, update_window=True)
+        self._check_risk_limits()
+        if not self.stopped:
+            self._maybe_update_snapshot()
+        self._schedule_housekeeping_alert()
 
     def _active_stats(self, samples: int, mean: float, std: float, window_sec: float) -> tuple[float, float] | None:
         if samples < 2 or std <= 0:
