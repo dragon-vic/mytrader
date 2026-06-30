@@ -3,12 +3,14 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import random
 import shlex
 import signal
 import shutil
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -21,14 +23,17 @@ import websockets
 
 LOCAL_TZ = ZoneInfo("Asia/Shanghai")
 
-BINANCE_SYMBOLS = ("OPENAIUSDT", "ANTHROPICUSDT")
-OKX_SYMBOLS = ("OPENAI-USDT-SWAP", "ANTHROPIC-USDT-SWAP")
+BINANCE_SYMBOLS = ("OPENAIUSDT", "ANTHROPICUSDT", "KORUUSDT")
+OKX_SYMBOLS = ("OPENAI-USDT-SWAP", "ANTHROPIC-USDT-SWAP", "KORU-USDT-SWAP")
 
 QUOTE_FLUSH_SEC = 30
 # Trade tick 量明显小于 quote，单独放慢落盘节奏，减少小 parquet 文件数量。
 TRADE_FLUSH_SEC = 900
 COMPACT_SEC = 300
+METRICS_SEC = 60
 MAX_ROWS = 50_000
+BACKOFF_INITIAL_SEC = 5.0
+BACKOFF_MAX_SEC = 60.0
 
 STRATEGY_DIR = Path(__file__).resolve().parents[1]
 PROJECT_DIR = Path(__file__).resolve().parents[3]
@@ -69,6 +74,17 @@ TRADE_SCHEMA = pa.schema([
 ])
 
 
+@dataclass
+class StreamStats:
+    name: str
+    connects: int = 0
+    errors: int = 0
+    messages: int = 0
+    connected_at: float | None = None
+    last_msg_at: float | None = None
+    backoff_sec: float = BACKOFF_INITIAL_SEC
+
+
 # 长期采集四个 preipo 标的的 bid/ask1 和成交 tick，并按小时合并 parquet。
 async def main(duration_sec: int) -> None:
     BASE_DIR.mkdir(parents=True, exist_ok=True)
@@ -80,6 +96,10 @@ async def main(duration_sec: int) -> None:
     stop = asyncio.Event()
     quote_queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=100_000)
     trade_queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=100_000)
+    stats = {
+        name: StreamStats(name)
+        for name in ("binance_quote", "okx_quote", "binance_trade", "okx_trade")
+    }
 
     def request_stop(*_args) -> None:
         stop.set()
@@ -89,25 +109,26 @@ async def main(duration_sec: int) -> None:
 
     write_log(f"start duration_sec={duration_sec} base_dir={BASE_DIR}")
     collectors = [
-        asyncio.create_task(collect_binance_quotes(quote_queue, stop, stop_at)),
-        asyncio.create_task(collect_okx_quotes(quote_queue, stop, stop_at)),
-        asyncio.create_task(collect_binance_trades(trade_queue, stop, stop_at)),
-        asyncio.create_task(collect_okx_trades(trade_queue, stop, stop_at)),
+        asyncio.create_task(collect_binance_quotes(quote_queue, stop, stop_at, stats["binance_quote"])),
+        asyncio.create_task(collect_okx_quotes(quote_queue, stop, stop_at, stats["okx_quote"])),
+        asyncio.create_task(collect_binance_trades(trade_queue, stop, stop_at, stats["binance_trade"])),
+        asyncio.create_task(collect_okx_trades(trade_queue, stop, stop_at, stats["okx_trade"])),
     ]
     writers = [
         asyncio.create_task(write_chunks("quote", quote_queue, QUOTE_RAW_DIR, QUOTE_SCHEMA, QUOTE_FLUSH_SEC, stop, stop_at)),
         asyncio.create_task(write_chunks("trade", trade_queue, TRADE_RAW_DIR, TRADE_SCHEMA, TRADE_FLUSH_SEC, stop, stop_at)),
     ]
     compactor = asyncio.create_task(compact_loop(stop, stop_at))
+    metrics = asyncio.create_task(metrics_loop(quote_queue, trade_queue, stats, stop, stop_at))
     try:
         while not stop.is_set() and not expired(stop_at):
             await asyncio.sleep(1)
         stop.set()
     finally:
         stop.set()
-        for task in [*collectors, compactor]:
+        for task in [*collectors, compactor, metrics]:
             task.cancel()
-        await asyncio.gather(*collectors, compactor, return_exceptions=True)
+        await asyncio.gather(*collectors, compactor, metrics, return_exceptions=True)
         for writer in writers:
             try:
                 await asyncio.wait_for(writer, timeout=30)
@@ -119,15 +140,22 @@ async def main(duration_sec: int) -> None:
 
 
 # Binance futures bookTicker 是变更推送，URL 里一次订阅两个标的。
-async def collect_binance_quotes(queue: asyncio.Queue[dict], stop: asyncio.Event, stop_at: float | None) -> None:
+async def collect_binance_quotes(
+    queue: asyncio.Queue[dict],
+    stop: asyncio.Event,
+    stop_at: float | None,
+    stats: StreamStats,
+) -> None:
     streams = "/".join(f"{symbol.lower()}@bookTicker" for symbol in BINANCE_SYMBOLS)
     url = f"wss://fstream.binance.com/stream?streams={streams}"
     while not stop.is_set() and not expired(stop_at):
         try:
             write_log("binance quote connecting")
             async with websockets.connect(url, ping_interval=20, ping_timeout=20, close_timeout=5) as ws:
+                mark_connected(stats)
                 write_log("binance quote connected")
                 async for raw in ws:
+                    mark_message(stats)
                     data = json.loads(raw)["data"]
                     await queue.put({
                         "ts_local_ns": time.time_ns(),
@@ -146,20 +174,28 @@ async def collect_binance_quotes(queue: asyncio.Queue[dict], stop: asyncio.Event
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            stats.errors += 1
             write_log(f"binance quote error {type(exc).__name__}: {exc}")
-            await sleep_backoff(stop, stop_at)
+            await sleep_backoff(stats, stop, stop_at)
 
 
 # Binance futures trade tick 量小于 quote burst，和 quote 分队列写盘避免互相阻塞。
-async def collect_binance_trades(queue: asyncio.Queue[dict], stop: asyncio.Event, stop_at: float | None) -> None:
+async def collect_binance_trades(
+    queue: asyncio.Queue[dict],
+    stop: asyncio.Event,
+    stop_at: float | None,
+    stats: StreamStats,
+) -> None:
     streams = "/".join(f"{symbol.lower()}@trade" for symbol in BINANCE_SYMBOLS)
     url = f"wss://fstream.binance.com/stream?streams={streams}"
     while not stop.is_set() and not expired(stop_at):
         try:
             write_log("binance trade connecting")
             async with websockets.connect(url, ping_interval=20, ping_timeout=20, close_timeout=5) as ws:
+                mark_connected(stats)
                 write_log("binance trade connected")
                 async for raw in ws:
+                    mark_message(stats)
                     data = json.loads(raw)["data"]
                     await queue.put({
                         "ts_local_ns": time.time_ns(),
@@ -178,12 +214,18 @@ async def collect_binance_trades(queue: asyncio.Queue[dict], stop: asyncio.Event
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            stats.errors += 1
             write_log(f"binance trade error {type(exc).__name__}: {exc}")
-            await sleep_backoff(stop, stop_at)
+            await sleep_backoff(stats, stop, stop_at)
 
 
 # OKX bbo-tbt 推送最优一档，公共频道不需要鉴权。
-async def collect_okx_quotes(queue: asyncio.Queue[dict], stop: asyncio.Event, stop_at: float | None) -> None:
+async def collect_okx_quotes(
+    queue: asyncio.Queue[dict],
+    stop: asyncio.Event,
+    stop_at: float | None,
+    stats: StreamStats,
+) -> None:
     url = "wss://ws.okx.com:8443/ws/v5/public"
     args = [{"channel": "bbo-tbt", "instId": symbol} for symbol in OKX_SYMBOLS]
     while not stop.is_set() and not expired(stop_at):
@@ -191,8 +233,10 @@ async def collect_okx_quotes(queue: asyncio.Queue[dict], stop: asyncio.Event, st
             write_log("okx quote connecting")
             async with websockets.connect(url, ping_interval=20, ping_timeout=20, close_timeout=5) as ws:
                 await ws.send(json.dumps({"op": "subscribe", "args": args}))
+                mark_connected(stats)
                 write_log("okx quote connected")
                 async for raw in ws:
+                    mark_message(stats)
                     if raw == "ping":
                         await ws.send("pong")
                         continue
@@ -221,12 +265,18 @@ async def collect_okx_quotes(queue: asyncio.Queue[dict], stop: asyncio.Event, st
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            stats.errors += 1
             write_log(f"okx quote error {type(exc).__name__}: {exc}")
-            await sleep_backoff(stop, stop_at)
+            await sleep_backoff(stats, stop, stop_at)
 
 
 # OKX trades 频道推送逐笔成交，和 Binance trade 统一成 taker side。
-async def collect_okx_trades(queue: asyncio.Queue[dict], stop: asyncio.Event, stop_at: float | None) -> None:
+async def collect_okx_trades(
+    queue: asyncio.Queue[dict],
+    stop: asyncio.Event,
+    stop_at: float | None,
+    stats: StreamStats,
+) -> None:
     url = "wss://ws.okx.com:8443/ws/v5/public"
     args = [{"channel": "trades", "instId": symbol} for symbol in OKX_SYMBOLS]
     while not stop.is_set() and not expired(stop_at):
@@ -234,8 +284,10 @@ async def collect_okx_trades(queue: asyncio.Queue[dict], stop: asyncio.Event, st
             write_log("okx trade connecting")
             async with websockets.connect(url, ping_interval=20, ping_timeout=20, close_timeout=5) as ws:
                 await ws.send(json.dumps({"op": "subscribe", "args": args}))
+                mark_connected(stats)
                 write_log("okx trade connected")
                 async for raw in ws:
+                    mark_message(stats)
                     if raw == "ping":
                         await ws.send("pong")
                         continue
@@ -263,8 +315,9 @@ async def collect_okx_trades(queue: asyncio.Queue[dict], stop: asyncio.Event, st
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            stats.errors += 1
             write_log(f"okx trade error {type(exc).__name__}: {exc}")
-            await sleep_backoff(stop, stop_at)
+            await sleep_backoff(stats, stop, stop_at)
 
 
 # 小批量写 parquet，按北京时间小时分桶，方便后台合并。
@@ -393,10 +446,80 @@ def expired(stop_at: float | None) -> bool:
     return stop_at is not None and time.monotonic() >= stop_at
 
 
-async def sleep_backoff(stop: asyncio.Event, stop_at: float | None) -> None:
-    end = time.monotonic() + 5
+def mark_connected(stats: StreamStats) -> None:
+    now = time.monotonic()
+    stats.connects += 1
+    stats.connected_at = now
+
+
+def mark_message(stats: StreamStats) -> None:
+    now = time.monotonic()
+    stats.messages += 1
+    stats.last_msg_at = now
+    stats.backoff_sec = BACKOFF_INITIAL_SEC
+
+
+async def sleep_backoff(stats: StreamStats, stop: asyncio.Event, stop_at: float | None) -> None:
+    delay = stats.backoff_sec + random.uniform(0, min(1.0, stats.backoff_sec * 0.2))
+    write_log(f"{stats.name} reconnect backoff={delay:.1f}s")
+    stats.backoff_sec = min(stats.backoff_sec * 2, BACKOFF_MAX_SEC)
+    end = time.monotonic() + delay
     while not stop.is_set() and time.monotonic() < end and not expired(stop_at):
         await asyncio.sleep(0.2)
+
+
+async def metrics_loop(
+    quote_queue: asyncio.Queue[dict],
+    trade_queue: asyncio.Queue[dict],
+    stats: dict[str, StreamStats],
+    stop: asyncio.Event,
+    stop_at: float | None,
+) -> None:
+    while not stop.is_set() and not expired(stop_at):
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=METRICS_SEC)
+        except asyncio.TimeoutError:
+            pass
+        if stop.is_set() or expired(stop_at):
+            break
+        write_metrics(quote_queue, trade_queue, stats)
+
+
+def write_metrics(
+    quote_queue: asyncio.Queue[dict],
+    trade_queue: asyncio.Queue[dict],
+    stats: dict[str, StreamStats],
+) -> None:
+    now = time.monotonic()
+    parts = [
+        f"rss_mb={current_rss_mb()}",
+        f"quote_queue={quote_queue.qsize()}",
+        f"trade_queue={trade_queue.qsize()}",
+        f"quote_raw_files={raw_file_count(QUOTE_RAW_DIR)}",
+        f"trade_raw_files={raw_file_count(TRADE_RAW_DIR)}",
+    ]
+    for item in stats.values():
+        last_age = int(now - item.last_msg_at) if item.last_msg_at is not None else -1
+        connected_age = int(now - item.connected_at) if item.connected_at is not None else -1
+        parts.append(
+            f"{item.name}:connects={item.connects},errors={item.errors},msgs={item.messages},"
+            f"last_age={last_age}s,connected_age={connected_age}s,backoff={item.backoff_sec:.0f}s"
+        )
+    write_log("metrics " + " ".join(parts))
+
+
+def current_rss_mb() -> int:
+    try:
+        for line in Path("/proc/self/status").read_text(encoding="utf-8").splitlines():
+            if line.startswith("VmRSS:"):
+                return int(line.split()[1]) // 1024
+    except OSError:
+        return -1
+    return -1
+
+
+def raw_file_count(raw_dir: Path) -> int:
+    return sum(1 for path in raw_dir.glob("*/*.parquet") if path.is_file())
 
 
 def write_log(text: str) -> None:
@@ -434,7 +557,7 @@ def launch_tmux_if_needed(args: list[str]) -> bool:
 
 if __name__ == "__main__":
     # 0 表示持续采集；临时测试可传秒数，例如：
-    # python strategies/pre_ipo/collector/collect_bidask1.py 120
+    # python strategies/preipo_arb/collector/collect_bidask1.py 120
     if launch_tmux_if_needed(sys.argv[1:]):
         raise SystemExit(0)
     seconds = int(sys.argv[1]) if len(sys.argv) > 1 else 0
