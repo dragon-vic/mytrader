@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from rich.columns import Columns
@@ -171,7 +172,12 @@ def run(config_name: str, mode: str) -> None:
     if mode == "backtest":
         import backtest
 
-        backtest.main(config_name)
+        started = time.perf_counter()
+        result = backtest.main(config_name)
+        elapsed = result.get("total_elapsed_sec") if isinstance(result, dict) else None
+        if elapsed is None:
+            elapsed = time.perf_counter() - started
+        print(f"回测完成，耗时：{format_duration(elapsed)}")
     else:
         import live
 
@@ -179,12 +185,8 @@ def run(config_name: str, mode: str) -> None:
 
 
 def show_backtest_running(config_name: str) -> None:
-    if os.name != "nt":
-        return
-    clear_screen()
-    print(f"配置：{config_name}")
-    print("回测中...")
-    sys.stdout.flush()
+    if os.name == "nt":
+        clear_screen()
 
 
 def tmux_available() -> bool:
@@ -320,6 +322,15 @@ def timestamp_name() -> str:
     from zoneinfo import ZoneInfo
 
     return datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d%H%M%S")
+
+
+def format_duration(seconds: float) -> str:
+    if seconds < 1:
+        return f"{seconds * 1000:.0f}ms"
+    if seconds < 60:
+        return f"{seconds:.2f}s"
+    minutes, rest = divmod(seconds, 60)
+    return f"{int(minutes)}m{rest:.1f}s"
 
 
 def shlex_quote(value: str) -> str:

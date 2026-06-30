@@ -28,7 +28,9 @@ class FeatureStore:
     def __init__(self, path: str, window: int) -> None:
         column_map = {
             "short_mean": f"short_mean_{window}",
+            "short_std": f"short_std_{window}",
             "long_mean": f"long_mean_{window}",
+            "long_std": f"long_std_{window}",
             "count": f"window_count_{window}",
         }
         data = pd.read_parquet(
@@ -40,11 +42,13 @@ class FeatureStore:
         self.short_edge = data["short_edge"].to_numpy(float)
         self.long_edge = data["long_edge"].to_numpy(float)
         self.short_mean = data[column_map["short_mean"]].to_numpy(float)
+        self.short_std = data[column_map["short_std"]].to_numpy(float)
         self.long_mean = data[column_map["long_mean"]].to_numpy(float)
+        self.long_std = data[column_map["long_std"]].to_numpy(float)
         self.count = data[column_map["count"]].to_numpy(int)
         self.index = 0
 
-    def next(self, tick: QuoteTick, warmup_minutes: int) -> tuple[float, float, float, float] | None:
+    def next(self, tick: QuoteTick, warmup_minutes: int) -> tuple[float, float, float, float, float, float] | None:
         if self.index >= len(self.ts_ns):
             raise RuntimeError("feature file ended before quote ticks")
         instrument_id = str(tick.instrument_id)
@@ -58,7 +62,14 @@ class FeatureStore:
         self.index += 1
         if self.count[row] < warmup_minutes or pd.isna(self.short_edge[row]) or pd.isna(self.long_edge[row]):
             return None
-        return self.short_edge[row], self.short_mean[row], self.long_edge[row], self.long_mean[row]
+        return (
+            self.short_edge[row],
+            self.short_mean[row],
+            self.short_std[row],
+            self.long_edge[row],
+            self.long_mean[row],
+            self.long_std[row],
+        )
 
 
 class PreIpoQuoteBacktestConfig(StrategyConfig, frozen=True):
@@ -66,8 +77,8 @@ class PreIpoQuoteBacktestConfig(StrategyConfig, frozen=True):
     okx_id: str
     feature_path: str
     qty: Decimal
-    exit_kind: str
     capture_bps: float
+    std_mult: float
     short_entry_bps: float
     long_entry_bps: float
     short_exit_bps: float
@@ -85,8 +96,8 @@ class PreIpoQuoteBacktestStrategy(Strategy):
         self.okx_id = InstrumentId.from_str(config.okx_id)
         self.features = FeatureStore(config.feature_path, int(config.window_minutes))
         self.qty = Decimal(str(config.qty))
-        self.exit_kind = str(config.exit_kind)
         self.capture_bps = float(config.capture_bps)
+        self.std_mult = float(config.std_mult)
         self.short_entry_bps = float(config.short_entry_bps)
         self.long_entry_bps = float(config.long_entry_bps)
         self.short_exit_bps = float(config.short_exit_bps)
@@ -116,12 +127,14 @@ class PreIpoQuoteBacktestStrategy(Strategy):
             return
         if state is None:
             return
-        short_edge, short_mean, long_edge, long_mean = state
-        if self.side == "flat" and short_edge >= short_mean + self.short_entry_bps:
+        short_edge, short_mean, short_std, long_edge, long_mean, long_std = state
+        short_band = max(self.short_entry_bps, self.std_mult * short_std)
+        long_band = max(self.long_entry_bps, self.std_mult * long_std)
+        if self.side == "flat" and short_edge >= short_mean + short_band:
             self._trade_to(SHORT)
             self.entry_ns = tick.ts_init
             self.entry_edge = short_edge
-        elif self.side == "flat" and long_edge <= long_mean - self.long_entry_bps:
+        elif self.side == "flat" and long_edge <= long_mean - long_band:
             self._trade_to(LONG)
             self.entry_ns = tick.ts_init
             self.entry_edge = long_edge
@@ -158,14 +171,10 @@ class PreIpoQuoteBacktestStrategy(Strategy):
         return ts_ns >= self.entry_ns + self.min_hold_ns
 
     def _short_exit(self, edge: float, mean: float) -> bool:
-        if self.exit_kind == "capture":
-            return edge <= self.entry_edge - self.capture_bps
-        return edge <= mean + self.short_exit_bps
+        return (edge <= mean + self.short_exit_bps) or (edge <= self.entry_edge - self.capture_bps)
 
     def _long_exit(self, edge: float, mean: float) -> bool:
-        if self.exit_kind == "capture":
-            return edge >= self.entry_edge + self.capture_bps
-        return edge >= mean - self.long_exit_bps
+        return (edge >= mean - self.long_exit_bps) or (edge >= self.entry_edge + self.capture_bps)
 
     def _flatten(self) -> None:
         if self.pending is not None or self.side == "flat":
@@ -187,4 +196,3 @@ class PreIpoQuoteBacktestStrategy(Strategy):
             time_in_force=TimeInForce.GTC,
         )
         self.submit_order(order)
-

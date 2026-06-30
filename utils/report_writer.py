@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from dataclasses import asdict
 from datetime import datetime
+from math import sqrt
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -331,22 +333,26 @@ def write_backtest_result(result, settings: dict[str, Any]) -> dict[str, Any]:
 
 
 # 打印回测核心摘要。
-def print_backtest_summary(payload: dict[str, Any], settings: dict[str, Any]) -> None:
+def print_backtest_summary(payload: dict[str, Any], settings: dict[str, Any]) -> float:
+    started = time.perf_counter()
     output_dir = run_reports_dir(settings, "backtest")
     elapsed_days = float(payload.get("elapsed_time") or 0) / 86400
     sections = [
         ("回测总览", ("指标", "数值"), backtest_overview_rows(payload, settings)),
+        ("参数", ("参数", "数值"), parameter_rows(settings)),
         ("仓位统计", ("指标", "数值"), trade_stats_rows(output_dir, elapsed_days)),
         (
             "标的统计",
-            ("标的", "仓位数", "胜率", "净收益", "收益率", "平均收益", "最大盈利", "最大亏损", "手续费"),
+            ("净收益", "手续费","标的", "仓位数", "胜率",  "收益率", "平均收益", "最大盈利", "最大亏损"),
             instrument_stats_rows(output_dir),
         ),
         ("订单执行统计", ("指标", "数值"), order_stats_rows(output_dir, elapsed_days)),
     ]
     write_summary_json("回测摘要", sections, output_dir)
-    console = Console()
+    console = Console(record=True)
     print_summary_tables(console, sections)
+    (output_dir / "summary.txt").write_text(console.export_text(styles=False), encoding="utf-8")
+    return time.perf_counter() - started
 
 
 # 打印 live/testnet 结束摘要。
@@ -360,7 +366,7 @@ def print_live_summary(settings: dict[str, Any]) -> None:
         ("仓位统计", ("指标", "数值"), trade_stats_rows(output_dir, elapsed_days)),
         (
             "标的统计",
-            ("标的", "仓位数", "胜率", "净收益", "收益率", "平均收益", "最大盈利", "最大亏损", "手续费"),
+            ("净收益","手续费","标的", "仓位数", "胜率",  "收益率", "平均收益", "最大盈利", "最大亏损"),
             instrument_stats_rows(output_dir),
         ),
         ("订单执行统计", ("指标", "数值"), order_stats_rows(output_dir, elapsed_days)),
@@ -419,37 +425,38 @@ def summary_table(title: str, headers: tuple[str, ...], rows: list[tuple[Any, ..
 # 回测总览的收益使用订单重建口径；NT multi-venue stats_pnls 只保留最后一个 venue。
 def backtest_overview_rows(payload: dict[str, Any], settings: dict[str, Any]) -> list[tuple[str, str]]:
     output_dir = run_reports_dir(settings, "backtest")
-    symbols = market_symbols(settings, "backtest")
     data_interval = backtest_data_interval(settings)
-    return_stats = payload.get("stats_returns", {})
     starting_balance = starting_balance_value(settings)
     pnl = net_pnl(output_dir)
+    return_stats = report_return_stats(output_dir, starting_balance)
 
     return [
         ("配置名", settings["project"]["config_name"]),
         ("策略名", settings["project"]["config_name"]),
-        ("markets", symbols),
         ("交易标的", traded_symbol_count(output_dir)),
         ("K线周期", data_interval),
         ("回测开始", format_timestamp_ns(payload.get("backtest_start"))),
         ("回测结束", format_timestamp_ns(payload.get("backtest_end"))),
         ("回测天数", format_number(float(payload.get("elapsed_time") or 0) / 86400)),
-        ("初始资金", settings["backtest"]["venue_account"]["starting_balance"]),
-        ("净收益", format_number(pnl)),
-        ("净收益率", format_number(pnl / starting_balance * 100 if starting_balance else 0, "%")),
-        ("盈利因子", format_number(return_stats.get("Profit Factor"))),
-        ("Sharpe", format_number(return_stats.get("Sharpe Ratio (252 days)"))),
-        ("Sortino", format_number(return_stats.get("Sortino Ratio (252 days)"))),
+        ("初始资金", starting_balance_text(settings)),
+        ("盈利因子", format_number(return_stats.get("profit_factor"))),
+        ("Sharpe", format_number(return_stats.get("sharpe"))),
+        ("Sortino", format_number(return_stats.get("sortino"))),
         ("迭代次数", format_int(payload.get("iterations"))),
         ("事件数", format_int(payload.get("total_events"))),
     ]
+
+
+def parameter_rows(settings: dict[str, Any]) -> list[tuple[str, str]]:
+    values = settings.get("runtime", {}).get("backtest_params") or {}
+    return [(str(key), str(value)) for key, value in values.items()]
 
 
 def backtest_data_interval(settings: dict[str, Any]) -> str:
     datasets = settings["backtest"].get("datasets", [])
     types = {dataset["type"] for dataset in datasets}
     labels = []
-    if "quote_ticks" in types:
+    if {"quote_ticks", "quote_tick_objects"} & types:
         labels.append("quote")
     if {"trade_ticks", "trade_tick_catalog"} & types:
         labels.append("tick")
@@ -460,13 +467,11 @@ def backtest_data_interval(settings: dict[str, Any]) -> str:
 
 # 用 live/testnet 已落盘报告组装总体概览行。
 def live_overview_rows(settings: dict[str, Any], output_dir: Path) -> list[tuple[str, str]]:
-    symbols = market_symbols(settings, "live")
     return [
         ("配置名", settings["project"]["config_name"]),
         ("策略名", settings["project"]["config_name"]),
         ("运行模式", settings["mode"]),
         ("报告目录", output_dir.name),
-        ("markets", symbols),
         ("交易标的", traded_symbol_count(output_dir)),
         ("净收益", format_number(net_pnl(output_dir))),
         ("生成时间", datetime.now(LOCAL_TZ).strftime("%Y-%m-%d %H:%M:%S")),
@@ -521,11 +526,11 @@ def trade_stats_rows(output_dir: Path, elapsed_days: float) -> list[tuple[str, s
     duration_min = pd.to_numeric(positions["持仓分钟"], errors="coerce")
     wins = total_pnl[total_pnl > 0]
     losses = total_pnl[total_pnl < 0]
-    gross_profit = total_pnl[total_pnl > 0].sum()
     return [
+        ("净收益", format_number(net_pnl(output_dir))),
+        ("总手续费", format_number(fees.sum())),
         ("完成仓位数", format_int(len(positions))),
         ("胜率", format_percent((total_pnl > 0).mean())),
-        ("净收益", format_number(net_pnl(output_dir))),
         ("资金费收入", format_number(funding.sum())),
         ("平均仓位收益", format_number(total_pnl.mean())),
         ("仓位收益中位数", format_number(total_pnl.median())),
@@ -533,8 +538,6 @@ def trade_stats_rows(output_dir: Path, elapsed_days: float) -> list[tuple[str, s
         ("亏损仓位平均亏损", format_number(losses.mean())),
         ("最大盈利", format_number(total_pnl.max())),
         ("最大亏损", format_number(total_pnl.min())),
-        ("总手续费", format_number(fees.sum())),
-        ("手续费/毛利润", format_percent(fees.sum() / gross_profit if gross_profit else 0)),
         ("平均持仓分钟", format_number(duration_min.mean())),
         ("最长持仓分钟", format_number(duration_min.max())),
     ]
@@ -550,7 +553,51 @@ def net_pnl(output_dir: Path) -> float:
 
 # 回测配置里的初始资金是 Money 字符串，例如 "100000 USDT"。
 def starting_balance_value(settings: dict[str, Any]) -> float:
-    return money_to_float(settings["backtest"]["venue_account"]["starting_balance"])
+    return sum(money_to_float(value) for value in starting_balance_values(settings))
+
+
+def starting_balance_text(settings: dict[str, Any]) -> str:
+    values = starting_balance_values(settings)
+    currencies = {money_currency(value) for value in values}
+    if len(currencies) == 1:
+        return f"{format_number(sum(money_to_float(value) for value in values))} {currencies.pop()}"
+    return ", ".join(str(value) for value in values)
+
+
+def starting_balance_values(settings: dict[str, Any]) -> list[Any]:
+    values = []
+    for venue in settings["backtest"].get("venues", []):
+        values.extend(venue.get("starting_balances") or [venue["starting_balance"]])
+    if values:
+        return values
+    return [settings["backtest"]["venue_account"]["starting_balance"]]
+
+
+def money_currency(value: Any) -> str:
+    parts = str(value).split()
+    return parts[1] if len(parts) > 1 else ""
+
+
+# 从完成仓位重算收益指标，避免 multi-venue 回测直接使用 NT 单 venue stats。
+def report_return_stats(output_dir: Path, starting_balance: float) -> dict[str, float]:
+    positions = read_report_csv(output_dir, POSITIONS_FILE)
+    if positions.empty or starting_balance == 0:
+        return {"profit_factor": 0.0, "sharpe": 0.0, "sortino": 0.0}
+    pnl = positions["已实现盈亏"].map(money_to_float) + report_funding_income(positions)
+    wins = pnl[pnl > 0].sum()
+    losses = -pnl[pnl < 0].sum()
+    profit_factor = wins / losses if losses else 0.0
+
+    close_time = pd.to_datetime(positions["平仓时间"], errors="coerce")
+    daily = pnl.groupby(close_time.dt.date).sum() / starting_balance
+    if len(daily) < 2:
+        return {"profit_factor": profit_factor, "sharpe": 0.0, "sortino": 0.0}
+    std = daily.std(ddof=1)
+    sharpe = daily.mean() / std * sqrt(252) if std and not pd.isna(std) else 0.0
+    downside = daily[daily < 0]
+    downside_std = downside.std(ddof=1)
+    sortino = daily.mean() / downside_std * sqrt(252) if len(downside) > 1 and downside_std and not pd.isna(downside_std) else 0.0
+    return {"profit_factor": profit_factor, "sharpe": sharpe, "sortino": sortino}
 
 
 # positions.csv 可能来自旧报告；没有资金费列时按 0 处理。

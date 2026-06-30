@@ -3,59 +3,40 @@ strategy:
   class: PreIpoStrategy
   config: PreIpoConfig
   params:
-    assets: [OPENAI, ANTHROPIC]
+    assets: [ANTHROPIC]
     instruments: enabled
 
-    # 启动时读取 collector 保存的最近 3h bid/ask1；不足 3h 就先用已有窗口。
-    # 信号至少需要 2h 窗口，collector 不足 2h 时启动后继续等实时 quote 补齐。
-    min_window_sec: 7200
-    init_fetch_sec: 10800
+    # 启动时读取 collector 保存的最近 6h bid/ask1；不足 6h 就先用已有窗口。
+    # 信号至少需要 6h 窗口，collector 不足 6h 时启动后继续等实时 quote 补齐。
+    min_window_sec: 21600
+    init_fetch_sec: 21600
 
-    # 两条 edge 线分别用 3h 时间等权均线；不再使用 30m 均线/波动做信号。
-    grid_center_sec: 10800
+    # 两条 edge 线分别用 6h 时间等权均线；不再使用 30m 均线/波动做信号。
+    grid_center_sec: 21600
 
-    # 每个标的单独配置网格参数，避免顶层默认值和 asset 覆盖值不一致。
-    # grid_band_bps: entry = max(min, std_mult * 3h_std)。long_edge 低于均线 entry 开 long；short_edge 高于均线 entry 开 short。
+    # 每个标的单独配置 entry/exit 参数，避免顶层默认值和 asset 覆盖值不一致。
+    # grid_band_bps: entry = max(min, std_mult * 6h_std)。long_edge 低于均线 entry 开 long；short_edge 高于均线 entry 开 short。
     # grid_signal_delay_ms: 第一次过线后等待多少毫秒，再用最新 quote 复查 entry；仍过线才交易。
-    # grid_step_bps: 同方向加仓的网格间距；short 要比当前最大开仓 edge 更高，long 要比当前最小开仓 edge 更低。
-    # grid_open_gap_sec: 非平仓动作之间的最小间隔；0 表示不做时间冷却。
-    # grid_max_inventory: 每个标的最多持有的净 pair 数。
-    # min_capture_bps: 平仓必须满足对应 pair 的实际 edge capture 下限。
+    # capture_bps: 持仓后，只要同一条 edge 线达到该收益就平仓。
+    # *_exit_bps: 未达到 capture 时的均线平仓条件，和 backtest 策略一致。
     # trade_qty: 单个标的每次开仓 qty；设为 "0" 时只监控该标的，不提交交易。
     asset_grid_params:
-      OPENAI:
-        trade_qty: "0.01"
-        grid_band_bps:
-          long:
-            min: "25"
-            std_mult: "0"
-          short:
-            min: "30"
-            std_mult: "0"
-        grid_signal_delay_ms:
-          long: 60
-          short: 10
-        grid_step_bps: "25"
-        grid_open_gap_sec: 0
-        grid_max_inventory: 1
-        min_capture_bps: "0"
       ANTHROPIC:
-        trade_qty: "0.1"
+        trade_qty: "0.3"
         grid_band_bps:
           long:
-            min: "30"
-            std_mult: "1.4"
+            min: "50"
+            std_mult: "0"
           short:
-            min: "30"
-            std_mult: "1.2"
+            min: "50"
+            std_mult: "0"
         grid_signal_delay_ms:
           long: 100
           short: 100
-        grid_step_bps: "25"
-        grid_open_gap_sec: 0
-        grid_max_inventory: 1
-        min_capture_bps: "0"
-    trade_qty : "0.01"
+        capture_bps: "70"
+        short_exit_bps: "-30"
+        long_exit_bps: "-30"
+        min_hold_sec: 0
     # live 运行时 snapshot 写到当前 report 目录，monitor/start 会读取这个文件显示 rich 表格。
     snapshot_interval_sec: 1
     snapshot_display: file
@@ -87,13 +68,11 @@ data:
     binance_futures:
       enabled: true
       markets:
-        - OPENAI
         - ANTHROPIC
 
     okx_swap:
       enabled: true
       markets:
-        - OPENAI
         - ANTHROPIC
 
     kraken_futures:
@@ -126,13 +105,11 @@ exec:
     binance_futures:
       enabled: true
       markets:
-        - OPENAI
         - ANTHROPIC
 
     okx_swap:
       enabled: true
       markets:
-        - OPENAI
         - ANTHROPIC
 
     kraken_futures:

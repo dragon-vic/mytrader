@@ -2,7 +2,9 @@ strategy:
   module: koru_backtest
   class: KoruQuoteBacktestStrategy
   config: KoruQuoteBacktestConfig
-  params:
+  grid_params:
+
+  case_params:
     binance_id: KORUUSDT-PERP.BINANCE
     okx_id: KORU-USDT-SWAP.OKX
     feature_path: strategies/koru/backtest_data/koru_features_collector_compact.parquet
@@ -15,7 +17,7 @@ strategy:
     min_hold_sec: 60
     entry_filter: slow
     entry_slope_ms: 5000
-    end_ns: 1782662399998947186
+    end_ns: 1782824399976292511
 
 data:
   clients:

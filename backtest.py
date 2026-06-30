@@ -1,8 +1,16 @@
 from __future__ import annotations
 
+import copy
+import itertools
+import os
+import pickle
+import time
+from concurrent.futures import ProcessPoolExecutor
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 from nautilus_trader.backtest.engine import BacktestEngine
@@ -26,6 +34,7 @@ from utils.market_data import MarketDataStore
 from utils.report_writer import log_file_settings
 from utils.report_writer import prepare_report_dir
 from utils.report_writer import print_backtest_summary
+from utils.report_writer import run_reports_dir
 from utils.report_writer import write_backtest_result
 from utils.report_writer import write_trader_reports
 from utils.runtime_ids import claim_run
@@ -132,6 +141,8 @@ def add_datasets(
         data_type = dataset["type"]
         if data_type == "quote_ticks":
             engine.add_data(load_quote_ticks(ROOT / dataset["path"], instruments))
+        elif data_type == "quote_tick_objects":
+            engine.add_data(load_quote_tick_objects(ROOT / dataset["path"]))
         elif data_type == "trade_ticks":
             engine.add_data(load_trade_ticks(ROOT / dataset["path"], factories[dataset["client"]]))
         elif data_type == "trade_tick_catalog":
@@ -168,6 +179,11 @@ def load_quote_ticks(path: Path, instruments: dict[str, Any]) -> list[QuoteTick]
             ),
         )
     return ticks
+
+
+def load_quote_tick_objects(path: Path) -> list[QuoteTick]:
+    with path.open("rb") as f:
+        return pickle.load(f)
 
 
 def positive_size(value: Any) -> Decimal:
@@ -218,24 +234,164 @@ def market_store(
 
 
 # 把 NT 生成的报告保存到当前 set 对应的目录。
-def write_reports(engine: BacktestEngine, result, settings: dict) -> None:
+def write_reports(engine: BacktestEngine, result, settings: dict) -> dict[str, float]:
     payload = write_backtest_result(result, settings)
-    print("生成报告...")
+    started = time.perf_counter()
     write_trader_reports(engine.trader, settings, "backtest")
-    print_backtest_summary(payload, settings)
+    summary_elapsed = print_backtest_summary(payload, settings)
+    report_elapsed = time.perf_counter() - started
+    return {"report_elapsed_sec": report_elapsed, "summary_elapsed_sec": summary_elapsed}
 
 
-# 运行回测，由 run.py 负责传入配置名。
-def main(config_name: str) -> None:
-    settings = load_settings(config_name, mode="backtest")
-    settings["mode"] = "backtest"
-    settings = claim_run(settings)
+# 运行一组已经展开参数的回测配置。
+def run_case(settings: dict[str, Any]) -> dict[str, Any]:
     engine = None
+    total_started = time.perf_counter()
     try:
         prepare_report_dir(settings, "backtest")
+        build_started = time.perf_counter()
         engine = build_backtest_engine(settings)
+        build_elapsed = time.perf_counter() - build_started
+        run_started = time.perf_counter()
         engine.run()
-        write_reports(engine, engine.get_result(), settings)
+        run_elapsed = time.perf_counter() - run_started
+        report_times = write_reports(engine, engine.get_result(), settings)
+        total_elapsed = time.perf_counter() - total_started
+        times = {
+            "build_elapsed_sec": build_elapsed,
+            "run_elapsed_sec": run_elapsed,
+            "total_elapsed_sec": total_elapsed,
+            **report_times,
+            "report_dir": str(run_reports_dir(settings, "backtest")),
+        }
+        print_timing(times)
+        return times
     finally:
         if engine is not None:
             engine.dispose()
+
+
+# 批处理 worker 必须是模块顶层函数，Windows spawn 才能序列化。
+def run_batch_case(settings: dict[str, Any]) -> dict[str, Any]:
+    return run_case(settings)
+
+
+# 运行回测，由 run.py 负责传入配置名。
+def main(config_name: str) -> dict[str, Any]:
+    settings = load_settings(config_name, mode="backtest")
+    settings["mode"] = "backtest"
+    cases = expand_batch_settings(settings)
+    if len(cases) == 1:
+        return run_case(claim_run(cases[0]))
+    return run_batch(cases)
+
+
+# 回测配置只接受 grid_params/case_params，并在运行前展开成普通 strategy.params。
+def expand_batch_settings(settings: dict[str, Any]) -> list[dict[str, Any]]:
+    strategy = settings["strategy"]
+    grid = strategy["grid_params"] or {}
+    case_params = strategy["case_params"]
+    if not grid:
+        total = case_count(case_params)
+        return [case_settings(settings, {}, total, index) for index in range(total)]
+
+    names = list(grid)
+    values = []
+    for name in names:
+        raw = grid[name]
+        if not isinstance(raw, list):
+            raise TypeError(f"strategy.grid_params.{name} must be a list")
+        values.append(raw)
+    combos = list(itertools.product(*values))
+    cases = []
+    for index, combo in enumerate(combos):
+        cases.append(case_settings(settings, dict(zip(names, combo)), len(combos), index))
+    return cases
+
+
+def case_settings(settings: dict[str, Any], grid_values: dict[str, Any], total: int, index: int) -> dict[str, Any]:
+    case = copy.deepcopy(settings)
+    case_params = case["strategy"]["case_params"]
+    params = merged_case_params({}, case_params, total, index)
+    params.update(grid_values)
+    case["strategy"]["params"] = params
+    case["runtime"] = {**case.get("runtime", {}), "backtest_params": selected_param_rows(grid_values, case_params, params)}
+    case["strategy"].pop("grid_params", None)
+    case["strategy"].pop("case_params", None)
+    return case
+
+
+def selected_param_rows(grid_values: dict[str, Any], case_params: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+    keys = set(grid_values)
+    keys.update(name for name, value in case_params.items() if isinstance(value, list))
+    return {name: params[name] for name in case_params if name in keys} | {name: params[name] for name in grid_values}
+
+
+def case_count(case_params: dict[str, Any]) -> int:
+    lengths = [len(value) for value in case_params.values() if isinstance(value, list) and len(value) > 1]
+    if not lengths:
+        return 1
+    total = lengths[0]
+    if any(length != total for length in lengths):
+        raise ValueError(f"strategy.case_params list lengths must match when grid_params is absent: {lengths}")
+    return total
+
+
+# case_params 支持单值广播、长度为 1 的列表广播、或和 grid 组合数量等长的一一对应列表。
+def merged_case_params(params: dict[str, Any], case_params: dict[str, Any], total: int, index: int) -> dict[str, Any]:
+    merged = dict(params)
+    for name, value in case_params.items():
+        if isinstance(value, list):
+            if len(value) == 1:
+                merged[name] = value[0]
+            elif len(value) == total:
+                merged[name] = value[index]
+            else:
+                raise ValueError(
+                    f"strategy.case_params.{name} length must be 1 or match grid combinations ({total}), got {len(value)}",
+                )
+        else:
+            merged[name] = value
+    return merged
+
+
+# 多进程运行批处理，每个组合一个独立 report 目录。
+def run_batch(cases: list[dict[str, Any]]) -> dict[str, Any]:
+    started_at = os.environ.get("NT_RUN_STARTED_AT") or datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d%H%M%S")
+    claimed = [claim_batch_case(case, started_at, index) for index, case in enumerate(cases)]
+    workers = 4
+    print(f"批处理回测：{len(claimed)} 组参数，{workers} 进程", flush=True)
+    started = time.perf_counter()
+    results = []
+    with ProcessPoolExecutor(max_workers=workers) as executor:
+        for result in executor.map(run_batch_case, claimed):
+            results.append(result)
+    total_elapsed = time.perf_counter() - started
+    return {"total_elapsed_sec": total_elapsed, "cases": results}
+
+
+def claim_batch_case(settings: dict[str, Any], started_at: str, index: int) -> dict[str, Any]:
+    os.environ["NT_RUN_STARTED_AT"] = started_at
+    claimed = claim_run(settings)
+    claimed["runtime"]["report_dir_name"] = f"backtest-{started_at}-{index:03d}"
+    return claimed
+
+
+def print_timing(times: dict[str, Any]) -> None:
+    print(
+        "耗时："
+        f"构建 {format_duration(times['build_elapsed_sec'])}，"
+        f"运行 {format_duration(times['run_elapsed_sec'])}，"
+        f"报告 {format_duration(times['report_elapsed_sec'])}，"
+        f"summary {format_duration(times['summary_elapsed_sec'])}，"
+        f"总计 {format_duration(times['total_elapsed_sec'])}",
+    )
+
+
+def format_duration(seconds: float) -> str:
+    if seconds < 1:
+        return f"{seconds * 1000:.0f}ms"
+    if seconds < 60:
+        return f"{seconds:.2f}s"
+    minutes, rest = divmod(seconds, 60)
+    return f"{int(minutes)}m{rest:.1f}s"

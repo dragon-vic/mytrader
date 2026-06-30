@@ -2,21 +2,25 @@ strategy:
   module: pre_ipo_backtest
   class: PreIpoQuoteBacktestStrategy
   config: PreIpoQuoteBacktestConfig
-  params:
+  grid_params:
+
+  case_params:
     binance_id: ANTHROPICUSDT-PERP.BINANCE
     okx_id: ANTHROPIC-USDT-SWAP.OKX
     feature_path: strategies/pre_ipo/backtest_data/anthropic_features_6d.parquet
-    qty: "1"
-    exit_kind: capture
-    capture_bps: 150
-    short_entry_bps: 100
-    long_entry_bps: 100
-    short_exit_bps: -20
-    long_exit_bps: 0
+    qty: "0.3"
+    capture_bps: 70
+    std_mult: 0
+    short_exit_bps: -30
+    long_exit_bps: -30
+    short_entry_bps: 50
+    long_entry_bps: 50
     window_minutes: 360
     warmup_minutes: 360
-    min_hold_sec: 1800
-    end_ns: 1782536389613494169
+    min_hold_sec: 0
+    end_ns: 1782824399624265984
+
+
 
 data:
   clients:
@@ -34,30 +38,30 @@ data:
 backtest:
   venues:
     - client: binance_futures
-      starting_balance: "100000 USDT"
+      starting_balance: "100 USDT"
       account_type: MARGIN
       oms_type: NETTING
       default_leverage: "5"
       use_market_order_acks: true
       latency:
-        base_latency_ms: 0
-        insert_latency_ms: 100
+        base_latency_ms: 100
+        insert_latency_ms: 00
         update_latency_ms: 0
         cancel_latency_ms: 0
     - client: okx_swap
-      starting_balance: "100000 USDT"
+      starting_balance: "100 USDT"
       account_type: MARGIN
       oms_type: NETTING
       default_leverage: "5"
       use_market_order_acks: true
       latency:
-        base_latency_ms: 0
-        insert_latency_ms: 100
+        base_latency_ms: 100
+        insert_latency_ms: 00
         update_latency_ms: 0
         cancel_latency_ms: 0
   datasets:
-    - type: quote_ticks
-      path: strategies/pre_ipo/backtest_data/anthropic_quotes_6d.parquet
+    - type: quote_tick_objects
+      path: strategies/pre_ipo/backtest_data/anthropic_quote_ticks_6d.pkl
   logging:
     log_level: ERROR
     bypass: true
@@ -75,5 +79,5 @@ backtest:
     max_price: "10000000"
     margin_init: "0.2"
     margin_maint: "0.1"
-    maker_fee: "0.001"
-    taker_fee: "0.001"
+    maker_fee: "0.0002"
+    taker_fee: "0.0004"

@@ -11,7 +11,6 @@ from datetime import datetime
 from datetime import timedelta
 from datetime import timezone
 from decimal import Decimal
-from math import floor
 from math import sqrt
 from pathlib import Path
 from threading import Event as ThreadEvent
@@ -48,7 +47,6 @@ FLAT = "FLAT"
 OPENING = "OPENING"
 OPEN = "OPEN"
 CLOSE = "CLOSE"
-FLIP = "FLIP"
 LONG_EDGE = "long_edge"
 SHORT_EDGE = "short_edge"
 BEIJING_TZ = timezone(timedelta(hours=8))
@@ -137,6 +135,16 @@ class PendingBatch:
     close_qty: Decimal = Decimal("0")
 
 
+@dataclass
+class ActionCandidate:
+    score: float
+    order_state: SpreadState
+    signal_edge_side: str
+    close_lot_id: int | None = None
+    expected_capture_bps: Decimal | None = None
+    grid_level: int | None = None
+
+
 # 按分钟等权统计 edge；缺失分钟沿用上一分钟，避免 quote burst 改变 3h 均线权重。
 class SpreadWindow:
     def __init__(self) -> None:
@@ -214,7 +222,6 @@ class PreIpoConfig(StrategyConfig, frozen=True):
     init_fetch_sec: float
     grid_center_sec: float
     asset_grid_params: dict[str, dict[str, object]]
-    trade_qty: Decimal
     snapshot_interval_sec: float
     snapshot_display: str
     snapshot_path: str
@@ -239,7 +246,6 @@ class PreIpoStrategy(Strategy):
         self.init_fetch_sec = float(config.init_fetch_sec)
         self.grid_center_ns = int(float(config.grid_center_sec) * 1_000_000_000)
         self.asset_grid_params = {key.upper(): dict(value) for key, value in config.asset_grid_params.items()}
-        self.trade_qty = Decimal(str(config.trade_qty))
         self.snapshot_interval_ns = int(float(config.snapshot_interval_sec) * 1_000_000_000)
         self.snapshot_display = str(config.snapshot_display).lower()
         self.snapshot_path = Path(config.snapshot_path)
@@ -262,7 +268,6 @@ class PreIpoStrategy(Strategy):
         self.signal_alerts: set[str] = set()
         self.signal_alert_versions: dict[str, int] = defaultdict(int)
         self.signal_alert_sides: dict[str, str] = {}
-        self.grid_last_open_ns: dict[str, int] = {asset: 0 for asset in self.assets}
         self.action_rows: list[dict[str, str]] = []
         self.realized_pnl_usdt: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
         self.realized_edge_bps: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
@@ -292,10 +297,6 @@ class PreIpoStrategy(Strategy):
         for asset in self.asset_grid_params:
             if asset not in self.assets:
                 raise RuntimeError(f"asset_grid_params contains unknown asset: {asset}")
-            if self._grid_step_bps(asset) <= 0:
-                raise RuntimeError(f"grid_step_bps must be positive for {asset}")
-            if self._grid_open_gap_ns(asset) < 0:
-                raise RuntimeError(f"grid_open_gap_sec must be non-negative for {asset}")
             for edge_side in (LONG_EDGE, SHORT_EDGE):
                 if self._grid_min_band_bps(asset, edge_side) <= 0:
                     raise RuntimeError(f"grid_band_bps.{self._edge_side_key(edge_side)}.min must be positive for {asset}")
@@ -303,15 +304,13 @@ class PreIpoStrategy(Strategy):
                     raise RuntimeError(f"grid_band_bps.{self._edge_side_key(edge_side)}.std_mult must be non-negative for {asset}")
                 if self._grid_signal_delay_ns(asset, edge_side) < 0:
                     raise RuntimeError(f"grid_signal_delay_ms.{self._edge_side_key(edge_side)} must be non-negative for {asset}")
-            if self._grid_max_inventory(asset) <= 0:
-                raise RuntimeError(f"grid_max_inventory must be positive for {asset}")
-            if self._min_capture_bps(asset) < 0:
-                raise RuntimeError(f"min_capture_bps must be non-negative for {asset}")
+            if self._capture_target_bps(asset) < 0:
+                raise RuntimeError(f"capture_bps must be non-negative for {asset}")
+            if self._min_hold_ns(asset) < 0:
+                raise RuntimeError(f"min_hold_sec must be non-negative for {asset}")
             if self._asset_trade_qty(asset) < 0:
                 raise RuntimeError(f"trade_qty must be non-negative for {asset}")
         self._warm_initial_windows()
-        if self.trade_qty < 0:
-            raise RuntimeError("trade_qty must be non-negative")
         if self.config.snapshot_interval_sec < 0:
             raise RuntimeError("snapshot_interval_sec must be non-negative")
         if self.snapshot_display not in {"rich", "log", "file", "off"}:
@@ -340,7 +339,7 @@ class PreIpoStrategy(Strategy):
             f"pre_ipo started assets={','.join(self.assets)} instruments={len(self.instruments)} "
             f"mode=two_line_grid asset_grid_params={self.asset_grid_params} "
             f"warm_windows={len(self.windows)} "
-            f"default_qty={self.trade_qty} asset_qty={self._asset_qty_log()} snapshot_display={self.snapshot_display} "
+            f"asset_qty={self._asset_qty_log()} snapshot_display={self.snapshot_display} "
             f"snapshot_path={self.snapshot_path}",
         )
 
@@ -813,8 +812,8 @@ class PreIpoStrategy(Strategy):
             return
         if asset in self.signal_alerts:
             return
-        candidate = max(candidates, key=lambda item: item[0])
-        edge_side = candidate[3].edge_side
+        candidate = max(candidates, key=lambda item: item.score)
+        edge_side = candidate.signal_edge_side
         if self._candidate_has_open_balance(asset, candidate):
             self._schedule_signal_alert(asset, edge_side, now_ns)
 
@@ -824,30 +823,77 @@ class PreIpoStrategy(Strategy):
         states: dict[tuple[str, InstrumentId, InstrumentId], SpreadState],
         now_ns: int,
         edge_side: str | None = None,
-    ) -> list[tuple[float, int | None, Decimal | None, SpreadState, int]]:
-        candidates: list[tuple[float, int | None, Decimal | None, SpreadState, int]] = []
+    ) -> list[ActionCandidate]:
+        inventory = self._asset_inventory(asset, include_pending=True)
+        if inventory == 0:
+            return self._entry_candidates(asset, states, edge_side)
+        if abs(inventory) != 1:
+            return []
+        return self._exit_candidates(asset, states, now_ns, edge_side, inventory)
+
+    def _entry_candidates(
+        self,
+        asset: str,
+        states: dict[tuple[str, InstrumentId, InstrumentId], SpreadState],
+        edge_side: str | None,
+    ) -> list[ActionCandidate]:
+        candidates: list[ActionCandidate] = []
         for state in states.values():
             if edge_side is not None and state.edge_side != edge_side:
                 continue
-            grid_level = self._grid_signal(asset, state)
-            if grid_level is None:
+            if not self._entry_signal(asset, state):
                 continue
-            close_pos, capture = self._close_candidate(asset, state.edge_side, state.edge_bps)
-            if self._can_apply_grid_signal(asset, state, grid_level, now_ns, close_pos, capture):
-                candidates.append((abs(float(state.edge_bps) - state.mean_bps), close_pos.lot_id if close_pos else None, capture, state, grid_level))
+            candidates.append(
+                ActionCandidate(
+                    score=abs(float(state.edge_bps) - state.mean_bps),
+                    order_state=state,
+                    signal_edge_side=state.edge_side,
+                ),
+            )
         return candidates
+
+    def _exit_candidates(
+        self,
+        asset: str,
+        states: dict[tuple[str, InstrumentId, InstrumentId], SpreadState],
+        now_ns: int,
+        edge_side: str | None,
+        inventory: int,
+    ) -> list[ActionCandidate]:
+        pos = self._single_position(asset, LONG_EDGE if inventory > 0 else SHORT_EDGE)
+        if pos is None or now_ns < pos.opened_ns + self._min_hold_ns(asset):
+            return []
+        signal_side = pos.edge_side
+        if edge_side is not None and edge_side != signal_side:
+            return []
+        signal_state = self._state_by_side(states, signal_side)
+        order_state = self._state_by_side(states, SHORT_EDGE if signal_side == LONG_EDGE else LONG_EDGE)
+        if signal_state is None or order_state is None:
+            return []
+        entry_edge = pos.edge_bps
+        capture = self._capture_bps(pos.edge_side, entry_edge, signal_state.edge_bps)
+        if not self._exit_signal(asset, pos.edge_side, signal_state, capture):
+            return []
+        return [
+            ActionCandidate(
+                score=abs(float(signal_state.edge_bps) - signal_state.mean_bps),
+                order_state=order_state,
+                signal_edge_side=signal_state.edge_side,
+                close_lot_id=pos.lot_id,
+                expected_capture_bps=capture,
+            ),
+        ]
 
     def _submit_grid_candidate(
         self,
         asset: str,
-        candidate: tuple[float, int | None, Decimal | None, SpreadState, int],
+        candidate: ActionCandidate,
         now_ns: int,
     ) -> None:
-        _, close_lot_id, capture, state, grid_level = candidate
+        state = candidate.order_state
         before_inventory = self._asset_inventory(asset, include_pending=True)
         sign = 1 if state.edge_side == LONG_EDGE else -1
-        reducing = self._reduces_inventory(before_inventory, state.edge_side)
-        inventory_delta = sign * (2 if reducing and abs(before_inventory) == 1 else 1)
+        inventory_delta = -before_inventory if candidate.close_lot_id is not None else sign
         after_inventory = before_inventory + inventory_delta
         self._submit_edge_action(
             asset,
@@ -863,22 +909,21 @@ class PreIpoStrategy(Strategy):
             before_inventory=before_inventory,
             after_inventory=after_inventory,
             inventory_delta=inventory_delta,
-            close_lot_id=close_lot_id,
-            expected_capture_bps=capture,
+            close_lot_id=candidate.close_lot_id,
+            expected_capture_bps=candidate.expected_capture_bps,
         )
 
-    def _candidate_has_open_balance(self, asset: str, candidate: tuple[float, int | None, Decimal | None, SpreadState, int]) -> bool:
-        _, close_lot_id, _, state, _ = candidate
+    def _candidate_has_open_balance(self, asset: str, candidate: ActionCandidate) -> bool:
+        state = candidate.order_state
         before_inventory = self._asset_inventory(asset, include_pending=True)
         sign = 1 if state.edge_side == LONG_EDGE else -1
-        reducing = self._reduces_inventory(before_inventory, state.edge_side)
-        inventory_delta = sign * (2 if reducing and abs(before_inventory) == 1 else 1)
+        inventory_delta = -before_inventory if candidate.close_lot_id is not None else sign
         after_inventory = before_inventory + inventory_delta
         qty = self._shared_open_qty(asset, state.buy.instrument_id, state.sell.instrument_id, state.buy.price, state.sell.price)
         if qty is None:
             return False
         balance_qty = qty * Decimal(max(abs(after_inventory) - abs(before_inventory), 0))
-        if close_lot_id is not None or balance_qty <= 0:
+        if candidate.close_lot_id is not None or balance_qty <= 0:
             return True
         return self._check_open_balances(
             asset,
@@ -923,7 +968,7 @@ class PreIpoStrategy(Strategy):
         candidates = self._grid_action_candidates(asset, states, now_ns, edge_side=edge_side)
         if not candidates:
             return
-        self._submit_grid_candidate(asset, max(candidates, key=lambda item: item[0]), now_ns)
+        self._submit_grid_candidate(asset, max(candidates, key=lambda item: item.score), now_ns)
 
     def _cancel_signal_alert(self, asset: str) -> None:
         if asset not in self.signal_alerts:
@@ -936,44 +981,42 @@ class PreIpoStrategy(Strategy):
     def _signal_alert_name(self, asset: str) -> str:
         return f"preipo_grid_signal_{asset}"
 
-    def _grid_signal(self, asset: str, state: SpreadState) -> int | None:
+    def _entry_signal(self, asset: str, state: SpreadState) -> bool:
         band = self._grid_entry_band_bps(asset, state)
-        step = float(self._grid_step_bps(asset))
-        if step <= 0:
-            return None
         deviation = float(state.edge_bps) - state.mean_bps
-        if state.edge_side == SHORT_EDGE and deviation >= band:
-            return int(floor((deviation - band) / step))
-        if state.edge_side == LONG_EDGE and deviation <= -band:
-            return int(floor((abs(deviation) - band) / step))
-        return None
+        if state.edge_side == SHORT_EDGE:
+            return deviation >= band
+        if state.edge_side == LONG_EDGE:
+            return deviation <= -band
+        return False
 
-    def _can_apply_grid_signal(
+    def _exit_signal(
         self,
         asset: str,
+        edge_side: str,
         state: SpreadState,
-        grid_level: int,
-        now_ns: int,
-        close_pos: ArbPos | None,
-        capture: Decimal | None,
+        capture: Decimal,
     ) -> bool:
-        if grid_level < 0:
-            return False
-        inventory = self._asset_inventory(asset, include_pending=True)
-        reducing = self._reduces_inventory(inventory, state.edge_side)
-        if reducing and (close_pos is None or capture is None or capture < self._min_capture_bps(asset)):
-            return False
-        max_inventory = self._grid_max_inventory(asset)
-        if not reducing and state.edge_side == LONG_EDGE and inventory >= max_inventory:
-            return False
-        if not reducing and state.edge_side == SHORT_EDGE and inventory <= -max_inventory:
-            return False
-        open_gap_ns = self._grid_open_gap_ns(asset)
-        if not reducing and open_gap_ns > 0 and now_ns - self.grid_last_open_ns.get(asset, 0) < open_gap_ns:
-            return False
-        if not reducing and not self._passes_grid_step(asset, state.edge_side, state.edge_bps):
-            return False
-        return True
+        if capture >= self._capture_target_bps(asset):
+            return True
+        if edge_side == SHORT_EDGE:
+            return float(state.edge_bps) <= state.mean_bps + self._short_exit_bps(asset)
+        if edge_side == LONG_EDGE:
+            return float(state.edge_bps) >= state.mean_bps - self._long_exit_bps(asset)
+        raise RuntimeError(f"unknown edge_side: {edge_side}")
+
+    def _state_by_side(
+        self,
+        states: dict[tuple[str, InstrumentId, InstrumentId], SpreadState],
+        edge_side: str,
+    ) -> SpreadState | None:
+        return next((state for state in states.values() if state.edge_side == edge_side), None)
+
+    def _single_position(self, asset: str, edge_side: str) -> ArbPos | None:
+        matches = [pos for pos in self.positions.values() if pos.asset == asset and pos.edge_side == edge_side]
+        if len(matches) != 1:
+            return None
+        return matches[0]
 
     def _asset_grid(self, asset: str) -> dict[str, object]:
         if asset is None:
@@ -987,16 +1030,6 @@ class PreIpoStrategy(Strategy):
     def _grid_float(self, asset: str, key: str) -> float:
         params = self._asset_grid(asset)
         return float(params[key])
-
-    def _grid_int(self, asset: str, key: str) -> int:
-        params = self._asset_grid(asset)
-        return int(params[key])
-
-    def _grid_step_bps(self, asset: str) -> Decimal:
-        return self._grid_decimal(asset, "grid_step_bps")
-
-    def _grid_open_gap_ns(self, asset: str) -> int:
-        return int(self._grid_float(asset, "grid_open_gap_sec") * 1_000_000_000)
 
     def _grid_entry_band_bps(self, asset: str, state: SpreadState) -> float:
         min_band = self._grid_min_band_bps(asset, state.edge_side)
@@ -1012,14 +1045,17 @@ class PreIpoStrategy(Strategy):
     def _grid_signal_delay_ns(self, asset: str, edge_side: str) -> int:
         return int(self._grid_side_float(asset, "grid_signal_delay_ms", edge_side) * 1_000_000)
 
-    def _grid_max_inventory(self, asset: str) -> int:
-        return self._grid_int(asset, "grid_max_inventory")
+    def _capture_target_bps(self, asset: str) -> Decimal:
+        return self._grid_decimal(asset, "capture_bps")
 
-    def _min_capture_bps(self, asset: str) -> Decimal:
-        return self._grid_decimal(asset, "min_capture_bps")
+    def _short_exit_bps(self, asset: str) -> float:
+        return self._grid_float(asset, "short_exit_bps")
 
-    def _grid_side_decimal(self, asset: str, key: str, edge_side: str) -> Decimal:
-        return Decimal(str(self._grid_side_value(asset, key, edge_side)))
+    def _long_exit_bps(self, asset: str) -> float:
+        return self._grid_float(asset, "long_exit_bps")
+
+    def _min_hold_ns(self, asset: str) -> int:
+        return int(self._grid_float(asset, "min_hold_sec") * 1_000_000_000)
 
     def _grid_side_float(self, asset: str, key: str, edge_side: str) -> float:
         return float(self._grid_side_value(asset, key, edge_side))
@@ -1039,7 +1075,7 @@ class PreIpoStrategy(Strategy):
         raise RuntimeError(f"unknown edge_side: {edge_side}")
 
     def _asset_trade_qty(self, asset: str) -> Decimal:
-        return Decimal(str(self._asset_grid(asset).get("trade_qty", self.trade_qty)))
+        return Decimal(str(self._asset_grid(asset)["trade_qty"]))
 
     def _asset_qty_log(self) -> dict[str, str]:
         return {asset: str(self._asset_trade_qty(asset)) for asset in self.assets}
@@ -1057,25 +1093,6 @@ class PreIpoStrategy(Strategy):
                 if batch.asset == asset
             )
         return inventory
-
-    # 加仓网格以已有同方向开仓 edge 为锚，mean 只负责确认仍处于波动区。
-    def _passes_grid_step(self, asset: str, edge_side: str, edge_bps: Decimal) -> bool:
-        edges = [
-            pos.actual_entry_edge_bps or pos.edge_bps
-            for pos in self.positions.values()
-            if pos.asset == asset and pos.edge_side == edge_side
-        ]
-        edges.extend(
-            batch.edge_bps
-            for batch in self.pending.values()
-            if batch.asset == asset and batch.edge_side == edge_side and batch.open_qty > 0
-        )
-        if not edges:
-            return True
-        step = self._grid_step_bps(asset)
-        if edge_side == SHORT_EDGE:
-            return edge_bps >= max(edges) + step
-        return edge_bps <= min(edges) - step
 
     def _reduces_inventory(self, inventory: int, edge_side: str) -> bool:
         return (inventory > 0 and edge_side == SHORT_EDGE) or (inventory < 0 and edge_side == LONG_EDGE)
@@ -1095,7 +1112,7 @@ class PreIpoStrategy(Strategy):
                 continue
             entry_edge = pos.actual_entry_edge_bps or pos.edge_bps
             capture = self._capture_bps(pos.edge_side, entry_edge, exit_edge)
-            if require_min_capture and capture < self._min_capture_bps(asset):
+            if require_min_capture and capture < self._capture_target_bps(asset):
                 continue
             if best_capture is None or capture > best_capture:
                 best_pos = pos
@@ -1129,7 +1146,7 @@ class PreIpoStrategy(Strategy):
         order_qty = close_qty + open_qty
         if order_qty <= 0:
             return
-        action = FLIP if close_lot_id is not None and open_qty > 0 else CLOSE if close_lot_id is not None else OPEN
+        action = CLOSE if close_lot_id is not None else OPEN
         lot_id = self._new_lot_id()
         self.log.info(
             f"edge_signal {asset} action={action} lot={lot_id} close_lot={close_lot_id or '-'} "
@@ -1167,8 +1184,6 @@ class PreIpoStrategy(Strategy):
             balance_qty=balance_qty,
             expected_capture_bps=expected_capture_bps,
         )
-        if batch is not None and batch.lot_id in self.pending and open_qty > 0:
-            self.grid_last_open_ns[asset] = now_ns
 
     def _submit_batch(
         self,
