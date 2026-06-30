@@ -1,0 +1,37 @@
+strategy:
+  module: quote_delay_test
+  class: QuoteDelayStrategy
+  config: QuoteDelayConfig
+  params:
+    instruments: enabled
+    run_seconds: 180
+    summary_interval_sec: 5
+
+logging:
+  strategy_log_level: INFO
+
+data:
+  clients:
+    binance_futures:
+      enabled: true
+      markets:
+        - OPENAI
+        - ANTHROPIC
+
+    okx_swap:
+      enabled: false
+      markets: []
+
+exec:
+  engine:
+    reconciliation: false
+    reconciliation_scope: null
+
+  clients:
+    binance_futures:
+      enabled: false
+      markets: []
+
+    okx_swap:
+      enabled: false
+      markets: []

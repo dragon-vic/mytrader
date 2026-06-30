@@ -5,6 +5,7 @@ from decimal import Decimal
 from typing import Any
 from typing import get_type_hints
 
+from utils.config_loader import backtest_client_config
 from utils.config_loader import proxy_url
 from utils.instrument_factory import InstrumentFactory
 from utils.report_writer import run_reports_dir
@@ -21,11 +22,9 @@ def build_strategy(settings: dict[str, Any], run_type: str = "backtest"):
 
 
 def strategy_instruments(settings: dict[str, Any], run_type: str, params: dict[str, Any]) -> InstrumentFactory:
-    client = params.pop("instrument_client")
+    client = params["instrument_client"]
     if run_type == "backtest":
-        if client != settings["backtest"]["key"]:
-            raise ValueError("backtest strategy.params.instrument_client must equal backtest.client")
-        return InstrumentFactory.from_client(settings["backtest"])
+        return InstrumentFactory.from_client(backtest_client_config(settings, client))
     source = settings["data"]["clients"].get(client) or settings["exec"]["clients"].get(client)
     if source is None:
         raise ValueError(f"strategy.params.instrument_client not found: {client}")
@@ -73,7 +72,7 @@ def strategy_params(
     if "event_log_path" in fields and params.get("event_log_path", "auto") == "auto":
         params["event_log_path"] = str(run_reports_dir(settings, run_type) / "strategy_events.csv")
     if "snapshot_path" in fields and params.get("snapshot_path", "auto") == "auto":
-        params["snapshot_path"] = str(run_reports_dir(settings, run_type) / "preipo_arb_snapshot.json")
+        params["snapshot_path"] = str(run_reports_dir(settings, run_type) / f"{settings['project']['config_name']}_snapshot.json")
     if "tick_log_path" in fields and params.get("tick_log_path", "auto") == "auto":
         params["tick_log_path"] = str(run_reports_dir(settings, run_type) / "poly_ticks.parquet")
     if "poly_trade_path" in fields and params.get("poly_trade_path", "auto") == "auto":

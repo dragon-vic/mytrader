@@ -3,9 +3,9 @@ from __future__ import annotations
 
 # run.py 的交互模式和命令行模式。
 MODE_OPTIONS = [
+    ("回测", "backtest"),
     ("实盘", "live"),
     ("模拟盘", "testnet"),
-    ("回测", "backtest"),
 ]
 RUN_MODES = ("backtest", "testnet", "live")
 

@@ -1,0 +1,78 @@
+strategy:
+  module: koru_backtest
+  class: KoruQuoteBacktestStrategy
+  config: KoruQuoteBacktestConfig
+  params:
+    binance_id: KORUUSDT-PERP.BINANCE
+    okx_id: KORU-USDT-SWAP.OKX
+    feature_path: strategies/koru/backtest_data/koru_features_collector_compact.parquet
+    qty: "1"
+    capture_bps: 100
+    short_entry_bps: 60
+    long_entry_bps: 60
+    window_minutes: 360
+    warmup_minutes: 360
+    min_hold_sec: 60
+    entry_filter: slow
+    entry_slope_ms: 5000
+    end_ns: 1782662399998947186
+
+data:
+  clients:
+    binance_futures:
+      enabled: true
+      markets:
+        - symbol: KORU/USDT
+          timeframe: 1s
+    okx_swap:
+      enabled: true
+      markets:
+        - symbol: KORU/USDT
+          timeframe: 1s
+
+backtest:
+  venues:
+    - client: binance_futures
+      starting_balance: "100000 USDT"
+      account_type: MARGIN
+      oms_type: NETTING
+      default_leverage: "5"
+      use_market_order_acks: true
+      latency:
+        base_latency_ms: 0
+        insert_latency_ms: 100
+        update_latency_ms: 0
+        cancel_latency_ms: 0
+    - client: okx_swap
+      starting_balance: "100000 USDT"
+      account_type: MARGIN
+      oms_type: NETTING
+      default_leverage: "5"
+      use_market_order_acks: true
+      latency:
+        base_latency_ms: 0
+        insert_latency_ms: 100
+        update_latency_ms: 0
+        cancel_latency_ms: 0
+  datasets:
+    - type: quote_ticks
+      path: strategies/koru/backtest_data/koru_quotes_collector.parquet
+  logging:
+    log_level: ERROR
+    bypass: true
+  instrument:
+    settlement_currency: USDT
+    is_inverse: false
+    price_precision: 2
+    size_precision: 3
+    price_increment: "0.01"
+    size_increment: "0.001"
+    multiplier: "1"
+    min_quantity: "0.001"
+    max_quantity: "10000"
+    min_notional: "0"
+    max_price: "10000000"
+    margin_init: "0.2"
+    margin_maint: "0.1"
+    maker_fee: "0.0005"
+    taker_fee: "0.0005"

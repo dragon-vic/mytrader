@@ -276,8 +276,16 @@ def run_background(config_name: str, mode: str) -> None:
         raise RuntimeError("后台运行需要 tmux，请先安装 tmux，或选择前台运行。")
     ensure_strategy_not_running(config_name)
     strategy = strategy_name(config_name)
-    session_name = f"{strategy}-{timestamp_name()}"
-    command = f"{shlex_quote(sys.executable)} -u run.py {shlex_quote(config_name)} {shlex_quote(mode)}"
+    start_time = timestamp_name()
+    session_name = f"{strategy}-{start_time}"
+    report_dir = background_report_dir(config_name, mode, start_time)
+    report_dir.mkdir(parents=True, exist_ok=True)
+    tmux_log = report_dir / "tmux.log"
+    command = (
+        f"export NT_RUN_STARTED_AT={shlex_quote(start_time)}; "
+        f"exec {shlex_quote(sys.executable)} -u run.py {shlex_quote(config_name)} {shlex_quote(mode)} "
+        f">> {shlex_quote(str(tmux_log))} 2>&1"
+    )
     shell_command = f"bash -lc {shlex_quote(command)}"
     subprocess.run(
         ["tmux", "new-session", "-d", "-s", session_name, "-c", str(ROOT), shell_command],
@@ -288,13 +296,23 @@ def run_background(config_name: str, mode: str) -> None:
         cwd=ROOT,
         text=True,
     ).strip()
-    report_dir = config_path(config_name).parent / "report"
     print(f"后台进程已启动：{config_name} {mode}")
     print(f"tmux会话：{session_name}")
     print(f"PID：{pid}")
-    print(f"日志：{report_dir}/live-开始时间/node.log 或 backtest-开始时间/node.log")
+    print(f"NT日志：{report_dir}/node.log")
+    print(f"tmux日志：{tmux_log}")
     print("监控：重新运行 start，选择对应的运行中策略")
     print(f"停止：tmux attach -t {session_name} 后按 Ctrl+C")
+
+
+# 后台运行先创建目录，保证 Python 启动失败也能留下 tmux.log。
+def background_report_dir(config_name: str, mode: str, start_time: str) -> Path:
+    settings = load_settings(config_name, mode=mode)
+    root = Path(settings["reports"]["root"])
+    if not root.is_absolute():
+        root = Path(settings["project"]["strategy_dir"]) / root
+    run_kind = "backtest" if mode == "backtest" else "live"
+    return root / f"{run_kind}-{start_time}"
 
 
 def timestamp_name() -> str:
@@ -410,15 +428,18 @@ def run_interactive() -> None:
                 run_monitor(selected_config.removeprefix("运行中："))
                 return
 
-        selected_label = choose(
-            f"配置：{selected_config}\n请选择模式：",
-            [label for label, _mode in MODE_OPTIONS],
-        )
-        if selected_label is None:
-            selected_config = None
-            continue
+        if os.name == "nt":
+            selected_label = choose(
+                f"配置：{selected_config}\n请选择模式：",
+                [label for label, _mode in MODE_OPTIONS],
+            )
+            if selected_label is None:
+                selected_config = None
+                continue
+            mode = dict(MODE_OPTIONS)[selected_label]
+        else:
+            mode = "live"
 
-        mode = dict(MODE_OPTIONS)[selected_label]
         if os.name != "nt":
             style = choose("请选择运行方式：", ["后台运行", "前台运行"])
             if style is None:

@@ -19,7 +19,7 @@ from rich.table import Table
 
 
 BEIJING_TZ = timezone(timedelta(hours=8))
-SNAPSHOT_NAME = "preipo_arb_snapshot.json"
+SNAPSHOT_NAME = "koru_snapshot.json"
 MONITOR_PAGES = 2
 
 
@@ -99,6 +99,7 @@ def summary_table(rows: dict[str, dict[str, str]]) -> Table:
     metrics = (
         ("inventory", "库存"),
         ("realized_usdt", "已实现USDT"),
+        ("unrealized_usdt", "未实现USDT"),
         ("realized_bps", "已实现bps"),
         ("unrealized_bps", "未实现bps"),
         ("total_bps", "总计bps"),
@@ -142,7 +143,7 @@ def build_view(payload: dict, path: Path, session_name: str | None, page: int = 
         keys = "正在停止node..."
     else:
         keys = "↑/↓翻页 | Esc退出监控 | s停止node" if session_name else "↑/↓翻页 | Esc退出监控"
-    parts = [Panel.fit(f"PREIPO Arbitrage Live | Page {page + 1}/{MONITOR_PAGES} | 北京时间 {beijing_time} | {keys} | {path}", border_style="cyan")]
+    parts = [Panel.fit(f"KORU Live | Page {page + 1}/{MONITOR_PAGES} | 北京时间 {beijing_time} | {keys} | {path}", border_style="cyan")]
     if page == 1:
         parts.append(action_table(payload.get("action_rows") or []))
         return Group(*parts)
@@ -263,3 +264,4 @@ if __name__ == "__main__":
         1.0,
         sys.argv[2] if len(sys.argv) > 2 else None,
     )
+

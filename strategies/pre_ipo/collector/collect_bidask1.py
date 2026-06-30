@@ -21,8 +21,8 @@ import websockets
 
 LOCAL_TZ = ZoneInfo("Asia/Shanghai")
 
-BINANCE_SYMBOLS = ("OPENAIUSDT", "ANTHROPICUSDT", "KORUUSDT")
-OKX_SYMBOLS = ("OPENAI-USDT-SWAP", "ANTHROPIC-USDT-SWAP", "KORU-USDT-SWAP")
+BINANCE_SYMBOLS = ("OPENAIUSDT", "ANTHROPICUSDT")
+OKX_SYMBOLS = ("OPENAI-USDT-SWAP", "ANTHROPIC-USDT-SWAP")
 
 QUOTE_FLUSH_SEC = 30
 # Trade tick 量明显小于 quote，单独放慢落盘节奏，减少小 parquet 文件数量。
@@ -434,7 +434,7 @@ def launch_tmux_if_needed(args: list[str]) -> bool:
 
 if __name__ == "__main__":
     # 0 表示持续采集；临时测试可传秒数，例如：
-    # python strategies/preipo_arb/collector/collect_bidask1.py 120
+    # python strategies/pre_ipo/collector/collect_bidask1.py 120
     if launch_tmux_if_needed(sys.argv[1:]):
         raise SystemExit(0)
     seconds = int(sys.argv[1]) if len(sys.argv) > 1 else 0

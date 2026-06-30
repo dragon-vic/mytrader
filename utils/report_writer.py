@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 import json
-import sys
-import traceback
 import re
-from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
@@ -12,7 +9,6 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import pandas as pd
-from rich.columns import Columns
 from rich.console import Console
 from rich.table import Table
 
@@ -25,30 +21,6 @@ from utils.report_labels import to_chinese_columns
 
 
 LOCAL_TZ = ZoneInfo("Asia/Shanghai")
-
-
-class TeeStream:
-    def __init__(self, terminal, log_file) -> None:
-        self.terminal = terminal
-        self.log_file = log_file
-
-    def __getattr__(self, name: str):
-        return getattr(self.terminal, name)
-
-    def write(self, text: str) -> int:
-        self.terminal.write(text)
-        self.log_file.write(text)
-        return len(text)
-
-    def flush(self) -> None:
-        self.terminal.flush()
-        self.log_file.flush()
-
-    def isatty(self) -> bool:
-        return self.terminal.isatty()
-
-    def fileno(self) -> int:
-        return self.terminal.fileno()
 
 
 # 返回当前策略自己的报告根目录。
@@ -101,37 +73,6 @@ def log_file_settings(settings: dict[str, Any], run_type: str) -> dict[str, Any]
         "clear_log_file": bool(logging["clear_log_file"]),
     }
 
-
-# 返回 NT node.log 的完整路径。
-def node_log_path(settings: dict[str, Any], run_type: str) -> Path:
-    filename = str(settings["logging"]["log_file_name"])
-    if not filename.endswith(".log"):
-        filename = f"{filename}.log"
-    return run_reports_dir(settings, run_type) / filename
-
-
-# 把 node 返回后的终端输出同时补进 node.log。
-@contextmanager
-def tee_node_log(settings: dict[str, Any], run_type: str):
-    path = node_log_path(settings, run_type)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as log_file:
-        stdout = sys.stdout
-        stderr = sys.stderr
-        sys.stdout = TeeStream(stdout, log_file)
-        sys.stderr = TeeStream(stderr, log_file)
-        try:
-            yield
-        except BaseException:
-            log_file.write("\n")
-            traceback.print_exc(file=log_file)
-            raise
-        finally:
-            sys.stdout = stdout
-            sys.stderr = stderr
-            log_file.flush()
-
-
 # 创建当前运行的报告目录；每次运行使用新目录，不再清理旧文件。
 def prepare_report_dir(settings: dict[str, Any], run_type: str) -> Path:
     root = reports_root(settings).resolve()
@@ -167,7 +108,7 @@ class TraderReportWriter:
         return cls(
             run_reports_dir(settings, run_type),
             bool(settings["reports"]["enabled"]),
-            runtime_start_ns(settings),
+            runtime_start_ns(settings) if run_type in {"live", "testnet"} else None,
             settings,
         )
 
@@ -457,7 +398,11 @@ def print_summary_tables(console: Console, sections: list[tuple[str, tuple[str, 
     top = [table for table in tables if table.title != "标的统计"]
     instruments = [table for table in tables if table.title == "标的统计"]
     if top:
-        console.print(Columns(top, equal=True, expand=True))
+        grid = Table.grid(expand=True)
+        for _ in top:
+            grid.add_column(ratio=1)
+        grid.add_row(*top)
+        console.print(grid)
     for table in instruments:
         console.print(table)
 
@@ -471,35 +416,46 @@ def summary_table(title: str, headers: tuple[str, ...], rows: list[tuple[Any, ..
     return table
 
 
-# 用 NT 回测结果组装总体概览行。
+# 回测总览的收益使用订单重建口径；NT multi-venue stats_pnls 只保留最后一个 venue。
 def backtest_overview_rows(payload: dict[str, Any], settings: dict[str, Any]) -> list[tuple[str, str]]:
     output_dir = run_reports_dir(settings, "backtest")
-    markets = settings["markets"]
     symbols = market_symbols(settings, "backtest")
-    timeframes = ", ".join(sorted({market["timeframe"] for market in markets}))
-    stats_pnls = payload.get("stats_pnls", {})
-    currency = next(iter(stats_pnls), "")
-    pnl_stats = stats_pnls.get(currency, {})
+    data_interval = backtest_data_interval(settings)
     return_stats = payload.get("stats_returns", {})
+    starting_balance = starting_balance_value(settings)
+    pnl = net_pnl(output_dir)
 
     return [
         ("配置名", settings["project"]["config_name"]),
         ("策略名", settings["project"]["config_name"]),
         ("markets", symbols),
         ("交易标的", traded_symbol_count(output_dir)),
-        ("K线周期", timeframes),
+        ("K线周期", data_interval),
         ("回测开始", format_timestamp_ns(payload.get("backtest_start"))),
         ("回测结束", format_timestamp_ns(payload.get("backtest_end"))),
         ("回测天数", format_number(float(payload.get("elapsed_time") or 0) / 86400)),
         ("初始资金", settings["backtest"]["venue_account"]["starting_balance"]),
-        ("总收益", format_number(pnl_stats.get("PnL (total)"), currency)),
-        ("总收益率", format_number(pnl_stats.get("PnL% (total)"), "%")),
+        ("净收益", format_number(pnl)),
+        ("净收益率", format_number(pnl / starting_balance * 100 if starting_balance else 0, "%")),
         ("盈利因子", format_number(return_stats.get("Profit Factor"))),
         ("Sharpe", format_number(return_stats.get("Sharpe Ratio (252 days)"))),
         ("Sortino", format_number(return_stats.get("Sortino Ratio (252 days)"))),
         ("迭代次数", format_int(payload.get("iterations"))),
         ("事件数", format_int(payload.get("total_events"))),
     ]
+
+
+def backtest_data_interval(settings: dict[str, Any]) -> str:
+    datasets = settings["backtest"].get("datasets", [])
+    types = {dataset["type"] for dataset in datasets}
+    labels = []
+    if "quote_ticks" in types:
+        labels.append("quote")
+    if {"trade_ticks", "trade_tick_catalog"} & types:
+        labels.append("tick")
+    if "bars" in types or not labels:
+        labels.extend(sorted({market["timeframe"] for market in settings["markets"] if "timeframe" in market}))
+    return "/".join(labels)
 
 
 # 用 live/testnet 已落盘报告组装总体概览行。
@@ -590,6 +546,11 @@ def net_pnl(output_dir: Path) -> float:
     if positions.empty:
         return 0.0
     return (positions["已实现盈亏"].map(money_to_float) + report_funding_income(positions)).sum()
+
+
+# 回测配置里的初始资金是 Money 字符串，例如 "100000 USDT"。
+def starting_balance_value(settings: dict[str, Any]) -> float:
+    return money_to_float(settings["backtest"]["venue_account"]["starting_balance"])
 
 
 # positions.csv 可能来自旧报告；没有资金费列时按 0 处理。

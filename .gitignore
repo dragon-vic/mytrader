@@ -14,8 +14,9 @@ strategies/*/report/
 strategies/*/research
 **/research/*
 strategies/*/collector/bidask1-live/
+strategies/*/backtest_data/
 logs/
-strategies/preipo_arb/preipo_arb_snapshot.json
+strategies/*/*_snapshot.json
 .gitignore
 .env
 .venv/

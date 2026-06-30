@@ -24,7 +24,6 @@ from utils.instrument_factory import InstrumentFactory
 from utils.report_writer import log_file_settings
 from utils.polymarket_btc5m import up_down_instrument_windows
 from utils.report_writer import print_live_summary
-from utils.report_writer import tee_node_log
 from utils.report_writer import TraderReportWriter
 from utils.runtime_ids import claim_run
 from utils.strategy_factory import build_strategy
@@ -182,7 +181,6 @@ def main(config_name: str, mode: str | None = None) -> None:
     try:
         run_live_node(node)
     finally:
-        with tee_node_log(settings, "live"):
-            report_writer.write_final_reports(node.trader)
-            node.dispose()
-            print_live_summary(settings)
+        report_writer.write_final_reports(node.trader)
+        node.dispose()
+        print_live_summary(settings)

@@ -1,9 +1,9 @@
 strategy:
-  module: preipo_arb
-  class: PreipoArbStrategy
-  config: PreipoArbConfig
+  module: pre_ipo
+  class: PreIpoStrategy
+  config: PreIpoConfig
   params:
-    assets: [OPENAI, ANTHROPIC, KORU]
+    assets: [OPENAI, ANTHROPIC]
     instruments: enabled
 
     # 启动时读取 collector 保存的最近 3h bid/ask1；不足 3h 就先用已有窗口。
@@ -15,8 +15,8 @@ strategy:
     grid_center_sec: 10800
 
     # 每个标的单独配置网格参数，避免顶层默认值和 asset 覆盖值不一致。
-    # grid_band_bps: long_edge 低于均线多少开 long；short_edge 高于均线多少开 short。
-    # grid_signal_delay_ms: 第一次过线后等待多少毫秒，再用最新 quote 复查；仍过线才交易。
+    # grid_band_bps: entry = max(min, std_mult * 3h_std)。long_edge 低于均线 entry 开 long；short_edge 高于均线 entry 开 short。
+    # grid_signal_delay_ms: 第一次过线后等待多少毫秒，再用最新 quote 复查 entry；仍过线才交易。
     # grid_step_bps: 同方向加仓的网格间距；short 要比当前最大开仓 edge 更高，long 要比当前最小开仓 edge 更低。
     # grid_open_gap_sec: 非平仓动作之间的最小间隔；0 表示不做时间冷却。
     # grid_max_inventory: 每个标的最多持有的净 pair 数。
@@ -26,8 +26,12 @@ strategy:
       OPENAI:
         trade_qty: "0.01"
         grid_band_bps:
-          long: "24"
-          short: "29"
+          long:
+            min: "25"
+            std_mult: "0"
+          short:
+            min: "30"
+            std_mult: "0"
         grid_signal_delay_ms:
           long: 60
           short: 10
@@ -38,23 +42,15 @@ strategy:
       ANTHROPIC:
         trade_qty: "0.1"
         grid_band_bps:
-          long: "41"
-          short: "41"
-        grid_signal_delay_ms:
-          long: 70
-          short: 70
-        grid_step_bps: "25"
-        grid_open_gap_sec: 0
-        grid_max_inventory: 1
-        min_capture_bps: "0"
-      KORU:
-        trade_qty: "0.1"
-        grid_band_bps:
-          long: "37"
-          short: "47"
+          long:
+            min: "30"
+            std_mult: "1.4"
+          short:
+            min: "30"
+            std_mult: "1.2"
         grid_signal_delay_ms:
           long: 100
-          short: 80
+          short: 100
         grid_step_bps: "25"
         grid_open_gap_sec: 0
         grid_max_inventory: 1
@@ -71,9 +67,7 @@ strategy:
     # 每个 quote 后按交易所聚合持仓风险；未实现亏损超过钱包余额 80% 时全平并停止。
     risk_enabled: true
     risk_max_unrealized_loss_ratio: "0.8"
-    # KORU quote 量过大时只处理 10%，其余在 on_quote_tick 最开始直接丢弃。
-    quote_sample_rates:
-      KORU: 0.1
+    quote_sample_rates: {}
     # quote 在本地 NT 队列中从 ts_init 到 on_quote_tick 超过该值时聚合记录 error summary。
     max_quote_delay_ms: 10
     quote_summary_interval_sec: 5
@@ -83,8 +77,6 @@ strategy:
       OKX: 5
       KRAKEN: 10
       HYPERLIQUID: 5
-
-
 
 logging:
   component_levels:
@@ -97,14 +89,12 @@ data:
       markets:
         - OPENAI
         - ANTHROPIC
-        - KORU
 
     okx_swap:
       enabled: true
       markets:
         - OPENAI
         - ANTHROPIC
-        - KORU
 
     kraken_futures:
       enabled: false
@@ -138,14 +128,12 @@ exec:
       markets:
         - OPENAI
         - ANTHROPIC
-        - KORU
 
     okx_swap:
       enabled: true
       markets:
         - OPENAI
         - ANTHROPIC
-        - KORU
 
     kraken_futures:
       enabled: false
@@ -170,6 +158,3 @@ exec:
           raw_symbol: VNTL-ANTHROPIC
           instrument_symbol: VNTL-ANTHROPIC
           base_currency: ANTHROPIC
-
-backtest:
-  quote_data_path: data/tick/PREIPO-BINANCE-OKX-TRADES-20260609-20260614.parquet

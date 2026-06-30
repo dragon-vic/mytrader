@@ -207,7 +207,7 @@ class SpreadWindow:
             self.total_sq -= old * old
 
 
-class PreipoArbConfig(StrategyConfig, frozen=True):
+class KoruConfig(StrategyConfig, frozen=True):
     instruments: list[str]
     assets: list[str]
     min_window_sec: float
@@ -228,8 +228,8 @@ class PreipoArbConfig(StrategyConfig, frozen=True):
     fee_bps: dict[str, float]
 
 
-class PreipoArbStrategy(Strategy):
-    def __init__(self, config: PreipoArbConfig) -> None:
+class KoruStrategy(Strategy):
+    def __init__(self, config: KoruConfig) -> None:
         super().__init__(config)
         self.instruments = [InstrumentId.from_str(value) for value in config.instruments]
         self.assets = [asset.upper() for asset in config.assets]
@@ -297,8 +297,10 @@ class PreipoArbStrategy(Strategy):
             if self._grid_open_gap_ns(asset) < 0:
                 raise RuntimeError(f"grid_open_gap_sec must be non-negative for {asset}")
             for edge_side in (LONG_EDGE, SHORT_EDGE):
-                if self._grid_band_bps(asset, edge_side) <= 0:
-                    raise RuntimeError(f"grid_band_bps.{self._edge_side_key(edge_side)} must be positive for {asset}")
+                if self._grid_min_band_bps(asset, edge_side) <= 0:
+                    raise RuntimeError(f"grid_band_bps.{self._edge_side_key(edge_side)}.min must be positive for {asset}")
+                if self._grid_std_mult(asset, edge_side) < 0:
+                    raise RuntimeError(f"grid_band_bps.{self._edge_side_key(edge_side)}.std_mult must be non-negative for {asset}")
                 if self._grid_signal_delay_ns(asset, edge_side) < 0:
                     raise RuntimeError(f"grid_signal_delay_ms.{self._edge_side_key(edge_side)} must be non-negative for {asset}")
             if self._grid_max_inventory(asset) <= 0:
@@ -335,7 +337,7 @@ class PreipoArbStrategy(Strategy):
         self._start_snapshot_display()
         self._schedule_housekeeping_alert()
         self.log.info(
-            f"preipo_arb started assets={','.join(self.assets)} instruments={len(self.instruments)} "
+            f"koru started assets={','.join(self.assets)} instruments={len(self.instruments)} "
             f"mode=two_line_grid asset_grid_params={self.asset_grid_params} "
             f"warm_windows={len(self.windows)} "
             f"default_qty={self.trade_qty} asset_qty={self._asset_qty_log()} snapshot_display={self.snapshot_display} "
@@ -370,9 +372,9 @@ class PreipoArbStrategy(Strategy):
         self._maybe_log_quote_summary()
 
     def _drop_quote(self, asset: str) -> bool:
-        if asset.upper() != "KORU":
-            return False
         sample_rate = self.quote_sample_rates.get(asset.upper(), 1.0)
+        if sample_rate >= 1.0:
+            return False
         counts = self.quote_sample_counts[asset.upper()]
         counts[0] += 1
         if random.random() < sample_rate:
@@ -397,8 +399,6 @@ class PreipoArbStrategy(Strategy):
             return
         self.last_quote_summary_ns = now_ns
         self._log_quote_delay_summary()
-        self._log_quote_profile_summary()
-        self._log_quote_sample_summary()
         self.quote_delay_stats.clear()
         self.quote_profile_stats.clear()
         self.quote_sample_counts.clear()
@@ -410,7 +410,7 @@ class PreipoArbStrategy(Strategy):
             if not high:
                 continue
             sorted_values = sorted(values)
-            self.log.error(
+            self.log.warning(
                 f"quote_delay_summary {instrument_id} n={len(values)} high_n={len(high)} "
                 f"threshold_ms={threshold_ms:.3f} "
                 f"p50_ms={self._quote_percentile_ms(sorted_values, 0.50):.3f} "
@@ -772,7 +772,7 @@ class PreipoArbStrategy(Strategy):
             return
         self.housekeeping_alert_seq += 1
         self.clock.set_time_alert_ns(
-            f"preipo_housekeeping_{self.housekeeping_alert_seq}",
+            f"koru_housekeeping_{self.housekeeping_alert_seq}",
             self.clock.timestamp_ns() + 1_000_000_000,
             callback=lambda _event: self._on_housekeeping_alert(),
             allow_past=True,
@@ -934,10 +934,10 @@ class PreipoArbStrategy(Strategy):
         self.clock.cancel_timer(self._signal_alert_name(asset))
 
     def _signal_alert_name(self, asset: str) -> str:
-        return f"preipo_grid_signal_{asset}"
+        return f"koru_grid_signal_{asset}"
 
     def _grid_signal(self, asset: str, state: SpreadState) -> int | None:
-        band = float(self._grid_band_bps(asset, state.edge_side))
+        band = self._grid_entry_band_bps(asset, state)
         step = float(self._grid_step_bps(asset))
         if step <= 0:
             return None
@@ -998,8 +998,16 @@ class PreipoArbStrategy(Strategy):
     def _grid_open_gap_ns(self, asset: str) -> int:
         return int(self._grid_float(asset, "grid_open_gap_sec") * 1_000_000_000)
 
-    def _grid_band_bps(self, asset: str, edge_side: str) -> Decimal:
-        return self._grid_side_decimal(asset, "grid_band_bps", edge_side)
+    def _grid_entry_band_bps(self, asset: str, state: SpreadState) -> float:
+        min_band = self._grid_min_band_bps(asset, state.edge_side)
+        std_mult = self._grid_std_mult(asset, state.edge_side)
+        return max(min_band, std_mult * state.std_bps)
+
+    def _grid_min_band_bps(self, asset: str, edge_side: str) -> float:
+        return float(self._grid_side_value(asset, "grid_band_bps", edge_side, "min"))
+
+    def _grid_std_mult(self, asset: str, edge_side: str) -> float:
+        return float(self._grid_side_value(asset, "grid_band_bps", edge_side, "std_mult"))
 
     def _grid_signal_delay_ns(self, asset: str, edge_side: str) -> int:
         return int(self._grid_side_float(asset, "grid_signal_delay_ms", edge_side) * 1_000_000)
@@ -1011,12 +1019,17 @@ class PreipoArbStrategy(Strategy):
         return self._grid_decimal(asset, "min_capture_bps")
 
     def _grid_side_decimal(self, asset: str, key: str, edge_side: str) -> Decimal:
-        params = self._asset_grid(asset)
-        return Decimal(str(params[key][self._edge_side_key(edge_side)]))
+        return Decimal(str(self._grid_side_value(asset, key, edge_side)))
 
     def _grid_side_float(self, asset: str, key: str, edge_side: str) -> float:
+        return float(self._grid_side_value(asset, key, edge_side))
+
+    def _grid_side_value(self, asset: str, key: str, edge_side: str, subkey: str | None = None) -> object:
         params = self._asset_grid(asset)
-        return float(params[key][self._edge_side_key(edge_side)])
+        value = params[key][self._edge_side_key(edge_side)]
+        if subkey is not None:
+            return value[subkey]
+        return value
 
     def _edge_side_key(self, edge_side: str) -> str:
         if edge_side == LONG_EDGE:
@@ -1275,12 +1288,12 @@ class PreipoArbStrategy(Strategy):
         if open_positions:
             details = ", ".join(str(position) for position in open_positions)
             self.log.error(f"start_check_failed open_positions={details}")
-            self._request_stop("preipo 启动检查发现已有持仓")
+            self._request_stop("koru 启动检查发现已有持仓")
             return
         accounts = list(self.cache.accounts())
         if not accounts:
             self.log.error("start_check_failed accounts=0")
-            self._request_stop("preipo 启动检查没有账户数据")
+            self._request_stop("koru 启动检查没有账户数据")
             return
 
     # 开仓检查按配置杠杆估算初始保证金，再加 10% 缓冲覆盖手续费和盘口滑动。
@@ -1554,7 +1567,7 @@ class PreipoArbStrategy(Strategy):
             if wallet <= 0:
                 self.log.error(f"risk_check_failed venue={venue} wallet_usdt={wallet}")
                 self._flatten_cache_positions(f"risk wallet missing {venue}")
-                self._request_stop(f"preipo 风控 {venue} 钱包余额异常")
+                self._request_stop(f"koru 风控 {venue} 钱包余额异常")
                 return
             if bool(row["high_risk"]):
                 self.log.error(
@@ -1562,7 +1575,7 @@ class PreipoArbStrategy(Strategy):
                     f"risk_rate={risk_rate * Decimal('100'):.2f}% threshold={self.risk_max_unrealized_loss_ratio * Decimal('100'):.2f}%",
                 )
                 self._flatten_cache_positions(f"risk limit {venue}")
-                self._request_stop(f"preipo 风控 {venue} 未实现亏损超过阈值")
+                self._request_stop(f"koru 风控 {venue} 未实现亏损超过阈值")
                 return
 
     # 策略停止时按内部持仓记录提交反向市价单。
@@ -1861,7 +1874,7 @@ class PreipoArbStrategy(Strategy):
             return
         self.stop_requested = True
         self.log.error(f"strategy_stop reason={reason}")
-        self.msgbus.publish(NODE_STOP_TOPIC, {"source": "preipo_arb", "reason": reason})
+        self.msgbus.publish(NODE_STOP_TOPIC, {"source": "koru", "reason": reason})
 
     def _emergency_flatten(self, batch: PendingBatch) -> None:
         for leg in batch.legs.values():
@@ -2154,11 +2167,22 @@ class PreipoArbStrategy(Strategy):
             rows[asset] = {
                 "inventory": str(self._asset_inventory(asset)),
                 "realized_usdt": self._fmt(self.realized_pnl_usdt[asset]),
+                "unrealized_usdt": self._fmt(self._unrealized_pnl_usdt(asset)),
                 "realized_bps": self._fmt(self.realized_edge_bps[asset]),
                 "unrealized_bps": self._fmt(unrealized),
                 "total_bps": self._fmt(self.realized_edge_bps[asset] + unrealized),
             }
         return rows
+
+    def _unrealized_pnl_usdt(self, asset: str) -> Decimal:
+        total = Decimal("0")
+        for position in self._strategy_open_positions():
+            if self._asset(position.instrument_id) != asset:
+                continue
+            pnl = self._position_unrealized_pnl(position)
+            if pnl is not None:
+                total += pnl
+        return total
 
     def _unrealized_edge_bps(self, asset: str) -> Decimal:
         total = Decimal("0")
@@ -2206,7 +2230,7 @@ class PreipoArbStrategy(Strategy):
         if self.snapshot_display == "file" and self.snapshot_interval_ns > 0:
             self.snapshot_path.parent.mkdir(parents=True, exist_ok=True)
             self.snapshot_stop.clear()
-            self.snapshot_thread = Thread(target=self._snapshot_file_loop, name="preipo-arb-snapshot-file", daemon=True)
+            self.snapshot_thread = Thread(target=self._snapshot_file_loop, name="koru-snapshot-file", daemon=True)
             self.snapshot_thread.start()
             return
         if self.snapshot_display != "rich" or self.snapshot_interval_ns <= 0:
@@ -2217,7 +2241,7 @@ class PreipoArbStrategy(Strategy):
             return
         self.log.info("snapshot_display=rich using alternate screen; stop node to restore terminal")
         self.snapshot_stop.clear()
-        self.snapshot_thread = Thread(target=self._snapshot_loop, name="preipo-arb-snapshot", daemon=True)
+        self.snapshot_thread = Thread(target=self._snapshot_loop, name="koru-snapshot", daemon=True)
         self.snapshot_thread.start()
 
     def _stop_snapshot_display(self) -> None:
@@ -2264,7 +2288,7 @@ class PreipoArbStrategy(Strategy):
         action_rows = rows.get("__action_rows__", [])
         asset_rows = {key: value for key, value in rows.items() if not key.startswith("__")}
         payload = {
-            "strategy": "preipo_arb",
+            "strategy": "koru",
             "assets": self.assets,
             "rows": [asset_rows[asset] for asset in self.assets if asset in asset_rows],
             "market_tables": market_tables,
@@ -2278,7 +2302,7 @@ class PreipoArbStrategy(Strategy):
         tmp.replace(self.snapshot_path)
 
     def _snapshot_table(self, rows: dict[str, object]) -> Table:
-        title = f"PREIPO Arbitrage Actions | 北京时间 {rows.get('__beijing_time__') or self._beijing_time()}"
+        title = f"KORU Actions | 北京时间 {rows.get('__beijing_time__') or self._beijing_time()}"
         table = Table(title=title, expand=True)
         columns = (
             ("lot", "lot", "right"),
@@ -2312,3 +2336,5 @@ class PreipoArbStrategy(Strategy):
             if side == SHORT_EDGE:
                 return "short"
         return str(row.get(key, "-"))
+
+
