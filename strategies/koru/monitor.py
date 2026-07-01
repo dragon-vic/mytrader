@@ -112,7 +112,16 @@ def summary_table(rows: dict[str, dict[str, str]]) -> Table:
         return table
     for asset, values in rows.items():
         table.add_row(str(asset), *(str(values.get(key, "-")) for key, _ in metrics))
+    table.add_row("TOTAL", *(summary_total_value(rows, key) for key, _ in metrics), style="bold")
     return table
+
+
+def summary_total_value(rows: dict[str, dict[str, str]], key: str) -> str:
+    values = [parse_number(values.get(key, "-")) for values in rows.values()]
+    values = [value for value in values if value is not None]
+    if not values:
+        return "-"
+    return format_number(sum(values))
 
 
 def risk_table(rows: dict[str, dict[str, str]]) -> Table:
