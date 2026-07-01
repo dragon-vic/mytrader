@@ -3,7 +3,7 @@ strategy:
   class: PreIpoStrategy
   config: PreIpoConfig
   params:
-    assets: [ANTHROPIC]
+    assets: [OPENAI, ANTHROPIC]
     instruments: enabled
 
     # 启动时读取 collector 保存的最近 6h bid/ask1；不足 6h 就先用已有窗口。
@@ -14,43 +14,57 @@ strategy:
     # 两条 edge 线分别用 6h 时间等权均线；不再使用 30m 均线/波动做信号。
     grid_center_sec: 21600
 
-    # 每个标的单独配置 entry/exit 参数，避免顶层默认值和 asset 覆盖值不一致。
-    # grid_band_bps: entry = max(min, std_mult * 6h_std)。long_edge 低于均线 entry 开 long；short_edge 高于均线 entry 开 short。
-    # grid_signal_delay_ms: 第一次过线后等待多少毫秒，再用最新 quote 复查 entry；仍过线才交易。
+    # OKX 2026-06-30 对 OPENAI/ANTHROPIC 做 rebase：价格 /10，数量 *10。
+    # edge 用 price_multipliers 归一化；下单用 qty_multipliers 对齐名义敞口。
+    price_multipliers:
+      BINANCE: 1
+      OKX: 10
+    qty_multipliers:
+      BINANCE: 1
+      OKX: 10
+
+    # 每个标的单独配置交易参数，信号字段和回测配置保持一致。
+    # entry = max(entry_bps, std_mult * 6h_std)。long_edge 低于均线 entry 开 long；short_edge 高于均线 entry 开 short。
+    # signal_delay_ms: 第一次过线后等待多少毫秒，再用最新 quote 复查；仍过线才交易。
     # capture_bps: 持仓后，只要同一条 edge 线达到该收益就平仓。
     # *_exit_bps: 未达到 capture 时的均线平仓条件，和 backtest 策略一致。
     # trade_qty: 单个标的每次开仓 qty；设为 "0" 时只监控该标的，不提交交易。
     asset_grid_params:
+      OPENAI:
+        trade_qty: 0
+        short_entry_bps: 50
+        long_entry_bps: 50
+        std_mult: 0
+        signal_delay_ms: 100
+        capture_bps: 70
+        short_exit_bps: -30
+        long_exit_bps: -30
+        min_hold_sec: 0
       ANTHROPIC:
-        trade_qty: "0.3"
-        grid_band_bps:
-          long:
-            min: "50"
-            std_mult: "0"
-          short:
-            min: "50"
-            std_mult: "0"
-        grid_signal_delay_ms:
-          long: 100
-          short: 100
-        capture_bps: "70"
-        short_exit_bps: "-30"
-        long_exit_bps: "-30"
+        trade_qty: 0.5
+        short_entry_bps: 60
+        long_entry_bps: 60
+        std_mult: 2.6
+        signal_delay_ms: 0
+        capture_bps: 70
+        short_exit_bps: -15
+        long_exit_bps: -15
         min_hold_sec: 0
     # live 运行时 snapshot 写到当前 report 目录，monitor/start 会读取这个文件显示 rich 表格。
     snapshot_interval_sec: 1
     snapshot_display: file
     snapshot_path: auto
-    slippage_bps: "2"
+    slippage_bps: 2
     # 只用于策略开仓前的可用 USDT 检查：required_margin = price * qty / margin_leverage * 1.1。
     # 交易所账户侧杠杆需要单独通过 API/界面保持一致。
-    margin_leverage: "5"
+    margin_leverage: 5
     # 每个 quote 后按交易所聚合持仓风险；未实现亏损超过钱包余额 80% 时全平并停止。
     risk_enabled: true
-    risk_max_unrealized_loss_ratio: "0.8"
+    risk_max_unrealized_loss_ratio: 0.8
     quote_sample_rates: {}
     # quote 在本地 NT 队列中从 ts_init 到 on_quote_tick 超过该值时聚合记录 error summary。
-    max_quote_delay_ms: 10
+    quote_delay_log_enabled: false
+    max_quote_delay_ms: 100
     quote_summary_interval_sec: 5
     use_hyphens_in_client_order_ids: false
     fee_bps:
@@ -68,11 +82,13 @@ data:
     binance_futures:
       enabled: true
       markets:
+        - OPENAI
         - ANTHROPIC
 
     okx_swap:
       enabled: true
       markets:
+        - OPENAI
         - ANTHROPIC
 
     kraken_futures:
@@ -101,15 +117,21 @@ data:
           base_currency: ANTHROPIC
 
 exec:
+  engine:
+    # 启动对账只回看最近 6h，避免 OKX 旧 pre-market 订单/fill 在启动时大量重建。
+    reconciliation_lookback_mins: 360
+
   clients:
     binance_futures:
       enabled: true
       markets:
+        - OPENAI
         - ANTHROPIC
 
     okx_swap:
       enabled: true
       markets:
+        - OPENAI
         - ANTHROPIC
 
     kraken_futures:

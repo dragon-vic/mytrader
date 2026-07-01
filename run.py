@@ -21,7 +21,9 @@ from utils.config_loader import config_path
 from utils.config_loader import load_settings
 
 
-REPORT_OPTION = "查看总结"
+MENU_LAUNCH = "启动"
+MENU_RUNNING = "运行中"
+MENU_SUMMARY = "总结"
 
 
 def clear_screen() -> None:
@@ -114,17 +116,16 @@ def choose(title: str, options: list[str]) -> str | None:
             selected = (selected + 1) % len(options)
 
 
-def render_main_menu(left: list[str], right: list[str], col: int, row: int) -> None:
+def render_main_menu(columns: list[tuple[str, list[str]]], col: int, row: int) -> None:
     clear_screen()
     print("请选择配置：")
     print()
-    print(f"{'配置':<32}运行中 / 总结")
-    print(f"{'-' * 24:<32}{'-' * 24}")
-    count = max(len(left), len(right))
+    width = 38
+    print("".join(f"{name:<{width}}" for name, _options in columns))
+    print("".join(f"{'-' * 24:<{width}}" for _name, _options in columns))
+    count = max(len(options) for _name, options in columns)
     for index in range(count):
-        left_text = menu_cell(left, 0, index, col, row)
-        right_text = menu_cell(right, 1, index, col, row)
-        print(f"{left_text:<32}{right_text}")
+        print("".join(f"{menu_cell(options, cell_col, index, col, row):<{width}}" for cell_col, (_name, options) in enumerate(columns)))
     print()
     print("↑/↓ 选择，←/→ 切换列，Enter 确认，q 返回")
 
@@ -136,36 +137,54 @@ def menu_cell(options: list[str], cell_col: int, index: int, col: int, row: int)
     return f"{prefix}{options[index]}"
 
 
-def choose_main(left: list[str], right: list[str]) -> str | None:
-    if not left and not right:
+def choose_main(launch: list[str], running: list[str], summaries: list[str]) -> tuple[str, str] | None:
+    if not launch and not running and not summaries:
         raise ValueError("No main menu options")
-    columns = [left, right]
-    col = 1 if len(right) > 1 else 0
-    if not columns[col]:
-        col = 1 - col
+    columns = [(MENU_LAUNCH, launch), (MENU_RUNNING, running), (MENU_SUMMARY, summaries)]
+    col = 1 if running else 0
+    if not columns[col][1]:
+        col = next(index for index, (_name, options) in enumerate(columns) if options)
     row = 0
     while True:
-        render_main_menu(left, right, col, row)
+        render_main_menu(columns, col, row)
         key = read_key()
         if key == "back":
             return None
         if key == "enter":
-            return columns[col][row]
+            clear_screen()
+            return columns[col][0], columns[col][1][row]
         if key in {"left", "right"}:
-            next_col = 0 if key == "left" else 1
-            if columns[next_col]:
-                col = next_col
-                row = min(row, len(columns[col]) - 1)
+            step = -1 if key == "left" else 1
+            for offset in range(1, len(columns) + 1):
+                next_col = (col + step * offset) % len(columns)
+                if columns[next_col][1]:
+                    col = next_col
+                    row = min(row, len(columns[col][1]) - 1)
+                    break
         elif key == "up":
-            row = (row - 1) % len(columns[col])
+            row = (row - 1) % len(columns[col][1])
         elif key == "down":
-            row = (row + 1) % len(columns[col])
+            row = (row + 1) % len(columns[col][1])
 
 
 def parse_mode(raw: str) -> str:
     if raw not in RUN_MODES:
         raise ValueError(f"mode must be one of: {', '.join(RUN_MODES)}")
     return raw
+
+
+def parse_style(raw: str) -> str:
+    aliases = {
+        "background": "background",
+        "bg": "background",
+        "后台": "background",
+        "foreground": "foreground",
+        "fg": "foreground",
+        "前台": "foreground",
+    }
+    if raw not in aliases:
+        raise ValueError("style must be one of: background|bg|后台|foreground|fg|前台")
+    return aliases[raw]
 
 
 def run(config_name: str, mode: str) -> None:
@@ -346,6 +365,29 @@ def report_dirs() -> list[Path]:
     return sorted(dirs, key=lambda path: path.stat().st_mtime, reverse=True)
 
 
+def report_label(report_dir: Path) -> str:
+    return f"{report_dir.parent.parent.name}-{report_dir.name.removeprefix('live-').removeprefix('backtest-')}"
+
+
+def report_options(limit: int = 10) -> list[str]:
+    options = []
+    for path in report_dirs():
+        if not (path / SUMMARY_FILE).exists():
+            continue
+        options.append(report_label(path))
+        if len(options) >= limit:
+            break
+    return options
+
+
+def report_by_label(label: str) -> Path:
+    timestamp = label[-14:]
+    strategy = label[:-15]
+    if len(label) < 16 or label[-15] != "-" or not strategy or not timestamp.isdigit():
+        raise RuntimeError(f"report 名格式不正确：{label}")
+    return ROOT / "strategies" / strategy / "report" / f"live-{timestamp}"
+
+
 def latest_report_strategy_dir() -> Path | None:
     dirs = report_dirs()
     if not dirs:
@@ -377,6 +419,22 @@ def show_latest_report(wait: bool = True, clear: bool = True) -> None:
         clear_screen()
     if summary is None:
         print("没有找到已完成报告 summary.json")
+        if wait:
+            wait_key()
+        return
+    print(f"总结：{summary.relative_to(ROOT)}")
+    print()
+    print_summary_tables(summary)
+    if wait:
+        wait_key()
+
+
+def show_report(report_dir: Path, wait: bool = True, clear: bool = True) -> None:
+    if clear:
+        clear_screen()
+    summary = report_dir / SUMMARY_FILE
+    if not summary.exists():
+        print(f"未找到：{summary.relative_to(ROOT)}")
         if wait:
             wait_key()
         return
@@ -429,15 +487,17 @@ def run_interactive() -> None:
     selected_config = None
     while True:
         if selected_config is None:
-            selected_config = choose_main(menu_config_names(), running_options() + [REPORT_OPTION])
-            if selected_config is None:
+            selected = choose_main(menu_config_names(), running_options(), report_options())
+            if selected is None:
                 return
-            if selected_config == REPORT_OPTION:
-                show_latest_report(wait=False)
+            menu, value = selected
+            if menu == MENU_SUMMARY:
+                show_report(report_by_label(value), wait=False, clear=False)
                 return
-            if selected_config.startswith("运行中："):
-                run_monitor(selected_config.removeprefix("运行中："))
+            if menu == MENU_RUNNING:
+                run_monitor(value.removeprefix("运行中："))
                 return
+            selected_config = value
 
         if os.name == "nt":
             selected_label = choose(
@@ -474,8 +534,20 @@ def main() -> None:
         run(sys.argv[1], parse_mode(sys.argv[2]))
         return
 
+    if len(sys.argv) == 4:
+        config_name = sys.argv[1]
+        mode = parse_mode(sys.argv[2])
+        style = parse_style(sys.argv[3])
+        if style == "background":
+            run_background(config_name, mode)
+        else:
+            if mode == "backtest":
+                show_backtest_running(config_name)
+            run(config_name, mode)
+        return
+
     if len(sys.argv) != 1:
-        raise ValueError("Usage: python run.py [config_name] [backtest|testnet|live]")
+        raise ValueError("Usage: python run.py [config_name] [backtest|testnet|live] [background|foreground]")
 
     if not sys.stdin.isatty():
         raise RuntimeError("交互模式需要真实终端；非终端环境请用 python run.py 配置名 模式")

@@ -7,20 +7,19 @@ strategy:
   case_params:
     binance_id: ANTHROPICUSDT-PERP.BINANCE
     okx_id: ANTHROPIC-USDT-SWAP.OKX
-    feature_path: strategies/pre_ipo/backtest_data/anthropic_features_6d.parquet
-    qty: "0.3"
-    capture_bps: 70
-    std_mult: 0
-    short_exit_bps: -30
-    long_exit_bps: -30
-    short_entry_bps: 50
-    long_entry_bps: 50
+    feature_path: strategies/pre_ipo/backtest_data/anth_0628_features.parquet
+    qty: 0.5
+    capture_bps: [70]
+    short_entry_bps: [60]
+    long_entry_bps: [60]
+    std_mult: [2.6]
+    short_exit_bps: [-15]
+    long_exit_bps: [-15]
     window_minutes: 360
     warmup_minutes: 360
     min_hold_sec: 0
-    end_ns: 1782824399624265984
-
-
+    signal_delay_ms: 0
+    end_ns: 1782903599677340985
 
 data:
   clients:
@@ -36,6 +35,7 @@ data:
           timeframe: 1s
 
 backtest:
+  max_workers: 8
   venues:
     - client: binance_futures
       starting_balance: "100 USDT"
@@ -44,8 +44,8 @@ backtest:
       default_leverage: "5"
       use_market_order_acks: true
       latency:
-        base_latency_ms: 100
-        insert_latency_ms: 00
+        base_latency_ms: 5
+        insert_latency_ms: 15
         update_latency_ms: 0
         cancel_latency_ms: 0
     - client: okx_swap
@@ -55,13 +55,13 @@ backtest:
       default_leverage: "5"
       use_market_order_acks: true
       latency:
-        base_latency_ms: 100
-        insert_latency_ms: 00
+        base_latency_ms: 5
+        insert_latency_ms: 30
         update_latency_ms: 0
         cancel_latency_ms: 0
   datasets:
     - type: quote_tick_objects
-      path: strategies/pre_ipo/backtest_data/anthropic_quote_ticks_6d.pkl
+      path: strategies/pre_ipo/backtest_data/anth_0628_quote_ticks.pkl
   logging:
     log_level: ERROR
     bypass: true

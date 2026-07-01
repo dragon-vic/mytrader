@@ -68,6 +68,8 @@ def action_table(rows: list[dict[str, str]]) -> Table:
         ("signal_edge", "信号edge", "right"),
         ("edge_slippage", "edge滑点", "right"),
         ("fill_slippage", "成交滑点", "right"),
+        ("bn_latency", "bn_latency", "right"),
+        ("okx_latency", "okx_latency", "right"),
         ("mean", "均值", "right"),
         ("std", "波动", "right"),
         ("inventory", "库存", "right"),
@@ -264,4 +266,3 @@ if __name__ == "__main__":
         1.0,
         sys.argv[2] if len(sys.argv) > 2 else None,
     )
-

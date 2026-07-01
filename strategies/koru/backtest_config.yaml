@@ -17,7 +17,7 @@ strategy:
     min_hold_sec: 60
     entry_filter: slow
     entry_slope_ms: 5000
-    end_ns: 1782824399976292511
+    end_ns: 1782903599607223896
 
 data:
   clients:
@@ -33,6 +33,7 @@ data:
           timeframe: 1s
 
 backtest:
+  max_workers: 4
   venues:
     - client: binance_futures
       starting_balance: "100000 USDT"

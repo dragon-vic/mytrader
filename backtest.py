@@ -355,12 +355,12 @@ def merged_case_params(params: dict[str, Any], case_params: dict[str, Any], tota
     return merged
 
 
-# 多进程运行批处理，每个组合一个独立 report 目录。
+# 多进程运行批处理：同一批次放在一个父目录下，每个组合一个子 report 目录。
 def run_batch(cases: list[dict[str, Any]]) -> dict[str, Any]:
     started_at = os.environ.get("NT_RUN_STARTED_AT") or datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d%H%M%S")
     claimed = [claim_batch_case(case, started_at, index) for index, case in enumerate(cases)]
-    workers = 4
-    print(f"批处理回测：{len(claimed)} 组参数，{workers} 进程", flush=True)
+    workers = batch_workers(claimed[0], len(claimed))
+    print(f"批处理回测：{len(claimed)} 组参数，最多 {settings_max_workers(claimed[0])} 进程，实际 {workers} 进程", flush=True)
     started = time.perf_counter()
     results = []
     with ProcessPoolExecutor(max_workers=workers) as executor:
@@ -370,10 +370,23 @@ def run_batch(cases: list[dict[str, Any]]) -> dict[str, Any]:
     return {"total_elapsed_sec": total_elapsed, "cases": results}
 
 
+# 从 YAML 读取批量回测最多进程数。
+def settings_max_workers(settings: dict[str, Any]) -> int:
+    workers = int(settings["backtest"]["max_workers"])
+    if workers < 1:
+        raise ValueError("backtest.max_workers must be >= 1")
+    return workers
+
+
+def batch_workers(settings: dict[str, Any], case_count: int) -> int:
+    return min(settings_max_workers(settings), case_count)
+
+
 def claim_batch_case(settings: dict[str, Any], started_at: str, index: int) -> dict[str, Any]:
     os.environ["NT_RUN_STARTED_AT"] = started_at
     claimed = claim_run(settings)
-    claimed["runtime"]["report_dir_name"] = f"backtest-{started_at}-{index:03d}"
+    parent = f"backtest-{started_at}"
+    claimed["runtime"]["report_dir_name"] = f"{parent}/backtest-{started_at}-{index:03d}"
     return claimed
 
 

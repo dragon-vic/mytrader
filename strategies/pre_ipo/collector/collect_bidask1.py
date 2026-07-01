@@ -349,13 +349,14 @@ async def write_chunks(
 
 
 def write_parts(rows: list[dict], raw_dir: Path, schema: pa.Schema) -> None:
-    by_hour: dict[str, list[dict]] = {}
+    by_part: dict[tuple[str, str], list[dict]] = {}
     for row in rows:
-        by_hour.setdefault(hour_key(int(row["ts_local_ns"])), []).append(row)
-    for key, hour_rows in by_hour.items():
-        out_dir = raw_dir / key
+        key = (str(row["symbol"]).upper(), hour_key(int(row["ts_local_ns"])))
+        by_part.setdefault(key, []).append(row)
+    for (asset, hour), part_rows in by_part.items():
+        out_dir = raw_dir / asset / hour
         out_dir.mkdir(parents=True, exist_ok=True)
-        data = {name: [row.get(name) for row in hour_rows] for name in schema.names}
+        data = {name: [row.get(name) for row in part_rows] for name in schema.names}
         table = pa.Table.from_pydict(data, schema=schema)
         path = out_dir / f"part-{time.time_ns()}.parquet"
         pq.write_table(table, path, compression="zstd")
@@ -407,27 +408,31 @@ def compact_one(
     include_current: bool,
 ) -> None:
     current = current_hour_key()
-    for hour_dir in sorted(path for path in raw_dir.glob("*") if path.is_dir()):
-        key = hour_dir.name
-        if not include_current and key >= current:
-            continue
-        files = sorted(hour_dir.glob("*.parquet"))
-        if not files:
+    for asset_dir in sorted(path for path in raw_dir.glob("*") if path.is_dir()):
+        asset = asset_dir.name.upper()
+        for hour_dir in sorted(path for path in asset_dir.glob("*") if path.is_dir()):
+            key = hour_dir.name
+            if not include_current and key >= current:
+                continue
+            files = sorted(hour_dir.glob("*.parquet"))
+            if not files:
+                hour_dir.rmdir()
+                continue
+            asset_merged_dir = merged_dir / asset
+            asset_merged_dir.mkdir(parents=True, exist_ok=True)
+            out_path = asset_merged_dir / f"{prefix}-{key}.parquet"
+            inputs = [str(path) for path in files]
+            if out_path.exists():
+                inputs.insert(0, str(out_path))
+            table = ds.dataset(inputs, format="parquet").to_table(columns=schema.names)
+            table = table.sort_by(sort_by)
+            tmp_path = out_path.with_suffix(".parquet.tmp")
+            pq.write_table(table, tmp_path, compression="zstd", row_group_size=100_000)
+            tmp_path.replace(out_path)
+            for path in files:
+                path.unlink()
             hour_dir.rmdir()
-            continue
-        out_path = merged_dir / f"{prefix}-{key}.parquet"
-        inputs = [str(path) for path in files]
-        if out_path.exists():
-            inputs.insert(0, str(out_path))
-        table = ds.dataset(inputs, format="parquet").to_table(columns=schema.names)
-        table = table.sort_by(sort_by)
-        tmp_path = out_path.with_suffix(".parquet.tmp")
-        pq.write_table(table, tmp_path, compression="zstd", row_group_size=100_000)
-        tmp_path.replace(out_path)
-        for path in files:
-            path.unlink()
-        hour_dir.rmdir()
-        write_log(f"compacted {label} hour={key} files={len(files)} rows={table.num_rows} out={out_path.name}")
+            write_log(f"compacted {label} asset={asset} hour={key} files={len(files)} rows={table.num_rows} out={out_path.name}")
 
 
 def asset_symbol(raw_symbol: str) -> str:
@@ -519,7 +524,7 @@ def current_rss_mb() -> int:
 
 
 def raw_file_count(raw_dir: Path) -> int:
-    return sum(1 for path in raw_dir.glob("*/*.parquet") if path.is_file())
+    return sum(1 for path in raw_dir.glob("*/*/*.parquet") if path.is_file())
 
 
 def write_log(text: str) -> None:

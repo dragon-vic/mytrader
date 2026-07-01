@@ -11,6 +11,12 @@ from utils.instrument_factory import InstrumentFactory
 from utils.report_writer import run_reports_dir
 
 
+def decimal_param(value: object) -> Decimal:
+    if isinstance(value, bool):
+        raise TypeError("numeric parameter must not be bool")
+    return Decimal(str(value))
+
+
 # 根据 set 里的策略类配置动态构建策略实例。
 def build_strategy(settings: dict[str, Any], run_type: str = "backtest"):
     strategy = settings["strategy"]
@@ -62,7 +68,7 @@ def strategy_params(
             params["bar_types"] = instruments.bar_types()
     for key, value in list(params.items()):
         if fields.get(key) is Decimal:
-            params[key] = Decimal(str(value))
+            params[key] = decimal_param(value)
     if params.get("external_order_claims") is True:
         instruments = strategy_instruments(settings, run_type, params)
         params["external_order_claims"] = [
