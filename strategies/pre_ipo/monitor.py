@@ -134,7 +134,36 @@ def risk_table(rows: dict[str, dict[str, str]]) -> Table:
         return table
     for venue, values in rows.items():
         table.add_row(str(venue), *(str(values.get(key, "-")) for key, _ in metrics))
+    table.add_row("TOTAL", *(risk_total_value(rows, key) for key, _ in metrics), style="bold")
     return table
+
+
+def risk_total_value(rows: dict[str, dict[str, str]], key: str) -> str:
+    if key == "status":
+        return "HIGH" if any(str(values.get(key, "")).upper() == "HIGH" for values in rows.values()) else "OK"
+    values = [parse_number(values.get(key, "-")) for values in rows.values()]
+    values = [value for value in values if value is not None]
+    if not values:
+        return "-"
+    suffix = "%" if key == "risk_rate" else ""
+    return format_number(sum(values), suffix)
+
+
+def parse_number(value: object) -> float | None:
+    text = str(value).strip().replace(",", "")
+    if text in {"", "-", "nan", "None"}:
+        return None
+    text = text.removesuffix("%")
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def format_number(value: float, suffix: str = "") -> str:
+    if value == int(value):
+        return f"{int(value)}{suffix}"
+    return f"{value:.2f}".rstrip("0").rstrip(".") + suffix
 
 
 def build_view(payload: dict, path: Path, session_name: str | None, page: int = 0, stopping: bool = False) -> Group:
