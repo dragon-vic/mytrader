@@ -1005,8 +1005,12 @@ class PreIpoStrategy(Strategy):
         version = self.signal_alert_versions[asset]
         self.signal_alerts.add(asset)
         self.signal_alert_sides[asset] = edge_side
+        delay_ns = self._grid_signal_delay_ns(asset, edge_side)
+        if delay_ns <= 0:
+            self._on_signal_alert(asset, edge_side, version)
+            return
         alert_name = self._signal_alert_name(asset)
-        alert_ns = now_ns + self._grid_signal_delay_ns(asset, edge_side)
+        alert_ns = now_ns + delay_ns
         self.clock.set_time_alert_ns(
             alert_name,
             alert_ns,
