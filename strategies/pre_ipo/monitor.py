@@ -60,7 +60,6 @@ def market_table(asset: str, rows: list[dict[str, str]]) -> Table:
 def action_table(rows: list[dict[str, str]]) -> Table:
     table = Table(title="Actions", expand=True)
     columns = (
-        ("lot", "lot", "right"),
         ("asset", "标的", "left"),
         ("action", "动作", "center"),
         ("status", "状态", "center"),
@@ -72,9 +71,7 @@ def action_table(rows: list[dict[str, str]]) -> Table:
         ("okx_latency", "okx_latency", "right"),
         ("mean", "均值", "right"),
         ("std", "波动", "right"),
-        ("inventory", "库存", "right"),
         ("time", "北京时间", "left"),
-        ("age_min", "分钟", "right"),
     )
     for key, label, justify in columns:
         table.add_column(label, justify=justify, no_wrap=key != "time")
@@ -88,12 +85,53 @@ def action_table(rows: list[dict[str, str]]) -> Table:
 
 def action_value(row: dict[str, str], key: str) -> str:
     if key == "action":
-        side = str(row.get("edge_side", ""))
-        if side == "long_edge":
-            return "long"
-        if side == "short_edge":
-            return "short"
+        return action_label(row)
     return str(row.get(key, "-"))
+
+
+def action_label(row: dict[str, str]) -> str:
+    before, after = inventory_transition(row.get("inventory"))
+    arrow = action_arrow(before, after, row.get("edge_side"))
+    operation = action_operation(before, after, row.get("action"))
+    if arrow == "-":
+        return operation
+    if operation == "-":
+        return arrow
+    return f"{arrow} {operation}"
+
+
+def inventory_transition(value: object) -> tuple[float | None, float | None]:
+    parts = str(value or "").split("->", 1)
+    if len(parts) != 2:
+        return None, None
+    return parse_number(parts[0]), parse_number(parts[1])
+
+
+def action_arrow(before: float | None, after: float | None, edge_side: object) -> str:
+    signed = after if after not in (None, 0) else before
+    if signed is not None:
+        if signed > 0:
+            return "↑"
+        if signed < 0:
+            return "↓"
+    side = str(edge_side or "")
+    if side == "long_edge":
+        return "↑"
+    if side == "short_edge":
+        return "↓"
+    return "-"
+
+
+def action_operation(before: float | None, after: float | None, raw_action: object) -> str:
+    if before is not None and after is not None:
+        before_abs = abs(before)
+        after_abs = abs(after)
+        if after_abs > before_abs:
+            return "open" if before_abs == 0 else "add"
+        if after_abs < before_abs:
+            return "close" if after_abs == 0 else "reduce"
+    action = str(raw_action or "").strip().lower()
+    return action if action in {"open", "close", "add", "reduce"} else "-"
 
 
 def summary_table(rows: dict[str, dict[str, str]]) -> Table:

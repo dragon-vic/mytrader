@@ -8,18 +8,26 @@ import time
 from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
 from decimal import Decimal
+from decimal import ROUND_CEILING
+from decimal import ROUND_FLOOR
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 from nautilus_trader.backtest.engine import BacktestEngine
+from nautilus_trader.backtest.models import FillModel
 from nautilus_trader.backtest.models import LatencyModel
+from nautilus_trader.backtest.models import OneTickSlippageFillModel
 from nautilus_trader.config import BacktestEngineConfig
 from nautilus_trader.config import LoggingConfig
+from nautilus_trader.model.book import OrderBook
 from nautilus_trader.model.data import QuoteTick
+from nautilus_trader.model.data import BookOrder
 from nautilus_trader.model.enums import AccountType
+from nautilus_trader.model.enums import BookType
 from nautilus_trader.model.enums import OmsType
+from nautilus_trader.model.enums import OrderSide
 from nautilus_trader.model.identifiers import Venue
 from nautilus_trader.model.objects import Money
 from nautilus_trader.model.objects import Price
@@ -39,6 +47,59 @@ from utils.report_writer import write_backtest_result
 from utils.report_writer import write_trader_reports
 from utils.runtime_ids import claim_run
 from utils.strategy_factory import build_strategy
+
+
+class BpsSlippageFillModel(FillModel):
+    def __init__(self, slippage_bps: Decimal) -> None:
+        super().__init__(prob_fill_on_limit=1.0, prob_slippage=0.0)
+        self.slippage_bps = slippage_bps
+
+    # 用模拟盘口强制成交价包含固定 bps 滑点。
+    def get_orderbook_for_fill_simulation(
+        self,
+        instrument,
+        order,
+        best_bid: Price,
+        best_ask: Price,
+    ) -> OrderBook:
+        unlimited = 1_000_000
+        bid_price = bps_price(
+            best_bid,
+            instrument.price_increment.as_decimal(),
+            instrument.price_precision,
+            Decimal("-1"),
+            self.slippage_bps,
+        )
+        ask_price = bps_price(
+            best_ask,
+            instrument.price_increment.as_decimal(),
+            instrument.price_precision,
+            Decimal("1"),
+            self.slippage_bps,
+        )
+
+        book = OrderBook(instrument_id=instrument.id, book_type=BookType.L2_MBP)
+        book.add(
+            BookOrder(
+                side=OrderSide.BUY,
+                price=bid_price,
+                size=Quantity(unlimited, instrument.size_precision),
+                order_id=1,
+            ),
+            0,
+            0,
+        )
+        book.add(
+            BookOrder(
+                side=OrderSide.SELL,
+                price=ask_price,
+                size=Quantity(unlimited, instrument.size_precision),
+                order_id=2,
+            ),
+            0,
+            0,
+        )
+        return book
 
 
 # 为当前 set 创建一个新的 NT 回测引擎。
@@ -88,6 +149,8 @@ def add_venues(engine: BacktestEngine, settings: dict[str, Any]) -> None:
             kwargs["default_leverage"] = Decimal(str(venue["default_leverage"]))
         if "latency" in venue:
             kwargs["latency_model"] = latency_model(venue["latency"])
+        if "fill_model" in venue:
+            kwargs["fill_model"] = fill_model(venue["fill_model"])
         engine.add_venue(
             venue=Venue(venue["client_config"]["venue"]),
             oms_type=getattr(OmsType, venue["oms_type"]),
@@ -107,6 +170,36 @@ def latency_model(cfg: dict[str, Any]) -> LatencyModel:
         update_latency_nanos=latency_ms(cfg["update_latency_ms"], ns_per_ms),
         cancel_latency_nanos=latency_ms(cfg["cancel_latency_ms"], ns_per_ms),
     )
+
+
+# YAML 配置回测成交模型；默认模型的 prob_slippage 是一跳滑点概率，不是 bps。
+def fill_model(cfg: dict[str, Any]) -> FillModel:
+    model_type = str(cfg["type"])
+    if model_type == "default":
+        random_seed = cfg.get("random_seed")
+        return FillModel(
+            prob_fill_on_limit=float(str(cfg["prob_fill_on_limit"])),
+            prob_slippage=float(str(cfg["prob_slippage"])),
+            random_seed=int(random_seed) if random_seed is not None else None,
+        )
+    if model_type == "one_tick_slippage":
+        return OneTickSlippageFillModel()
+    if model_type == "bps_slippage":
+        return BpsSlippageFillModel(Decimal(str(cfg["slippage_bps"])))
+    raise ValueError(f"Unsupported backtest fill_model type: {model_type}")
+
+
+def bps_price(
+    price: Price,
+    tick: Decimal,
+    precision: int,
+    side: Decimal,
+    slippage_bps: Decimal,
+) -> Price:
+    raw = price.as_decimal() * (Decimal("1") + side * slippage_bps / Decimal("10000"))
+    rounding = ROUND_CEILING if side > 0 else ROUND_FLOOR
+    aligned = (raw / tick).to_integral_value(rounding=rounding) * tick
+    return Price.from_str(f"{aligned:.{precision}f}")
 
 
 def latency_ms(value: Any, ns_per_ms: int) -> int:

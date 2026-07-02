@@ -31,10 +31,14 @@ from nautilus_trader.model.currencies import USDT
 from nautilus_trader.model.data import QuoteTick
 from nautilus_trader.model.enums import OrderSide
 from nautilus_trader.model.enums import TimeInForce
+from nautilus_trader.model.events import OrderAccepted
 from nautilus_trader.model.events import OrderCanceled
+from nautilus_trader.model.events import OrderCancelRejected
+from nautilus_trader.model.events import OrderDenied
 from nautilus_trader.model.events import OrderExpired
 from nautilus_trader.model.events import OrderFilled
 from nautilus_trader.model.events import OrderRejected
+from nautilus_trader.model.events import OrderSubmitted
 from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.model.objects import Quantity
 from nautilus_trader.model.orders import MarketOrder
@@ -75,7 +79,6 @@ class ArbLeg:
 
 @dataclass
 class ArbPos:
-    lot_id: int
     asset: str
     buy_id: InstrumentId
     sell_id: InstrumentId
@@ -84,6 +87,7 @@ class ArbPos:
     entry_buy_avg_px: Decimal | None
     entry_sell_avg_px: Decimal | None
     entry_fee: Decimal
+    base_qty: Decimal
     buy_qty: Decimal
     sell_qty: Decimal
     edge_bps: Decimal
@@ -121,13 +125,23 @@ class PendingLeg:
     best_px: Decimal | None = None
     submit_ns: int | None = None
     fill_event_ns: int | None = None
+    submitted: bool = False
+    accepted: bool = False
+    terminal: bool = False
+    cancel_requested: bool = False
+    failed: bool = False
+    hedge_order: MarketOrder | None = None
+    hedge_order_id: str | None = None
+    hedge_target_qty: Decimal = Decimal("0")
+    hedge_filled_qty: Decimal = Decimal("0")
+    hedge_terminal: bool = False
 
 
 @dataclass
 class PendingBatch:
     asset: str
     action: str
-    lot_id: int
+    batch_id: int
     buy_id: InstrumentId
     sell_id: InstrumentId
     buy_px: Decimal
@@ -139,14 +153,15 @@ class PendingBatch:
     created_ns: int
     legs: dict[str, PendingLeg]
     edge_side: str = SHORT_EDGE
-    before_inventory: int = 0
-    after_inventory: int = 0
+    before_inventory: Decimal = Decimal("0")
+    after_inventory: Decimal = Decimal("0")
     grid_level: int | None = None
-    close_lot_id: int | None = None
     expected_capture_bps: Decimal | None = None
-    inventory_delta: int = 0
+    inventory_delta: Decimal = Decimal("0")
     open_qty: Decimal = Decimal("0")
     close_qty: Decimal = Decimal("0")
+    resolving: bool = False
+    resolved_reason: str | None = None
 
 
 @dataclass
@@ -154,7 +169,8 @@ class ActionCandidate:
     score: float
     order_state: SpreadState
     signal_edge_side: str
-    close_lot_id: int | None = None
+    action: str = OPEN
+    order_qty: Decimal = Decimal("0")
     expected_capture_bps: Decimal | None = None
     grid_level: int | None = None
 
@@ -232,9 +248,7 @@ class SpreadWindow:
 class PreIpoConfig(StrategyConfig, frozen=True):
     instruments: list[str]
     assets: list[str]
-    min_window_sec: float
-    init_fetch_sec: float
-    grid_center_sec: float
+    window_minutes: float
     price_multipliers: dict[str, object]
     qty_multipliers: dict[str, object]
     asset_grid_params: dict[str, dict[str, object]]
@@ -259,9 +273,8 @@ class PreIpoStrategy(Strategy):
         self.assets = [asset.upper() for asset in config.assets]
         self.instrument_assets = {instrument_id: self._parse_asset(instrument_id) for instrument_id in self.instruments}
         self.instrument_venues = {instrument_id: str(instrument_id.venue).upper() for instrument_id in self.instruments}
-        self.min_window_ns = int(float(config.min_window_sec) * 1_000_000_000)
-        self.init_fetch_sec = float(config.init_fetch_sec)
-        self.grid_center_ns = int(float(config.grid_center_sec) * 1_000_000_000)
+        self.window_minutes = float(config.window_minutes)
+        self.window_ns = int(self.window_minutes * MINUTE_NS)
         self.price_multipliers = {key.upper(): decimal_param(value) for key, value in config.price_multipliers.items()}
         self.qty_multipliers = {key.upper(): decimal_param(value) for key, value in config.qty_multipliers.items()}
         self.asset_grid_params = {key.upper(): dict(value) for key, value in config.asset_grid_params.items()}
@@ -280,11 +293,11 @@ class PreIpoStrategy(Strategy):
         self.windows: dict[tuple[str, str, InstrumentId, InstrumentId], SpreadWindow] = {}
         self.stopped = False
         self.stop_requested = False
-        self.next_lot_id = 1
-        self.positions: dict[int, ArbPos] = {}
+        self.next_batch_id = 1
+        self.positions: dict[str, ArbPos] = {}
         self.pending: dict[int, PendingBatch] = {}
         self.failed_orders: dict[str, PendingBatch] = {}
-        self.order_lot: dict[str, int] = {}
+        self.order_batch: dict[str, int] = {}
         self.signal_alerts: set[str] = set()
         self.signal_alert_versions: dict[str, int] = defaultdict(int)
         self.signal_alert_sides: dict[str, str] = {}
@@ -305,12 +318,8 @@ class PreIpoStrategy(Strategy):
         self.housekeeping_alert_seq = 0
 
     def on_start(self) -> None:
-        if self.min_window_ns < 0:
-            raise RuntimeError("min_window_sec must be non-negative")
-        if self.init_fetch_sec <= 0:
-            raise RuntimeError("init_fetch_sec must be positive")
-        if self.grid_center_ns <= 0:
-            raise RuntimeError("grid_center_sec must be positive")
+        if self.window_ns <= 0:
+            raise RuntimeError("window_minutes must be positive")
         for venue, multiplier in self.price_multipliers.items():
             if multiplier <= 0:
                 raise RuntimeError(f"price_multipliers.{venue} must be positive")
@@ -336,6 +345,8 @@ class PreIpoStrategy(Strategy):
                 raise RuntimeError(f"min_hold_sec must be non-negative for {asset}")
             if self._asset_trade_qty(asset) < 0:
                 raise RuntimeError(f"trade_qty must be non-negative for {asset}")
+            if self._asset_max_position(asset) <= 0:
+                raise RuntimeError(f"max_position must be positive for {asset}")
         self._warm_initial_windows()
         if self.config.snapshot_interval_sec < 0:
             raise RuntimeError("snapshot_interval_sec must be non-negative")
@@ -520,41 +531,71 @@ class PreIpoStrategy(Strategy):
                 leg.fill_event_ns = max(leg.fill_event_ns or 0, int(event.ts_event))
                 self.log.error(
                     f"failed_action_late_fill {failed_batch.asset} action={failed_batch.action} "
-                    f"lot={failed_batch.lot_id} order={order_id} last_qty={event.last_qty}",
+                    f"batch={failed_batch.batch_id} order={order_id} last_qty={event.last_qty}",
                 )
                 self._try_submit_emergency(leg.instrument_id, self._opposite(leg.side), fill_qty)
             return
-        lot_id = self.order_lot.get(order_id)
-        if lot_id is None:
+        batch_id = self.order_batch.get(order_id)
+        if batch_id is None:
             return
-        batch = self.pending.get(lot_id)
-        if batch is None or order_id not in batch.legs:
+        batch = self.pending.get(batch_id)
+        if batch is None:
             return
-        leg = batch.legs[order_id]
         fill_qty = Decimal(str(event.last_qty))
         fill_px = self._event_px(event)
+        leg = self._batch_leg(batch, order_id)
+        if leg is None:
+            return
+        if order_id == leg.hedge_order_id:
+            leg.hedge_filled_qty += fill_qty
+            leg.fill_event_ns = max(leg.fill_event_ns or 0, int(event.ts_event))
+            if leg.hedge_filled_qty >= leg.hedge_target_qty:
+                leg.hedge_terminal = True
+            self.log.warning(
+                f"resolve_fill {batch.asset} batch={batch_id} order={order_id} "
+                f"{leg.instrument_id} filled={leg.hedge_filled_qty}/{leg.hedge_target_qty}",
+            )
+            self._resolve_failed_batch(batch)
+            return
         leg.filled_qty += fill_qty
         leg.filled_value += fill_px * fill_qty
         self._update_best_fill_px(leg, fill_px)
         leg.filled_fee += self._event_fee(event)
         leg.fill_event_ns = max(leg.fill_event_ns or 0, int(event.ts_event))
+        if self._leg_filled(leg):
+            leg.terminal = True
         fill_state = "filled" if self._leg_filled(leg) else "partial"
         self.log.info(
-            f"{fill_state}_fill {batch.asset} action={batch.action} lot={lot_id} order={order_id} "
+            f"{fill_state}_fill {batch.asset} action={batch.action} batch={batch_id} order={order_id} "
             f"{leg.instrument_id} filled={leg.filled_qty}/{leg.target_qty}",
         )
+        if batch.resolving:
+            self._resolve_failed_batch(batch)
+            return
         if not self._batch_filled(batch):
             return
         self._confirm_open(batch)
 
+    def on_order_submitted(self, event: OrderSubmitted) -> None:
+        self._mark_order_submitted(str(event.client_order_id), accepted=False)
+
+    def on_order_accepted(self, event: OrderAccepted) -> None:
+        self._mark_order_submitted(str(event.client_order_id), accepted=True)
+
     def on_order_rejected(self, event: OrderRejected) -> None:
         self._handle_order_failed(str(event.client_order_id), f"rejected: {event.reason}")
 
+    def on_order_denied(self, event: OrderDenied) -> None:
+        self._handle_order_failed(str(event.client_order_id), f"denied: {event.reason}")
+
     def on_order_canceled(self, event: OrderCanceled) -> None:
-        self._handle_order_failed(str(event.client_order_id), "canceled")
+        self._handle_order_terminal(str(event.client_order_id), "canceled")
 
     def on_order_expired(self, event: OrderExpired) -> None:
         self._handle_order_failed(str(event.client_order_id), "expired")
+
+    def on_order_cancel_rejected(self, event: OrderCancelRejected) -> None:
+        self._handle_order_failed(str(event.client_order_id), f"cancel_rejected: {event.reason}")
 
     def on_stop(self) -> None:
         self._flatten_on_stop()
@@ -581,7 +622,7 @@ class PreIpoStrategy(Strategy):
 
     def _warm_initial_windows(self) -> None:
         end_ns = time.time_ns()
-        start_ns = end_ns - int(self.init_fetch_sec * 1_000_000_000)
+        start_ns = end_ns - self.window_ns
         paths = self._collector_quote_files(start_ns, end_ns)
         started = time.perf_counter()
         quotes = self._load_collector_quotes(paths, start_ns, end_ns)
@@ -706,12 +747,12 @@ class PreIpoStrategy(Strategy):
                 short_key = (asset, SHORT_EDGE, binance_id, other_id)
                 for row in edge.itertuples(index=False):
                     ts_ns = int(row.ts_local_ns)
-                    self.windows.setdefault(long_key, SpreadWindow()).add(ts_ns, float(row.long_edge), self.grid_center_ns)
-                    self.windows.setdefault(short_key, SpreadWindow()).add(ts_ns, float(row.short_edge), self.grid_center_ns)
+                    self.windows.setdefault(long_key, SpreadWindow()).add(ts_ns, float(row.long_edge), self.window_ns)
+                    self.windows.setdefault(short_key, SpreadWindow()).add(ts_ns, float(row.short_edge), self.window_ns)
                 last = edge.iloc[-1]
                 if int(last["ts_local_ns"]) < end_ns:
-                    self.windows.setdefault(long_key, SpreadWindow()).add(end_ns, float(last["long_edge"]), self.grid_center_ns)
-                    self.windows.setdefault(short_key, SpreadWindow()).add(end_ns, float(last["short_edge"]), self.grid_center_ns)
+                    self.windows.setdefault(long_key, SpreadWindow()).add(end_ns, float(last["long_edge"]), self.window_ns)
+                    self.windows.setdefault(short_key, SpreadWindow()).add(end_ns, float(last["short_edge"]), self.window_ns)
                 warmed.add(long_key)
                 warmed.add(short_key)
         return warmed
@@ -797,7 +838,7 @@ class PreIpoStrategy(Strategy):
                 key = (asset, edge_side, buy.instrument_id, sell.instrument_id)
                 window = self.windows.setdefault(key, SpreadWindow())
                 if update_window:
-                    window.add(now_ns, float(edge), self.grid_center_ns)
+                    window.add(now_ns, float(edge), self.window_ns)
                 samples, mean, std, window_sec = window.stats()
                 stats = self._active_stats(samples, mean, std, window_sec)
                 if stats is None:
@@ -852,7 +893,7 @@ class PreIpoStrategy(Strategy):
     def _active_stats(self, samples: int, mean: float, std: float, window_sec: float) -> tuple[float, float] | None:
         if samples < 2 or std <= 0:
             return None
-        if window_sec * 1_000_000_000 < self.min_window_ns:
+        if window_sec * 1_000_000_000 < self.window_ns:
             return None
         return mean, std
 
@@ -887,29 +928,36 @@ class PreIpoStrategy(Strategy):
         edge_side: str | None = None,
     ) -> list[ActionCandidate]:
         inventory = self._asset_inventory(asset, include_pending=True)
-        if inventory == 0:
-            return self._entry_candidates(asset, states, edge_side)
-        if abs(inventory) != 1:
-            return []
-        return self._exit_candidates(asset, states, now_ns, edge_side, inventory)
+        candidates = self._exit_candidates(asset, states, now_ns, edge_side, inventory)
+        if candidates:
+            return candidates
+        return self._entry_candidates(asset, states, edge_side, inventory)
 
     def _entry_candidates(
         self,
         asset: str,
         states: dict[tuple[str, InstrumentId, InstrumentId], SpreadState],
         edge_side: str | None,
+        inventory: Decimal,
     ) -> list[ActionCandidate]:
         candidates: list[ActionCandidate] = []
         for state in states.values():
             if edge_side is not None and state.edge_side != edge_side:
                 continue
+            if not self._can_open(asset, state.edge_side, inventory):
+                continue
             if not self._entry_signal(asset, state):
+                continue
+            order_qty = self._open_qty(asset, inventory)
+            if order_qty <= 0:
                 continue
             candidates.append(
                 ActionCandidate(
                     score=abs(float(state.edge_bps) - state.mean_bps),
                     order_state=state,
                     signal_edge_side=state.edge_side,
+                    action=OPEN,
+                    order_qty=order_qty,
                 ),
             )
         return candidates
@@ -920,9 +968,9 @@ class PreIpoStrategy(Strategy):
         states: dict[tuple[str, InstrumentId, InstrumentId], SpreadState],
         now_ns: int,
         edge_side: str | None,
-        inventory: int,
+        inventory: Decimal,
     ) -> list[ActionCandidate]:
-        pos = self._single_position(asset, LONG_EDGE if inventory > 0 else SHORT_EDGE)
+        pos = self.positions.get(asset)
         if pos is None or now_ns < pos.opened_ns + self._min_hold_ns(asset):
             return []
         signal_side = pos.edge_side
@@ -941,7 +989,8 @@ class PreIpoStrategy(Strategy):
                 score=abs(float(signal_state.edge_bps) - signal_state.mean_bps),
                 order_state=order_state,
                 signal_edge_side=signal_state.edge_side,
-                close_lot_id=pos.lot_id,
+                action=CLOSE,
+                order_qty=self._close_qty(asset, inventory),
                 expected_capture_bps=capture,
             ),
         ]
@@ -954,8 +1003,8 @@ class PreIpoStrategy(Strategy):
     ) -> None:
         state = candidate.order_state
         before_inventory = self._asset_inventory(asset, include_pending=True)
-        sign = 1 if state.edge_side == LONG_EDGE else -1
-        inventory_delta = -before_inventory if candidate.close_lot_id is not None else sign
+        sign = Decimal("1") if state.edge_side == LONG_EDGE else Decimal("-1")
+        inventory_delta = -self._position_sign(before_inventory) * candidate.order_qty if candidate.action == CLOSE else sign * candidate.order_qty
         after_inventory = before_inventory + inventory_delta
         self._submit_edge_action(
             asset,
@@ -971,31 +1020,33 @@ class PreIpoStrategy(Strategy):
             before_inventory=before_inventory,
             after_inventory=after_inventory,
             inventory_delta=inventory_delta,
-            close_lot_id=candidate.close_lot_id,
+            action=candidate.action,
+            order_qty=candidate.order_qty,
             expected_capture_bps=candidate.expected_capture_bps,
         )
 
     def _candidate_has_open_balance(self, asset: str, candidate: ActionCandidate) -> bool:
         state = candidate.order_state
         before_inventory = self._asset_inventory(asset, include_pending=True)
-        sign = 1 if state.edge_side == LONG_EDGE else -1
-        inventory_delta = -before_inventory if candidate.close_lot_id is not None else sign
+        sign = Decimal("1") if state.edge_side == LONG_EDGE else Decimal("-1")
+        inventory_delta = -self._position_sign(before_inventory) * candidate.order_qty if candidate.action == CLOSE else sign * candidate.order_qty
         after_inventory = before_inventory + inventory_delta
         qtys = self._order_qtys(asset, state.buy.instrument_id, state.sell.instrument_id, self._asset_trade_qty(asset))
         if qtys is None:
             return False
         _, buy_qty, sell_qty = qtys
-        balance_lots = Decimal(max(abs(after_inventory) - abs(before_inventory), 0))
-        if candidate.close_lot_id is not None or balance_lots <= 0:
+        balance_qty = max(abs(after_inventory) - abs(before_inventory), Decimal("0"))
+        if candidate.action == CLOSE or balance_qty <= 0:
             return True
+        scale = balance_qty / self._asset_trade_qty(asset)
         return self._check_open_balances(
             asset,
             state.buy.instrument_id,
             state.buy.price,
-            buy_qty * balance_lots,
+            buy_qty * scale,
             state.sell.instrument_id,
             state.sell.price,
-            sell_qty * balance_lots,
+            sell_qty * scale,
         )
 
     def _schedule_signal_alert(self, asset: str, edge_side: str, now_ns: int) -> None:
@@ -1048,6 +1099,24 @@ class PreIpoStrategy(Strategy):
     def _signal_alert_name(self, asset: str) -> str:
         return f"preipo_grid_signal_{asset}"
 
+    def _position_sign(self, inventory: Decimal) -> Decimal:
+        if inventory > 0:
+            return Decimal("1")
+        if inventory < 0:
+            return Decimal("-1")
+        return Decimal("0")
+
+    def _can_open(self, asset: str, edge_side: str, inventory: Decimal) -> bool:
+        if abs(inventory) >= self._asset_max_position(asset):
+            return False
+        return inventory == 0 or (inventory > 0 and edge_side == LONG_EDGE) or (inventory < 0 and edge_side == SHORT_EDGE)
+
+    def _open_qty(self, asset: str, inventory: Decimal) -> Decimal:
+        return min(self._asset_trade_qty(asset), self._asset_max_position(asset) - abs(inventory))
+
+    def _close_qty(self, asset: str, inventory: Decimal) -> Decimal:
+        return min(self._asset_trade_qty(asset), abs(inventory))
+
     def _entry_signal(self, asset: str, state: SpreadState) -> bool:
         band = self._grid_entry_band_bps(asset, state)
         deviation = float(state.edge_bps) - state.mean_bps
@@ -1078,12 +1147,6 @@ class PreIpoStrategy(Strategy):
         edge_side: str,
     ) -> SpreadState | None:
         return next((state for state in states.values() if state.edge_side == edge_side), None)
-
-    def _single_position(self, asset: str, edge_side: str) -> ArbPos | None:
-        matches = [pos for pos in self.positions.values() if pos.asset == asset and pos.edge_side == edge_side]
-        if len(matches) != 1:
-            return None
-        return matches[0]
 
     def _asset_grid(self, asset: str) -> dict[str, object]:
         if asset is None:
@@ -1134,15 +1197,20 @@ class PreIpoStrategy(Strategy):
     def _asset_trade_qty(self, asset: str) -> Decimal:
         return decimal_param(self._asset_grid(asset)["trade_qty"])
 
-    def _asset_qty_log(self) -> dict[str, str]:
-        return {asset: str(self._asset_trade_qty(asset)) for asset in self.assets}
+    def _asset_max_position(self, asset: str) -> Decimal:
+        return decimal_param(self._asset_grid(asset)["max_position"])
 
-    def _asset_inventory(self, asset: str, include_pending: bool = False) -> int:
-        inventory = sum(
-            1 if pos.edge_side == LONG_EDGE else -1
-            for pos in self.positions.values()
-            if pos.asset == asset
-        )
+    def _asset_qty_log(self) -> dict[str, str]:
+        return {
+            asset: f"trade_qty={self._asset_trade_qty(asset)} max_position={self._asset_max_position(asset)}"
+            for asset in self.assets
+        }
+
+    def _asset_inventory(self, asset: str, include_pending: bool = False) -> Decimal:
+        pos = self.positions.get(asset)
+        inventory = Decimal("0")
+        if pos is not None:
+            inventory = pos.base_qty if pos.edge_side == LONG_EDGE else -pos.base_qty
         if include_pending:
             inventory += sum(
                 batch.inventory_delta
@@ -1151,30 +1219,8 @@ class PreIpoStrategy(Strategy):
             )
         return inventory
 
-    def _reduces_inventory(self, inventory: int, edge_side: str) -> bool:
+    def _reduces_inventory(self, inventory: Decimal, edge_side: str) -> bool:
         return (inventory > 0 and edge_side == SHORT_EDGE) or (inventory < 0 and edge_side == LONG_EDGE)
-
-    def _close_candidate(
-        self,
-        asset: str,
-        edge_side: str,
-        exit_edge: Decimal,
-        require_min_capture: bool = True,
-    ) -> tuple[ArbPos | None, Decimal | None]:
-        opposite = SHORT_EDGE if edge_side == LONG_EDGE else LONG_EDGE
-        best_pos: ArbPos | None = None
-        best_capture: Decimal | None = None
-        for pos in self.positions.values():
-            if pos.asset != asset or pos.edge_side != opposite:
-                continue
-            entry_edge = pos.actual_entry_edge_bps or pos.edge_bps
-            capture = self._capture_bps(pos.edge_side, entry_edge, exit_edge)
-            if require_min_capture and capture < self._capture_target_bps(asset):
-                continue
-            if best_capture is None or capture > best_capture:
-                best_pos = pos
-                best_capture = capture
-        return best_pos, best_capture
 
     def _submit_edge_action(
         self,
@@ -1188,29 +1234,31 @@ class PreIpoStrategy(Strategy):
         now_ns: int,
         grid_level: int | None = None,
         edge_side: str = SHORT_EDGE,
-        before_inventory: int = 0,
-        after_inventory: int = 0,
-        inventory_delta: int = 0,
-        close_lot_id: int | None = None,
+        before_inventory: Decimal = Decimal("0"),
+        after_inventory: Decimal = Decimal("0"),
+        inventory_delta: Decimal = Decimal("0"),
+        action: str = OPEN,
+        order_qty: Decimal = Decimal("0"),
         expected_capture_bps: Decimal | None = None,
     ) -> None:
         qtys = self._order_qtys(asset, buy.instrument_id, sell.instrument_id, self._asset_trade_qty(asset))
         if qtys is None:
             return
         base_qty, buy_qty, sell_qty = qtys
-        close_qty = base_qty if close_lot_id is not None else Decimal("0")
-        open_qty = base_qty if close_lot_id is None or abs(inventory_delta) == 2 else Decimal("0")
+        del base_qty, buy_qty, sell_qty
+        close_qty = order_qty if action == CLOSE else Decimal("0")
+        open_qty = order_qty if action == OPEN else Decimal("0")
         order_base_qty = close_qty + open_qty
         if order_base_qty <= 0:
             return
         buy_order_qty = self._leg_qty(asset, buy.instrument_id, order_base_qty)
         sell_order_qty = self._leg_qty(asset, sell.instrument_id, order_base_qty)
-        buy_balance_qty = buy_qty * Decimal(max(abs(after_inventory) - abs(before_inventory), 0))
-        sell_balance_qty = sell_qty * Decimal(max(abs(after_inventory) - abs(before_inventory), 0))
-        action = CLOSE if close_lot_id is not None else OPEN
-        lot_id = self._new_lot_id()
+        balance_qty = max(abs(after_inventory) - abs(before_inventory), Decimal("0"))
+        buy_balance_qty = self._leg_qty(asset, buy.instrument_id, balance_qty) if balance_qty > 0 else Decimal("0")
+        sell_balance_qty = self._leg_qty(asset, sell.instrument_id, balance_qty) if balance_qty > 0 else Decimal("0")
+        batch_id = self._new_batch_id()
         self.log.info(
-            f"edge_signal {asset} action={action} lot={lot_id} close_lot={close_lot_id or '-'} "
+            f"edge_signal {asset} action={action} batch={batch_id} "
             f"route={self._route(buy.instrument_id, sell.instrument_id)} "
             f"edge={edge_bps:.2f}bps side={edge_side} mean={mean_bps:.2f}bps std={std_bps:.2f}bps z={z_score:.2f} "
             f"base_qty={order_base_qty} buy_qty={buy_order_qty} sell_qty={sell_order_qty} open_qty={open_qty} close_qty={close_qty} "
@@ -1220,7 +1268,7 @@ class PreIpoStrategy(Strategy):
         batch = self._submit_batch(
             asset=asset,
             action=action,
-            lot_id=lot_id,
+            batch_id=batch_id,
             buy_id=buy.instrument_id,
             sell_id=sell.instrument_id,
             buy_px=buy.price,
@@ -1241,7 +1289,6 @@ class PreIpoStrategy(Strategy):
             inventory_delta=inventory_delta,
             open_qty=open_qty,
             close_qty=close_qty,
-            close_lot_id=close_lot_id,
             buy_balance_qty=buy_balance_qty,
             sell_balance_qty=sell_balance_qty,
             expected_capture_bps=expected_capture_bps,
@@ -1251,7 +1298,7 @@ class PreIpoStrategy(Strategy):
         self,
         asset: str,
         action: str,
-        lot_id: int,
+        batch_id: int,
         buy_id: InstrumentId,
         sell_id: InstrumentId,
         buy_px: Decimal,
@@ -1267,12 +1314,11 @@ class PreIpoStrategy(Strategy):
         sell_qty: Decimal | None = None,
         grid_level: int | None = None,
         edge_side: str = SHORT_EDGE,
-        before_inventory: int = 0,
-        after_inventory: int = 0,
-        inventory_delta: int = 0,
+        before_inventory: Decimal = Decimal("0"),
+        after_inventory: Decimal = Decimal("0"),
+        inventory_delta: Decimal = Decimal("0"),
         open_qty: Decimal = Decimal("0"),
         close_qty: Decimal = Decimal("0"),
-        close_lot_id: int | None = None,
         buy_balance_qty: Decimal = Decimal("0"),
         sell_balance_qty: Decimal = Decimal("0"),
         expected_capture_bps: Decimal | None = None,
@@ -1288,16 +1334,16 @@ class PreIpoStrategy(Strategy):
             sell_px,
             sell_balance_qty,
         ):
-            self.log.warning(f"open_skipped {asset} lot={lot_id} reason=insufficient_usdt")
+            self.log.warning(f"open_skipped {asset} batch={batch_id} reason=insufficient_usdt")
             return None
         buy_order_id = str(buy_order.client_order_id)
         sell_order_id = str(sell_order.client_order_id)
-        self.order_lot[buy_order_id] = lot_id
-        self.order_lot[sell_order_id] = lot_id
+        self.order_batch[buy_order_id] = batch_id
+        self.order_batch[sell_order_id] = batch_id
         batch = PendingBatch(
             asset=asset,
             action=action,
-            lot_id=lot_id,
+            batch_id=batch_id,
             buy_id=buy_id,
             sell_id=sell_id,
             buy_px=buy_px,
@@ -1331,25 +1377,27 @@ class PreIpoStrategy(Strategy):
             before_inventory=before_inventory,
             after_inventory=after_inventory,
             grid_level=grid_level,
-            close_lot_id=close_lot_id,
             expected_capture_bps=expected_capture_bps,
             inventory_delta=inventory_delta,
             open_qty=open_qty,
             close_qty=close_qty,
         )
-        self.pending[lot_id] = batch
+        # 先登记 pending/order 映射，再提交订单，避免同步订单事件早于状态更新。
+        self.pending[batch_id] = batch
         self.log.info(
-            f"submit_action_batch {asset} action={action} lot={lot_id} buy_order={buy_order_id} sell_order={sell_order_id} "
+            f"submit_action_batch {asset} action={action} batch={batch_id} buy_order={buy_order_id} sell_order={sell_order_id} "
             f"side={edge_side} inventory={before_inventory}->{after_inventory} "
             f"buy={buy_id} {buy_side} qty={buy_target} sell={sell_id} {sell_side} qty={sell_target}",
         )
         try:
             batch.legs[buy_order_id].submit_ns = self.clock.timestamp_ns()
             self.submit_order(buy_order)
+            if batch.resolving or batch.batch_id not in self.pending:
+                return batch
             batch.legs[sell_order_id].submit_ns = self.clock.timestamp_ns()
             self.submit_order(sell_order)
         except Exception as exc:
-            self.log.error(f"submit_batch_failed {asset} action={action} lot={lot_id} error={exc}")
+            self.log.error(f"submit_batch_failed {asset} action={action} batch={batch_id} error={exc}")
             self._fail_batch(batch, f"submit exception: {exc}")
         return batch
 
@@ -1662,8 +1710,8 @@ class PreIpoStrategy(Strategy):
     def _flatten_on_stop(self) -> None:
         if not self.positions:
             return
-        for lot_id, pos in list(self.positions.items()):
-            self.log.warning(f"flatten_action_inventory {pos.asset} lot={lot_id} reason=strategy_stop")
+        for pos in list(self.positions.values()):
+            self.log.warning(f"flatten_action_inventory {pos.asset} reason=strategy_stop")
             self._try_submit_emergency(pos.buy_id, OrderSide.SELL, pos.buy_qty)
             self._try_submit_emergency(pos.sell_id, OrderSide.BUY, pos.sell_qty)
 
@@ -1738,47 +1786,35 @@ class PreIpoStrategy(Strategy):
         actual_edge = self._actual_entry_edge_bps(batch)
         current_inventory = self._asset_inventory(batch.asset)
         reducing = self._reduces_inventory(current_inventory, batch.edge_side)
-        reduced_pos = None
         close_fee = self._filled_fee_share(batch, batch.close_qty)
         open_fee = self._filled_fee_share(batch, batch.open_qty)
+        pos_before_close = self.positions.get(batch.asset)
+        realized_capture = None
         if reducing:
-            reduced_pos = self._remove_closed_position(batch)
-            if reduced_pos is not None:
+            exit_edge = actual_edge if actual_edge is not None else batch.edge_bps
+            if pos_before_close is not None:
+                realized_capture = self._capture_bps(
+                    pos_before_close.edge_side,
+                    pos_before_close.actual_entry_edge_bps or pos_before_close.edge_bps,
+                    exit_edge,
+                )
                 self._record_realized(
                     batch.asset,
-                    reduced_pos,
-                    actual_edge if actual_edge is not None else batch.edge_bps,
-                    self._round_trip_pnl_usdt(reduced_pos, batch, close_fee),
+                    pos_before_close,
+                    exit_edge,
+                    self._round_trip_pnl_usdt(pos_before_close, batch, close_fee),
                 )
-        if batch.open_qty > 0 and (not reducing or reduced_pos is not None):
-            self.positions[batch.lot_id] = ArbPos(
-                lot_id=batch.lot_id,
-                asset=batch.asset,
-                buy_id=batch.buy_id,
-                sell_id=batch.sell_id,
-                buy_px=batch.buy_px,
-                sell_px=batch.sell_px,
-                entry_buy_avg_px=buy_avg,
-                entry_sell_avg_px=sell_avg,
-                entry_fee=open_fee,
-                buy_qty=self._leg_qty(batch.asset, batch.buy_id, batch.open_qty),
-                sell_qty=self._leg_qty(batch.asset, batch.sell_id, batch.open_qty),
-                edge_bps=batch.edge_bps,
-                actual_entry_edge_bps=actual_edge,
-                mean_bps=batch.mean_bps,
-                std_bps=batch.std_bps,
-                z_score=batch.z_score,
-                opened_ns=batch.created_ns,
-                edge_side=batch.edge_side,
-                grid_level=batch.grid_level,
-            )
+                self._reduce_position(batch, pos_before_close, close_fee)
+        entry_edge = actual_edge if actual_edge is not None else batch.edge_bps
+        if batch.open_qty > 0 and not reducing:
+            self._increase_position(batch, buy_avg, sell_avg, open_fee, entry_edge, actual_edge)
         after_inventory = self._asset_inventory(batch.asset)
         self._clear_pending(batch)
         expected_buy_qty = self._leg_qty(batch.asset, batch.buy_id, batch.open_qty + batch.close_qty)
         expected_sell_qty = self._leg_qty(batch.asset, batch.sell_id, batch.open_qty + batch.close_qty)
         if buy_qty != expected_buy_qty or sell_qty != expected_sell_qty:
             self.log.warning(
-                f"filled_qty_mismatch {batch.asset} lot={batch.lot_id} "
+                f"filled_qty_mismatch {batch.asset} batch={batch.batch_id} "
                 f"buy_qty={buy_qty}/{expected_buy_qty} sell_qty={sell_qty}/{expected_sell_qty}",
             )
         self.action_rows.append(
@@ -1797,38 +1833,98 @@ class PreIpoStrategy(Strategy):
                 before_inventory=current_inventory,
                 after_inventory=after_inventory,
                 created_ns=batch.created_ns,
-                close_lot_id=reduced_pos.lot_id if reduced_pos is not None else batch.close_lot_id,
                 expected_capture_bps=batch.expected_capture_bps,
-                realized_capture_bps=(
-                    self._capture_bps(
-                        reduced_pos.edge_side,
-                        reduced_pos.actual_entry_edge_bps or reduced_pos.edge_bps,
-                        actual_edge if actual_edge is not None else batch.edge_bps,
-                    )
-                    if reduced_pos is not None
-                    else None
-                ),
+                realized_capture_bps=realized_capture,
             ),
         )
         actual_text = self._fmt(actual_edge) if actual_edge is not None else "-"
         self.log.info(
-            f"edge_action_filled {batch.asset} action={batch.action} lot={batch.lot_id} side={batch.edge_side} "
+            f"edge_action_filled {batch.asset} action={batch.action} batch={batch.batch_id} side={batch.edge_side} "
             f"inventory={current_inventory}->{after_inventory} level={batch.grid_level} "
             f"base_qty={batch.open_qty + batch.close_qty} buy_qty={buy_qty} sell_qty={sell_qty} "
             f"signal_edge={batch.edge_bps:.2f}bps actual_edge={actual_text}bps",
         )
         self._log_next_notional(batch.asset)
 
-    def _remove_closed_position(self, batch: PendingBatch) -> ArbPos | None:
-        if batch.close_lot_id is not None and batch.close_lot_id in self.positions:
-            return self.positions.pop(batch.close_lot_id)
-        actual_edge = self._actual_entry_edge_bps(batch)
-        exit_edge = actual_edge if actual_edge is not None else batch.edge_bps
-        pos, _ = self._close_candidate(batch.asset, batch.edge_side, exit_edge, require_min_capture=False)
+    def _increase_position(
+        self,
+        batch: PendingBatch,
+        buy_avg: Decimal | None,
+        sell_avg: Decimal | None,
+        fee: Decimal,
+        entry_edge: Decimal,
+        actual_edge: Decimal | None,
+    ) -> None:
+        buy_qty = self._leg_qty(batch.asset, batch.buy_id, batch.open_qty)
+        sell_qty = self._leg_qty(batch.asset, batch.sell_id, batch.open_qty)
+        pos = self.positions.get(batch.asset)
         if pos is None:
-            self.log.error(f"close_position_missing {batch.asset} action_lot={batch.lot_id} close_lot={batch.close_lot_id}")
-            return None
-        return self.positions.pop(pos.lot_id)
+            self.positions[batch.asset] = ArbPos(
+                asset=batch.asset,
+                buy_id=batch.buy_id,
+                sell_id=batch.sell_id,
+                buy_px=batch.buy_px,
+                sell_px=batch.sell_px,
+                entry_buy_avg_px=buy_avg,
+                entry_sell_avg_px=sell_avg,
+                entry_fee=fee,
+                base_qty=batch.open_qty,
+                buy_qty=buy_qty,
+                sell_qty=sell_qty,
+                edge_bps=entry_edge,
+                actual_entry_edge_bps=actual_edge,
+                mean_bps=batch.mean_bps,
+                std_bps=batch.std_bps,
+                z_score=batch.z_score,
+                opened_ns=batch.created_ns,
+                edge_side=batch.edge_side,
+                grid_level=batch.grid_level,
+            )
+            return
+        total_base = pos.base_qty + batch.open_qty
+        old_actual_edge = pos.actual_entry_edge_bps or pos.edge_bps
+        pos.entry_buy_avg_px = self._weighted_avg(pos.entry_buy_avg_px, pos.buy_qty, buy_avg, buy_qty)
+        pos.entry_sell_avg_px = self._weighted_avg(pos.entry_sell_avg_px, pos.sell_qty, sell_avg, sell_qty)
+        pos.entry_fee += fee
+        pos.buy_qty += buy_qty
+        pos.sell_qty += sell_qty
+        pos.edge_bps = (pos.edge_bps * pos.base_qty + entry_edge * batch.open_qty) / total_base
+        if actual_edge is not None:
+            pos.actual_entry_edge_bps = (old_actual_edge * pos.base_qty + actual_edge * batch.open_qty) / total_base
+        pos.base_qty = total_base
+        pos.opened_ns = batch.created_ns
+        pos.mean_bps = batch.mean_bps
+        pos.std_bps = batch.std_bps
+        pos.z_score = batch.z_score
+        pos.grid_level = batch.grid_level
+
+    def _reduce_position(self, batch: PendingBatch, pos: ArbPos, close_fee: Decimal) -> None:
+        close_qty = min(batch.close_qty, pos.base_qty)
+        if close_qty <= 0:
+            return
+        ratio = close_qty / pos.base_qty
+        pos.entry_fee -= pos.entry_fee * ratio
+        pos.base_qty -= close_qty
+        pos.buy_qty -= min(pos.buy_qty, self._leg_qty(batch.asset, pos.buy_id, close_qty))
+        pos.sell_qty -= min(pos.sell_qty, self._leg_qty(batch.asset, pos.sell_id, close_qty))
+        if pos.base_qty <= 0:
+            self.positions.pop(batch.asset, None)
+
+    def _weighted_avg(
+        self,
+        old_avg: Decimal | None,
+        old_qty: Decimal,
+        new_avg: Decimal | None,
+        new_qty: Decimal,
+    ) -> Decimal | None:
+        if old_avg is None:
+            return new_avg
+        if new_avg is None:
+            return old_avg
+        total_qty = old_qty + new_qty
+        if total_qty <= 0:
+            return old_avg
+        return (old_avg * old_qty + new_avg * new_qty) / total_qty
 
     def _record_realized(self, asset: str, pos: ArbPos, exit_edge: Decimal, pnl_usdt: Decimal | None) -> None:
         entry_edge = pos.actual_entry_edge_bps or pos.edge_bps
@@ -1931,9 +2027,15 @@ class PreIpoStrategy(Strategy):
             return None
         if exit_sell_avg is None or exit_buy_avg is None:
             return None
-        long_pnl = (exit_sell_avg - pos.entry_buy_avg_px) * pos.buy_qty
-        short_pnl = (pos.entry_sell_avg_px - exit_buy_avg) * pos.sell_qty
-        return long_pnl + short_pnl - pos.entry_fee - exit_fee
+        close_qty = min(batch.close_qty, pos.base_qty)
+        if close_qty <= 0:
+            return None
+        entry_fee = pos.entry_fee * close_qty / pos.base_qty
+        buy_qty = self._leg_qty(batch.asset, pos.buy_id, close_qty)
+        sell_qty = self._leg_qty(batch.asset, pos.sell_id, close_qty)
+        long_pnl = (exit_sell_avg - pos.entry_buy_avg_px) * buy_qty
+        short_pnl = (pos.entry_sell_avg_px - exit_buy_avg) * sell_qty
+        return long_pnl + short_pnl - entry_fee - exit_fee
 
     def _event_px(self, event: OrderFilled) -> Decimal:
         text = str(event.last_px).split()[0].replace("_", "")
@@ -1946,24 +2048,138 @@ class PreIpoStrategy(Strategy):
         text = str(commission).split()[0].replace("_", "")
         return Decimal(text)
 
-    def _handle_order_failed(self, order_id: str, reason: str) -> None:
-        lot_id = self.order_lot.get(order_id)
-        if lot_id is None:
+    def _batch_leg(self, batch: PendingBatch, order_id: str) -> PendingLeg | None:
+        leg = batch.legs.get(order_id)
+        if leg is not None:
+            return leg
+        for leg in batch.legs.values():
+            if leg.hedge_order_id == order_id:
+                return leg
+        return None
+
+    def _mark_order_submitted(self, order_id: str, accepted: bool) -> None:
+        batch_id = self.order_batch.get(order_id)
+        if batch_id is None:
             return
-        batch = self.pending.get(lot_id)
+        batch = self.pending.get(batch_id)
         if batch is None:
-            self.order_lot.pop(order_id, None)
             return
-        self.log.error(f"order_failed {batch.asset} action={batch.action} lot={lot_id} order={order_id} reason={reason}")
-        self._fail_batch(batch, reason)
+        leg = self._batch_leg(batch, order_id)
+        if leg is None:
+            return
+        leg.submitted = True
+        if accepted:
+            leg.accepted = True
+
+    def _handle_order_failed(self, order_id: str, reason: str) -> None:
+        batch = self._pending_batch_for_order(order_id)
+        if batch is None:
+            self.order_batch.pop(order_id, None)
+            return
+        leg = self._batch_leg(batch, order_id)
+        if leg is None:
+            return
+        if order_id == leg.hedge_order_id:
+            self.log.error(f"resolve_order_failed {batch.asset} batch={batch.batch_id} order={order_id} reason={reason}")
+            self._request_stop(f"preipo 恢复订单失败: {reason}")
+            return
+        leg.failed = True
+        leg.terminal = True
+        batch.resolving = True
+        batch.resolved_reason = reason
+        self.log.error(f"order_failed {batch.asset} action={batch.action} batch={batch.batch_id} order={order_id} reason={reason}")
+        self._resolve_failed_batch(batch)
+
+    def _handle_order_terminal(self, order_id: str, reason: str) -> None:
+        batch = self._pending_batch_for_order(order_id)
+        if batch is None:
+            self.order_batch.pop(order_id, None)
+            return
+        leg = self._batch_leg(batch, order_id)
+        if leg is None:
+            return
+        if order_id == leg.hedge_order_id:
+            leg.hedge_terminal = True
+            self._resolve_failed_batch(batch)
+            return
+        if not batch.resolving:
+            self._handle_order_failed(order_id, reason)
+            return
+        leg.terminal = True
+        self.log.warning(f"resolve_original_terminal {batch.asset} batch={batch.batch_id} order={order_id} reason={reason}")
+        self._resolve_failed_batch(batch)
+
+    def _pending_batch_for_order(self, order_id: str) -> PendingBatch | None:
+        batch_id = self.order_batch.get(order_id)
+        if batch_id is None:
+            return None
+        return self.pending.get(batch_id)
 
     # 任一腿失败只隔离当前动作；其它库存不受影响。
     def _fail_batch(self, batch: PendingBatch, reason: str) -> None:
-        for order_id in batch.legs:
-            self.failed_orders[order_id] = batch
-        self._emergency_flatten(batch)
-        self._clear_pending(batch)
-        self.log.error(f"action_failed_removed {batch.asset} action={batch.action} lot={batch.lot_id} reason={reason}")
+        batch.resolving = True
+        batch.resolved_reason = reason
+        self._resolve_failed_batch(batch)
+
+    # 失败恢复：先取消未完成原订单，再把所有已成交数量用反向单冲掉。
+    def _resolve_failed_batch(self, batch: PendingBatch) -> None:
+        if batch.batch_id not in self.pending:
+            return
+        batch.resolving = True
+        for leg in batch.legs.values():
+            if leg.terminal:
+                continue
+            if leg.submit_ns is None and not leg.submitted and not leg.accepted:
+                leg.terminal = True
+                continue
+            if not leg.cancel_requested:
+                try:
+                    self.cancel_order(leg.order)
+                    leg.cancel_requested = True
+                    self.log.warning(
+                        f"resolve_cancel_original {batch.asset} batch={batch.batch_id} "
+                        f"order={leg.order.client_order_id} filled={leg.filled_qty}/{leg.target_qty}",
+                    )
+                except Exception as exc:
+                    self.log.error(
+                        f"resolve_cancel_failed {batch.asset} batch={batch.batch_id} "
+                        f"order={leg.order.client_order_id} error={exc}",
+                    )
+                    self._request_stop(f"preipo 恢复取消订单失败: {exc}")
+                return
+        for leg in batch.legs.values():
+            if leg.filled_qty <= leg.hedge_filled_qty:
+                continue
+            if leg.hedge_order_id is not None and not leg.hedge_terminal:
+                return
+            self._submit_resolution_order(batch, leg, leg.filled_qty - leg.hedge_filled_qty)
+            return
+        if all(leg.terminal and leg.hedge_filled_qty >= leg.filled_qty for leg in batch.legs.values()):
+            reason = batch.resolved_reason or "unknown"
+            self._clear_pending(batch)
+            self.log.error(f"action_resolved_removed {batch.asset} action={batch.action} batch={batch.batch_id} reason={reason}")
+
+    def _submit_resolution_order(self, batch: PendingBatch, leg: PendingLeg, qty: Decimal) -> None:
+        if qty <= 0:
+            return
+        instrument = self.cache.instrument(leg.instrument_id)
+        order = self.order_factory.market(
+            instrument_id=leg.instrument_id,
+            order_side=self._opposite(leg.side),
+            quantity=instrument.make_qty(qty),
+            time_in_force=TimeInForce.GTC,
+        )
+        order_id = str(order.client_order_id)
+        leg.hedge_order = order
+        leg.hedge_order_id = order_id
+        leg.hedge_target_qty = leg.filled_qty
+        leg.hedge_terminal = False
+        self.order_batch[order_id] = batch.batch_id
+        self.log.warning(
+            f"resolve_flatten_submit {batch.asset} batch={batch.batch_id} "
+            f"order={order_id} instrument={leg.instrument_id} side={self._opposite(leg.side)} qty={qty}",
+        )
+        self.submit_order(order)
 
     # 请求 live 入口停止整个 node，保证 finally 仍能写报告。
     def _request_stop(self, reason: str) -> None:
@@ -2002,14 +2218,16 @@ class PreIpoStrategy(Strategy):
         return OrderSide.SELL if side == OrderSide.BUY else OrderSide.BUY
 
     def _clear_pending(self, batch: PendingBatch) -> None:
-        for order_id in batch.legs:
-            self.order_lot.pop(order_id, None)
-        self.pending.pop(batch.lot_id, None)
+        for order_id, leg in batch.legs.items():
+            self.order_batch.pop(order_id, None)
+            if leg.hedge_order_id is not None:
+                self.order_batch.pop(leg.hedge_order_id, None)
+        self.pending.pop(batch.batch_id, None)
 
-    def _new_lot_id(self) -> int:
-        lot_id = self.next_lot_id
-        self.next_lot_id += 1
-        return lot_id
+    def _new_batch_id(self) -> int:
+        batch_id = self.next_batch_id
+        self.next_batch_id += 1
+        return batch_id
 
     def _fmt(self, value: object, suffix: str = "") -> str:
         try:
@@ -2202,10 +2420,9 @@ class PreIpoStrategy(Strategy):
         mean_bps: float,
         std_bps: float,
         grid_level: int | None,
-        before_inventory: int,
-        after_inventory: int,
+        before_inventory: Decimal,
+        after_inventory: Decimal,
         created_ns: int,
-        close_lot_id: int | None = None,
         expected_capture_bps: Decimal | None = None,
         realized_capture_bps: Decimal | None = None,
     ) -> dict[str, str]:
@@ -2213,7 +2430,6 @@ class PreIpoStrategy(Strategy):
         latencies = self._fill_latency_rows(batch)
         return {
             "created_ns": str(created_ns),
-            "lot": str(batch.lot_id) if batch is not None else "-",
             "asset": asset,
             "action": action,
             "edge_side": edge_side,
@@ -2241,12 +2457,11 @@ class PreIpoStrategy(Strategy):
         latencies = self._fill_latency_rows(batch)
         return {
             "created_ns": str(batch.created_ns),
-            "lot": str(batch.lot_id),
             "asset": batch.asset,
             "action": batch.action,
             "edge_side": batch.edge_side,
             "route": self._route(batch.buy_id, batch.sell_id),
-            "status": "pending",
+            "status": "resolving" if batch.resolving else "pending",
             "qty": self._fmt(self._batch_target_qty(batch)),
             "signal_edge": self._fmt(batch.edge_bps),
             "best_edge": "-",
@@ -2424,7 +2639,6 @@ class PreIpoStrategy(Strategy):
         title = f"PREIPO Arbitrage Actions | 北京时间 {rows.get('__beijing_time__') or self._beijing_time()}"
         table = Table(title=title, expand=True)
         columns = (
-            ("lot", "lot", "right"),
             ("asset", "asset", "left"),
             ("status", "status", "center"),
             ("qty", "qty", "right"),
@@ -2435,9 +2649,7 @@ class PreIpoStrategy(Strategy):
             ("okx_latency", "okx_latency", "right"),
             ("mean", "mean", "right"),
             ("std", "std", "right"),
-            ("inventory", "inventory", "right"),
             ("time", "time", "left"),
-            ("age_min", "age_min", "right"),
         )
         for key, label, justify in columns:
             table.add_column(label, justify=justify, no_wrap=key != "time")
@@ -2451,9 +2663,60 @@ class PreIpoStrategy(Strategy):
 
     def _snapshot_action_value(self, row: dict[str, str], key: str) -> str:
         if key == "action":
-            side = str(row.get("edge_side", ""))
-            if side == LONG_EDGE:
-                return "long"
-            if side == SHORT_EDGE:
-                return "short"
+            return self._snapshot_action_label(row)
         return str(row.get(key, "-"))
+
+    def _snapshot_action_label(self, row: dict[str, str]) -> str:
+        before, after = self._snapshot_inventory_transition(row.get("inventory"))
+        arrow = self._snapshot_action_arrow(before, after, row.get("edge_side"))
+        operation = self._snapshot_action_operation(before, after, row.get("action"))
+        if arrow == "-":
+            return operation
+        if operation == "-":
+            return arrow
+        return f"{arrow} {operation}"
+
+    def _snapshot_inventory_transition(self, value: object) -> tuple[float | None, float | None]:
+        parts = str(value or "").split("->", 1)
+        if len(parts) != 2:
+            return None, None
+        return self._snapshot_float(parts[0]), self._snapshot_float(parts[1])
+
+    def _snapshot_action_arrow(self, before: float | None, after: float | None, edge_side: object) -> str:
+        signed = after if after not in (None, 0) else before
+        if signed is not None:
+            if signed > 0:
+                return "↑"
+            if signed < 0:
+                return "↓"
+        side = str(edge_side or "")
+        if side == LONG_EDGE:
+            return "↑"
+        if side == SHORT_EDGE:
+            return "↓"
+        return "-"
+
+    def _snapshot_action_operation(
+        self,
+        before: float | None,
+        after: float | None,
+        raw_action: object,
+    ) -> str:
+        if before is not None and after is not None:
+            before_abs = abs(before)
+            after_abs = abs(after)
+            if after_abs > before_abs:
+                return "open" if before_abs == 0 else "add"
+            if after_abs < before_abs:
+                return "close" if after_abs == 0 else "reduce"
+        action = str(raw_action or "").strip().lower()
+        return action if action in {"open", "close", "add", "reduce"} else "-"
+
+    def _snapshot_float(self, value: object) -> float | None:
+        text = str(value).strip().replace(",", "")
+        if text in {"", "-", "nan", "None"}:
+            return None
+        try:
+            return float(text)
+        except ValueError:
+            return None

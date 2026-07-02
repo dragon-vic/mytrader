@@ -79,7 +79,10 @@ def log_file_settings(settings: dict[str, Any], run_type: str) -> dict[str, Any]
 def prepare_report_dir(settings: dict[str, Any], run_type: str) -> Path:
     root = reports_root(settings).resolve()
     output_dir = run_reports_dir(settings, run_type).resolve()
-    output_dir.relative_to(root)
+    # Windows 多进程下 resolve() 可能混用 \\?\ 扩展路径，先统一再校验目录边界。
+    checked_root = Path(str(root).removeprefix("\\\\?\\"))
+    checked_output = Path(str(output_dir).removeprefix("\\\\?\\"))
+    checked_output.relative_to(checked_root)
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
 
@@ -343,8 +346,8 @@ def print_backtest_summary(payload: dict[str, Any], settings: dict[str, Any]) ->
         ("仓位统计", ("指标", "数值"), trade_stats_rows(output_dir, elapsed_days)),
         (
             "标的统计",
-            ("净收益", "手续费","标的", "仓位数", "胜率",  "收益率", "平均收益", "最大盈利", "最大亏损"),
-            instrument_stats_rows(output_dir),
+            ("标的", "仓位数", "平均持仓数量", "平均最大持仓", "胜率", "净收益", "收益率", "平均收益", "最大盈利", "最大亏损", "手续费"),
+            instrument_stats_rows(output_dir, elapsed_days),
         ),
         ("订单执行统计", ("指标", "数值"), order_stats_rows(output_dir, elapsed_days)),
     ]
@@ -366,8 +369,8 @@ def print_live_summary(settings: dict[str, Any]) -> None:
         ("仓位统计", ("指标", "数值"), trade_stats_rows(output_dir, elapsed_days)),
         (
             "标的统计",
-            ("净收益","手续费","标的", "仓位数", "胜率",  "收益率", "平均收益", "最大盈利", "最大亏损"),
-            instrument_stats_rows(output_dir),
+            ("标的", "仓位数", "平均持仓数量", "平均最大持仓", "胜率", "净收益", "收益率", "平均收益", "最大盈利", "最大亏损", "手续费"),
+            instrument_stats_rows(output_dir, elapsed_days),
         ),
         ("订单执行统计", ("指标", "数值"), order_stats_rows(output_dir, elapsed_days)),
     ]
@@ -507,6 +510,7 @@ def short_symbol(value: Any) -> str:
 # 从订单重建的持仓汇总表组装仓位统计行。
 def trade_stats_rows(output_dir: Path, elapsed_days: float) -> list[tuple[str, str]]:
     positions = read_report_csv(output_dir, POSITIONS_FILE)
+    avg_qty = average_position_qty(output_dir, elapsed_days)
     if positions.empty:
         return [
             ("完成仓位数", "0"),
@@ -515,6 +519,7 @@ def trade_stats_rows(output_dir: Path, elapsed_days: float) -> list[tuple[str, s
             ("资金费收入", "0"),
             ("平均仓位收益", "0"),
             ("总手续费", "0"),
+            ("平均持仓数量", format_number(avg_qty)),
             ("平均持仓分钟", "0"),
             ("最长持仓分钟", "0"),
         ]
@@ -538,9 +543,63 @@ def trade_stats_rows(output_dir: Path, elapsed_days: float) -> list[tuple[str, s
         ("亏损仓位平均亏损", format_number(losses.mean())),
         ("最大盈利", format_number(total_pnl.max())),
         ("最大亏损", format_number(total_pnl.min())),
+        ("平均持仓数量", format_number(avg_qty)),
         ("平均持仓分钟", format_number(duration_min.mean())),
         ("最长持仓分钟", format_number(duration_min.max())),
     ]
+
+
+# 用订单成交事件重建每个标的净仓位，并按持续时间计算平均持仓数量。
+def average_position_qty(output_dir: Path, elapsed_days: float) -> float:
+    return sum(average_position_qty_by_instrument(output_dir, elapsed_days).values())
+
+
+def average_position_qty_by_instrument(output_dir: Path, elapsed_days: float) -> dict[str, float]:
+    orders = read_report_csv(output_dir, "orders.csv")
+    if orders.empty:
+        return {}
+    required = {"成交时间", "标的", "方向", "已成交数量"}
+    if not required.issubset(orders.columns):
+        return {}
+
+    data = orders.copy()
+    data["order_time"] = pd.to_datetime(data["成交时间"], utc=True, errors="coerce")
+    data["filled_qty_num"] = pd.to_numeric(data["已成交数量"], errors="coerce").fillna(0).abs()
+    data = data[data["order_time"].notna() & (data["filled_qty_num"] > 0)].sort_values("order_time", kind="mergesort")
+    if data.empty:
+        return {}
+
+    positions: dict[str, float] = {}
+    weighted_qty_minutes: dict[str, float] = {}
+    prev_time = data.iloc[0]["order_time"]
+    for row in data.itertuples(index=False):
+        order_time = row.order_time
+        elapsed_min = max((order_time - prev_time).total_seconds() / 60, 0.0)
+        for instrument, qty in positions.items():
+            weighted_qty_minutes[instrument] = weighted_qty_minutes.get(instrument, 0.0) + abs(qty) * elapsed_min
+
+        instrument = str(getattr(row, "标的"))
+        filled_qty = float(row.filled_qty_num)
+        direction = 1.0 if str(getattr(row, "方向")).upper() == "BUY" else -1.0
+        positions[instrument] = positions.get(instrument, 0.0) + direction * filled_qty
+        if abs(positions[instrument]) < 1e-12:
+            positions[instrument] = 0.0
+        prev_time = order_time
+
+    total_minutes = elapsed_days * 1440
+    if total_minutes <= 0:
+        total_minutes = (data.iloc[-1]["order_time"] - data.iloc[0]["order_time"]).total_seconds() / 60
+        if total_minutes <= 0:
+            return {}
+    event_span_min = (data.iloc[-1]["order_time"] - data.iloc[0]["order_time"]).total_seconds() / 60
+    if total_minutes > event_span_min:
+        tail_min = total_minutes - event_span_min
+        for instrument, qty in positions.items():
+            weighted_qty_minutes[instrument] = weighted_qty_minutes.get(instrument, 0.0) + abs(qty) * tail_min
+    return {
+        instrument: weighted_qty / total_minutes
+        for instrument, weighted_qty in weighted_qty_minutes.items()
+    }
 
 
 # 当前通用报告按订单重建出的完成仓位统计收益。
@@ -608,15 +667,17 @@ def report_funding_income(positions: pd.DataFrame) -> pd.Series:
 
 
 # 从持仓汇总表按标的聚合统计行。
-def instrument_stats_rows(output_dir: Path) -> list[tuple[str, ...]]:
+def instrument_stats_rows(output_dir: Path, elapsed_days: float) -> list[tuple[str, ...]]:
     positions = read_report_csv(output_dir, POSITIONS_FILE)
     if positions.empty:
-        return [("无成交", "0", "0%", "0", "0%", "0", "0", "0", "0")]
+        return [("无成交", "0", "0", "0", "0%", "0", "0%", "0", "0", "0", "0")]
 
     data = positions.copy()
     data["净收益"] = data["已实现盈亏"].map(money_to_float) + report_funding_income(data)
     data["手续费"] = data["手续费合计"].map(commissions_to_float)
+    data["最大持仓"] = pd.to_numeric(data["数量"], errors="coerce").fillna(0).abs()
     data["开仓名义额"] = pd.to_numeric(data["数量"], errors="coerce") * pd.to_numeric(data["开仓均价"], errors="coerce")
+    avg_qty = average_position_qty_by_instrument(output_dir, elapsed_days)
     rows = []
     for instrument, group in data.groupby("标的"):
         pnl = group["净收益"]
@@ -624,6 +685,8 @@ def instrument_stats_rows(output_dir: Path) -> list[tuple[str, ...]]:
         rows.append((
             str(instrument),
             format_int(len(group)),
+            format_number(avg_qty.get(str(instrument), 0.0)),
+            format_number(group["最大持仓"].mean()),
             format_percent((pnl > 0).mean()),
             format_number(pnl.sum()),
             format_percent(pnl.sum() / notional if notional else 0),
@@ -632,7 +695,7 @@ def instrument_stats_rows(output_dir: Path) -> list[tuple[str, ...]]:
             format_number(pnl.min()),
             format_number(group["手续费"].sum()),
         ))
-    return sorted(rows, key=lambda row: money_to_float(row[3]), reverse=True)
+    return sorted(rows, key=lambda row: money_to_float(row[5]), reverse=True)
 
 
 # 从订单和成交表组装执行统计行。
@@ -647,7 +710,8 @@ def order_stats_rows(output_dir: Path, elapsed_days: float = 0.0) -> list[tuple[
             ("有成交订单数", "0"),
             ("已完成订单数", "0"),
             ("已取消订单数", "0"),
-            ("已拒绝订单数", "0"),
+            ("本地拒单数", "0"),
+            ("交易所拒单数", "0"),
         ]
     filled_qty = pd.to_numeric(orders["已成交数量"], errors="coerce").fillna(0)
     return [
@@ -658,7 +722,8 @@ def order_stats_rows(output_dir: Path, elapsed_days: float = 0.0) -> list[tuple[
         ("有成交订单数", format_int((filled_qty > 0).sum())),
         ("已完成订单数", format_int((orders["订单状态"] == "FILLED").sum())),
         ("已取消订单数", format_int((orders["订单状态"] == "CANCELED").sum())),
-        ("已拒绝订单数", format_int((orders["订单状态"] == "REJECTED").sum())),
+        ("本地拒单数", format_int((orders["订单状态"] == "DENIED").sum())),
+        ("交易所拒单数", format_int((orders["订单状态"] == "REJECTED").sum())),
     ]
 
 

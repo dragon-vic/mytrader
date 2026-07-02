@@ -6,13 +6,8 @@ strategy:
     assets: [OPENAI, ANTHROPIC]
     instruments: enabled
 
-    # 启动时读取 collector 保存的最近 6h bid/ask1；不足 6h 就先用已有窗口。
-    # 信号至少需要 6h 窗口，collector 不足 6h 时启动后继续等实时 quote 补齐。
-    min_window_sec: 21600
-    init_fetch_sec: 21600
-
-    # 两条 edge 线分别用 6h 时间等权均线；不再使用 30m 均线/波动做信号。
-    grid_center_sec: 21600
+    # window_minutes 同时控制启动时读取 collector 的范围，以及 edge 均值/std 的时间窗口；360 = 6h。
+    window_minutes: 360
 
     # OKX 2026-06-30 对 OPENAI/ANTHROPIC 做 rebase：价格 /10，数量 *10。
     # edge 用 price_multipliers 归一化；下单用 qty_multipliers 对齐名义敞口。
@@ -28,22 +23,24 @@ strategy:
     # signal_delay_ms: 第一次过线后等待多少毫秒，再用最新 quote 复查；仍过线才交易。
     # capture_bps: 持仓后，只要同一条 edge 线达到该收益就平仓。
     # *_exit_bps: 未达到 capture 时的均线平仓条件，和 backtest 策略一致。
-    # trade_qty: 单个标的每次开仓 qty；设为 "0" 时只监控该标的，不提交交易。
+    # trade_qty: 单个标的每次开仓 qty；max_position 是该标的最大持仓 qty；trade_qty=0 时只监控。
     asset_grid_params:
       OPENAI:
         trade_qty: 0
+        max_position: 5
         short_entry_bps: 50
         long_entry_bps: 50
-        std_mult: 0
-        signal_delay_ms: 100
+        std_mult: 2.6
+        signal_delay_ms: 0
         capture_bps: 70
-        short_exit_bps: -30
-        long_exit_bps: -30
+        short_exit_bps: -15
+        long_exit_bps: -15
         min_hold_sec: 0
       ANTHROPIC:
-        trade_qty: 0.5
-        short_entry_bps: 60
-        long_entry_bps: 60
+        trade_qty: 0.2
+        max_position: 5
+        short_entry_bps: 50
+        long_entry_bps: 50
         std_mult: 2.6
         signal_delay_ms: 0
         capture_bps: 70
