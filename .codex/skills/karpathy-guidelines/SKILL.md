@@ -69,6 +69,7 @@ source: https://github.com/forrestchang/andrej-karpathy-skills
 - 正常开发期间不要捕获异常来隐藏或转换错误。让错误暴露，然后修根因。
 - 不要把 `None` 作为错误状态返回，迫使调用方分支。必需配置、凭据和依赖应直接访问，缺失时让它抛错。
 - 不要设计参数 fallback 或静默默认值。必需的 runtime/trading 参数必须在 YAML 中显式声明，缺失时失败。如果确实需要共享默认值，放在 `strategies/global.yaml`，让策略 set YAML 通过正常分层覆盖。策略专用交易参数属于 `strategy.params`，并且只在策略 config 声明时传入。
+- 不要写“优先看 A，缺失再看 B”这类滑坡式兼容逻辑，尤其是 UI、报告、策略状态和交易信号字段。字段缺失应直接不显示或失败，避免错误被 fallback 掩盖。
 - 构建 node 时，不要在 Python 代码中引入隐式默认值。每个 node/runtime 设置都必须来自合并后的 YAML，使有效配置可检查；共享默认值属于 `strategies/global.yaml`，策略 set YAML 可以显式覆盖。
 - 本项目只在 Windows 上使用配置的 HTTP proxy。Linux 上即使 `strategies/global.yaml` 包含本地 Windows 代理地址，`proxy_url(settings)` 也应返回 `None`。
 - 做功能行为变更前先和用户确认。小的格式、注释、文档式本地清理可以直接做。

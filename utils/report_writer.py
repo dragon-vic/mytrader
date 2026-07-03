@@ -346,7 +346,7 @@ def print_backtest_summary(payload: dict[str, Any], settings: dict[str, Any]) ->
         ("仓位统计", ("指标", "数值"), trade_stats_rows(output_dir, elapsed_days)),
         (
             "标的统计",
-            ("标的", "仓位数", "平均持仓数量", "平均最大持仓", "胜率", "净收益", "收益率", "平均收益", "最大盈利", "最大亏损", "手续费"),
+            ("标的", "仓位数", "时间平均持仓", "平均最大持仓", "胜率", "净收益", "收益率", "平均收益", "最大盈利", "最大亏损", "手续费"),
             instrument_stats_rows(output_dir, elapsed_days),
         ),
         ("订单执行统计", ("指标", "数值"), order_stats_rows(output_dir, elapsed_days)),

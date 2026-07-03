@@ -6,6 +6,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import pandas as pd
+import pyarrow.parquet as pq
 from nautilus_trader.config import StrategyConfig
 from nautilus_trader.model.data import QuoteTick
 from nautilus_trader.model.enums import OrderSide
@@ -18,6 +19,7 @@ from nautilus_trader.trading.strategy import Strategy
 
 LONG = "long"
 SHORT = "short"
+MINUTE_NS = 60_000_000_000
 
 
 def decimal_param(value: object) -> Decimal:
@@ -73,10 +75,18 @@ class FeatureStore:
             "long_std": f"long_std_{window}",
             "count": f"window_count_{window}",
         }
-        data = pd.read_parquet(
-            Path(path),
-            columns=["instrument_id", "ts_ns", "short_edge", "long_edge", *column_map.values()],
-        ).sort_values("ts_ns", kind="mergesort")
+        data_path = Path(path)
+        requested_columns = ["instrument_id", "ts_ns", "short_edge", "long_edge", *column_map.values()]
+        available_columns = set(pq.read_schema(data_path).names)
+        if set(requested_columns).issubset(available_columns):
+            data = pd.read_parquet(data_path, columns=requested_columns)
+        elif "minute_ns" in available_columns:
+            data = pd.read_parquet(data_path, columns=["instrument_id", "ts_ns", "minute_ns", "short_edge", "long_edge"])
+            data = self._add_dynamic_window(data, window, column_map)
+        else:
+            missing = sorted(set(requested_columns) - available_columns)
+            raise RuntimeError(f"feature file missing columns for window_minutes={window}: {missing}")
+        data = data.sort_values("ts_ns", kind="mergesort")
         self.instrument_ids = data["instrument_id"].astype(str).to_numpy()
         self.ts_ns = data["ts_ns"].to_numpy()
         self.short_edge = data["short_edge"].to_numpy(float)
@@ -87,6 +97,34 @@ class FeatureStore:
         self.long_std = data[column_map["long_std"]].to_numpy(float)
         self.count = data[column_map["count"]].to_numpy(int)
         self.index = 0
+
+    @staticmethod
+    def _add_dynamic_window(data: pd.DataFrame, window: int, column_map: dict[str, str]) -> pd.DataFrame:
+        if window <= 0:
+            raise RuntimeError("window_minutes must be positive")
+        minute = (
+            data.dropna(subset=["short_edge", "long_edge"])
+            .groupby("minute_ns", sort=True)[["short_edge", "long_edge"]]
+            .mean()
+        )
+        if minute.empty:
+            raise RuntimeError("feature file has no edge rows")
+        start = int(minute.index.min())
+        end = int(minute.index.max())
+        full_index = pd.RangeIndex(start=start, stop=end + MINUTE_NS, step=MINUTE_NS)
+        minute = minute.reindex(full_index).ffill()
+        rolling = minute.rolling(window=window, min_periods=1)
+        stats = pd.DataFrame(
+            {
+                column_map["short_mean"]: rolling["short_edge"].mean(),
+                column_map["short_std"]: rolling["short_edge"].std(ddof=0),
+                column_map["long_mean"]: rolling["long_edge"].mean(),
+                column_map["long_std"]: rolling["long_edge"].std(ddof=0),
+                column_map["count"]: rolling["short_edge"].count().astype(int),
+            },
+        )
+        stats.index.name = "minute_ns"
+        return data.merge(stats.reset_index(), on="minute_ns", how="left")
 
     def next(self, tick: QuoteTick, window_minutes: int) -> tuple[float, float, float, float, float, float] | None:
         if self.index >= len(self.ts_ns):
@@ -121,9 +159,11 @@ class PreIpoQuoteBacktestConfig(StrategyConfig, frozen=True):
     capture_bps: float
     std_mult: float
     entry_bps: float
+    short_min_bps: float
+    long_max_bps: float
     # long_entry_bps: float
-    short_exit_bps: float
-    long_exit_bps: float
+    exit_bps: float
+    # long_exit_bps: float
     window_minutes: int
     min_hold_sec: float
     signal_delay_ms: float
@@ -145,8 +185,12 @@ class PreIpoQuoteBacktestStrategy(Strategy):
         self.std_mult = float_param(config.std_mult)
         self.short_entry_bps = float_param(config.entry_bps)
         self.long_entry_bps = float_param(config.entry_bps)
-        self.short_exit_bps = float_param(config.short_exit_bps)
-        self.long_exit_bps = float_param(config.long_exit_bps)
+        self.short_min_bps = float_param(config.short_min_bps)
+        self.long_max_bps = float_param(config.long_max_bps)
+        if self.long_max_bps <= self.short_min_bps:
+            raise RuntimeError("long_max_bps must be greater than short_min_bps")
+        self.short_exit_bps = float_param(config.exit_bps)
+        self.long_exit_bps = float_param(config.exit_bps)
         self.min_hold_ns = int(float_param(config.min_hold_sec) * 1_000_000_000)
         self.signal_delay_ns = int(float_param(config.signal_delay_ms) * 1_000_000)
         if self.signal_delay_ns < 0:
@@ -307,9 +351,19 @@ class PreIpoQuoteBacktestStrategy(Strategy):
             return Candidate(target="flat", edge_side=SHORT, edge=short_edge)
         if self.side == LONG and edge_side in (None, LONG) and self._can_exit(ts_ns) and self._long_exit(long_edge, long_mean):
             return Candidate(target="flat", edge_side=LONG, edge=long_edge)
-        if self._can_open(SHORT) and edge_side in (None, SHORT) and short_edge >= short_mean + short_band:
+        if (
+            self._can_open(SHORT)
+            and edge_side in (None, SHORT)
+            and short_edge >= self.short_min_bps
+            and short_edge >= short_mean + short_band
+        ):
             return Candidate(target=SHORT, edge_side=SHORT, edge=short_edge)
-        if self._can_open(LONG) and edge_side in (None, LONG) and long_edge <= long_mean - long_band:
+        if (
+            self._can_open(LONG)
+            and edge_side in (None, LONG)
+            and long_edge <= self.long_max_bps
+            and long_edge <= long_mean - long_band
+        ):
             return Candidate(target=LONG, edge_side=LONG, edge=long_edge)
         return None
 

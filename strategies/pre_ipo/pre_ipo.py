@@ -339,6 +339,8 @@ class PreIpoStrategy(Strategy):
                     raise RuntimeError(f"std_mult must be non-negative for {asset}")
                 if self._grid_signal_delay_ns(asset, edge_side) < 0:
                     raise RuntimeError(f"signal_delay_ms must be non-negative for {asset}")
+            if self._long_max_bps(asset) <= self._short_min_bps(asset):
+                raise RuntimeError(f"long_max_bps must be greater than short_min_bps for {asset}")
             if self._capture_target_bps(asset) < 0:
                 raise RuntimeError(f"capture_bps must be non-negative for {asset}")
             if self._min_hold_ns(asset) < 0:
@@ -1121,9 +1123,9 @@ class PreIpoStrategy(Strategy):
         band = self._grid_entry_band_bps(asset, state)
         deviation = float(state.edge_bps) - state.mean_bps
         if state.edge_side == SHORT_EDGE:
-            return deviation >= band
+            return float(state.edge_bps) >= self._short_min_bps(asset) and deviation >= band
         if state.edge_side == LONG_EDGE:
-            return deviation <= -band
+            return float(state.edge_bps) <= self._long_max_bps(asset) and deviation <= -band
         return False
 
     def _exit_signal(
@@ -1183,6 +1185,12 @@ class PreIpoStrategy(Strategy):
 
     def _long_exit_bps(self, asset: str) -> float:
         return self._grid_float(asset, "long_exit_bps")
+
+    def _short_min_bps(self, asset: str) -> float:
+        return self._grid_float(asset, "short_min_bps")
+
+    def _long_max_bps(self, asset: str) -> float:
+        return self._grid_float(asset, "long_max_bps")
 
     def _min_hold_ns(self, asset: str) -> int:
         return int(self._grid_float(asset, "min_hold_sec") * 1_000_000_000)
@@ -2632,8 +2640,19 @@ class PreIpoStrategy(Strategy):
             "inventories": {asset: self._asset_inventory(asset) for asset in self.assets},
         }
         tmp = self.snapshot_path.with_suffix(f"{self.snapshot_path.suffix}.tmp")
-        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.write_text(json.dumps(self._json_value(payload), ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(self.snapshot_path)
+
+    def _json_value(self, value: object) -> object:
+        if isinstance(value, Decimal):
+            return str(value)
+        if isinstance(value, dict):
+            return {str(key): self._json_value(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [self._json_value(item) for item in value]
+        if isinstance(value, tuple):
+            return [self._json_value(item) for item in value]
+        return value
 
     def _snapshot_table(self, rows: dict[str, object]) -> Table:
         title = f"PREIPO Arbitrage Actions | 北京时间 {rows.get('__beijing_time__') or self._beijing_time()}"
@@ -2683,12 +2702,6 @@ class PreIpoStrategy(Strategy):
         return self._snapshot_float(parts[0]), self._snapshot_float(parts[1])
 
     def _snapshot_action_arrow(self, before: float | None, after: float | None, edge_side: object) -> str:
-        signed = after if after not in (None, 0) else before
-        if signed is not None:
-            if signed > 0:
-                return "↑"
-            if signed < 0:
-                return "↓"
         side = str(edge_side or "")
         if side == LONG_EDGE:
             return "↑"

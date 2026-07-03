@@ -108,12 +108,6 @@ def inventory_transition(value: object) -> tuple[float | None, float | None]:
 
 
 def action_arrow(before: float | None, after: float | None, edge_side: object) -> str:
-    signed = after if after not in (None, 0) else before
-    if signed is not None:
-        if signed > 0:
-            return "↑"
-        if signed < 0:
-            return "↓"
     side = str(edge_side or "")
     if side == "long_edge":
         return "↑"

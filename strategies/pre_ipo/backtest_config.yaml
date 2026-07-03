@@ -3,25 +3,27 @@ strategy:
   class: PreIpoQuoteBacktestStrategy
   config: PreIpoQuoteBacktestConfig
   grid_params:
-    entry_bps: [40,50,60,70]
-    window_minutes: [60,180,360,720]
+    entry_bps: [55,50]
+    exit_bps: [-15,-17.5,-20]
+
 
   case_params:
     binance_id: ANTHROPICUSDT-PERP.BINANCE
     okx_id: ANTHROPIC-USDT-SWAP.OKX
     feature_path: strategies/pre_ipo/backtest_data/anth_features_all.parquet
     qty: 0.2
-    max_position: 5
-
     std_mult: [2.6]
-    capture_bps: 70
-    short_exit_bps: -15
-    long_exit_bps: -15
-    # window_minutes 同时控制 edge 均线、std/band 和 warmup；180 = 3h。
 
+    capture_bps: [ 70]
+    max_position: 2
+
+    short_min_bps: 250
+    long_max_bps: 550
+    # window_minutes 同时控制 edge 均线、std/band 和 warmup；360 = 6h。
+    window_minutes: 360
     min_hold_sec: 0
     signal_delay_ms: 0
-    end_ns: 1782903599677340985
+    end_ns: 1783076399419884159
 
 data:
   clients:
@@ -37,7 +39,7 @@ data:
           timeframe: 1s
 
 backtest:
-  max_workers: 8
+  max_workers: 4
   venues:
     - client: binance_futures
       starting_balance: "10000 USDT"
