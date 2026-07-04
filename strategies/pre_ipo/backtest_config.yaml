@@ -13,7 +13,7 @@ strategy:
     qty: 0.2
     std_mult: [2.6]
     entry_bps: [50]
-    exit_bps: [-15]
+    exit_bps: [-15,-10,-20,-25,-30]
     capture_bps: [70]
     max_position: 4
 

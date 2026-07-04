@@ -199,7 +199,7 @@ def build_view(payload: dict, path: Path, session_name: str | None, page: int = 
     if stopping:
         keys = "正在停止node..."
     else:
-        keys = "↑/↓翻页 | Esc退出监控 | s停止node" if session_name else "↑/↓翻页 | Esc退出监控"
+        keys = "↑/↓翻页 | t查看日志 | Esc退出监控 | s停止node" if session_name else "↑/↓翻页 | t查看日志 | Esc退出监控"
     parts = [Panel.fit(f"PRE IPO Live | Page {page + 1}/{MONITOR_PAGES} | 北京时间 {beijing_time} | {keys} | {path}", border_style="cyan")]
     if page == 1:
         parts.append(action_table(payload.get("action_rows") or []))
@@ -284,31 +284,76 @@ def node_running(session_name: str) -> bool:
     return result.returncode == 0
 
 
+def tail_node_log(snapshot: Path) -> None:
+    log_path = snapshot.parent / "node.log"
+    if not log_path.exists():
+        print(f"node.log不存在：{log_path}")
+        return
+
+    try:
+        if os.name == "nt":
+            follow_log(log_path)
+            return
+
+        import signal
+
+        old_handler = signal.getsignal(signal.SIGINT)
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+        try:
+            subprocess.run(["less", "+F", str(log_path)], check=False)
+        finally:
+            signal.signal(signal.SIGINT, old_handler)
+
+    except KeyboardInterrupt:
+        return
+
+def follow_log(log_path: Path) -> None:
+    print(f"查看日志：{log_path}")
+    print("Ctrl+C退出")
+    with log_path.open("r", encoding="utf-8", errors="replace") as file:
+        file.seek(0, os.SEEK_END)
+        while True:
+            line = file.readline()
+            if line:
+                print(line, end="")
+                continue
+            time.sleep(0.2)
+
+
 def main(path: Path, refresh_sec: float, session_name: str | None = None) -> None:
     console = Console()
     stopping = False
     page = 0
     try:
-        payload = load_snapshot(path)
-        with Live(build_view(payload, path, session_name, page), console=console, screen=True, refresh_per_second=1) as live:
-            while True:
-                payload = load_snapshot(path)
-                live.update(build_view(payload, path, session_name, page, stopping), refresh=True)
-                if stopping:
-                    if session_name is None or not node_running(session_name):
+        while True:
+            show_log = False
+            payload = load_snapshot(path)
+            with Live(build_view(payload, path, session_name, page), console=console, screen=True, refresh_per_second=1) as live:
+                while True:
+                    payload = load_snapshot(path)
+                    live.update(build_view(payload, path, session_name, page, stopping), refresh=True)
+                    if stopping:
+                        if session_name is None or not node_running(session_name):
+                            return
+                        time.sleep(refresh_sec)
+                        continue
+                    key = read_key(refresh_sec)
+                    if key == "escape":
                         return
-                    time.sleep(refresh_sec)
-                    continue
-                key = read_key(refresh_sec)
-                if key == "escape":
-                    return
-                if key == "up":
-                    page = max(page - 1, 0)
-                if key == "down":
-                    page = min(page + 1, MONITOR_PAGES - 1)
-                if key == "s" and session_name:
-                    stop_node(session_name)
-                    stopping = True
+                    if key == "t":
+                        show_log = True
+                        break
+                    if key == "up":
+                        page = max(page - 1, 0)
+                    if key == "down":
+                        page = min(page + 1, MONITOR_PAGES - 1)
+                    if key == "s" and session_name:
+                        stop_node(session_name)
+                        stopping = True
+            if show_log:
+                tail_node_log(path)
+                continue
     except KeyboardInterrupt:
         return
 

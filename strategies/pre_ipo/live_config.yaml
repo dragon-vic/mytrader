@@ -49,8 +49,8 @@ strategy:
         std_mult: 2.6
         signal_delay_ms: 0
         capture_bps: 70
-        short_exit_bps: -15
-        long_exit_bps: -15
+        short_exit_bps: -20
+        long_exit_bps: -20
         min_hold_sec: 0
     # live 运行时 snapshot 写到当前 report 目录，monitor/start 会读取这个文件显示 rich 表格。
     snapshot_interval_sec: 1
