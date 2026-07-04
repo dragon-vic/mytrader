@@ -41,7 +41,7 @@ strategy:
         min_hold_sec: 0
       ANTHROPIC:
         trade_qty: 0.2
-        max_position: 3
+        max_position: 4
         short_entry_bps: 50
         long_entry_bps: 50
         short_min_bps: 250

@@ -390,22 +390,24 @@ class PreIpoStrategy(Strategy):
             self._maybe_log_quote_summary()
             return
         total_start = time.perf_counter_ns()
-        section_start = total_start
+
+        # 1. 记录 quote 进入策略的延迟，便于观察 NT 队列和本地处理耗时。
+        section_start = time.perf_counter_ns()
         self._record_quote_delay(tick)
         self._record_quote_profile(tick.instrument_id, "delay_check", time.perf_counter_ns() - section_start)
+        # 2. 缓存最新 bid/ask，后续 edge 计算只读当前内存状态。
         section_start = time.perf_counter_ns()
         self.quotes[tick.instrument_id] = tick
         self._record_quote_profile(tick.instrument_id, "cache_quote", time.perf_counter_ns() - section_start)
-        if asset is None:
-            self._record_quote_profile(tick.instrument_id, "total", time.perf_counter_ns() - total_start)
-            self._maybe_log_quote_summary()
-            return
-        section_start = time.perf_counter_ns()
-        states = self._update_spreads(asset, update_window=False)
-        self._record_quote_profile(tick.instrument_id, "edge_state", time.perf_counter_ns() - section_start)
-        section_start = time.perf_counter_ns()
-        self._maybe_open(asset, states)
-        self._record_quote_profile(tick.instrument_id, "signal_and_order_check", time.perf_counter_ns() - section_start)
+        if asset is not None:
+            # 3. 用当前两边 bid/ask 计算 long_edge/short_edge；quote 热路径不更新 rolling window。
+            section_start = time.perf_counter_ns()
+            states = self._update_spreads(asset, update_window=False)
+            self._record_quote_profile(tick.instrument_id, "edge_state", time.perf_counter_ns() - section_start)
+            # 4. 先过滤，再决定直接下单或设置 signal delay alert。
+            section_start = time.perf_counter_ns()
+            self._maybe_open(asset, states)
+            self._record_quote_profile(tick.instrument_id, "signal_and_order_check", time.perf_counter_ns() - section_start)
         self._record_quote_profile(tick.instrument_id, "total", time.perf_counter_ns() - total_start)
         self._maybe_log_quote_summary()
 
@@ -906,21 +908,22 @@ class PreIpoStrategy(Strategy):
 
     def _maybe_apply_grid(self, asset: str, states: dict[tuple[str, InstrumentId, InstrumentId], SpreadState], now_ns: int) -> None:
         if self._asset_trade_qty(asset) <= 0:
-            self._cancel_signal_alert(asset)
             return
         if any(batch.asset == asset for batch in self.pending.values()):
-            self._cancel_signal_alert(asset)
             return
         candidates = self._grid_action_candidates(asset, states, now_ns)
         if not candidates:
-            self._cancel_signal_alert(asset)
+            return
+        candidate = max(candidates, key=lambda item: item.score)
+        if not self._candidate_has_open_balance(asset, candidate):
+            return
+        delay_ns = self._grid_signal_delay_ns(asset, candidate.signal_edge_side)
+        if delay_ns <= 0:
+            self._submit_grid_candidate(asset, candidate, now_ns)
             return
         if asset in self.signal_alerts:
             return
-        candidate = max(candidates, key=lambda item: item.score)
-        edge_side = candidate.signal_edge_side
-        if self._candidate_has_open_balance(asset, candidate):
-            self._schedule_signal_alert(asset, edge_side, now_ns)
+        self._schedule_signal_alert(asset, candidate.signal_edge_side, now_ns)
 
     def _grid_action_candidates(
         self,
@@ -975,22 +978,22 @@ class PreIpoStrategy(Strategy):
         pos = self.positions.get(asset)
         if pos is None or now_ns < pos.opened_ns + self._min_hold_ns(asset):
             return []
-        signal_side = pos.edge_side
-        if edge_side is not None and edge_side != signal_side:
+        # 平仓触发看 reduce 动作方向；持仓方向只决定 capture 的正负。
+        reduce_side = SHORT_EDGE if pos.edge_side == LONG_EDGE else LONG_EDGE
+        if edge_side is not None and edge_side != reduce_side:
             return []
-        signal_state = self._state_by_side(states, signal_side)
-        order_state = self._state_by_side(states, SHORT_EDGE if signal_side == LONG_EDGE else LONG_EDGE)
-        if signal_state is None or order_state is None:
+        reduce_state = self._state_by_side(states, reduce_side)
+        if reduce_state is None:
             return []
-        entry_edge = pos.edge_bps
-        capture = self._capture_bps(pos.edge_side, entry_edge, signal_state.edge_bps)
-        if not self._exit_signal(asset, pos.edge_side, signal_state, capture):
+        entry_edge = self._position_entry_edge(pos)
+        capture = self._capture_bps(pos.edge_side, entry_edge, reduce_state.edge_bps) if entry_edge is not None else None
+        if not self._exit_signal(asset, reduce_side, reduce_state, capture):
             return []
         return [
             ActionCandidate(
-                score=abs(float(signal_state.edge_bps) - signal_state.mean_bps),
-                order_state=order_state,
-                signal_edge_side=signal_state.edge_side,
+                score=abs(float(reduce_state.edge_bps) - reduce_state.mean_bps),
+                order_state=reduce_state,
+                signal_edge_side=reduce_state.edge_side,
                 action=CLOSE,
                 order_qty=self._close_qty(asset, inventory),
                 expected_capture_bps=capture,
@@ -1054,14 +1057,13 @@ class PreIpoStrategy(Strategy):
     def _schedule_signal_alert(self, asset: str, edge_side: str, now_ns: int) -> None:
         if asset in self.signal_alerts:
             return
+        delay_ns = self._grid_signal_delay_ns(asset, edge_side)
+        if delay_ns <= 0:
+            raise RuntimeError("signal_delay_ms must be positive when scheduling alert")
         self.signal_alert_versions[asset] += 1
         version = self.signal_alert_versions[asset]
         self.signal_alerts.add(asset)
         self.signal_alert_sides[asset] = edge_side
-        delay_ns = self._grid_signal_delay_ns(asset, edge_side)
-        if delay_ns <= 0:
-            self._on_signal_alert(asset, edge_side, version)
-            return
         alert_name = self._signal_alert_name(asset)
         alert_ns = now_ns + delay_ns
         self.clock.set_time_alert_ns(
@@ -1133,14 +1135,14 @@ class PreIpoStrategy(Strategy):
         asset: str,
         edge_side: str,
         state: SpreadState,
-        capture: Decimal,
+        capture: Decimal | None,
     ) -> bool:
-        if capture >= self._capture_target_bps(asset):
+        if capture is not None and capture >= self._capture_target_bps(asset):
             return True
         if edge_side == SHORT_EDGE:
-            return float(state.edge_bps) <= state.mean_bps + self._short_exit_bps(asset)
+            return float(state.edge_bps) >= state.mean_bps - self._short_exit_bps(asset)
         if edge_side == LONG_EDGE:
-            return float(state.edge_bps) >= state.mean_bps - self._long_exit_bps(asset)
+            return float(state.edge_bps) <= state.mean_bps + self._long_exit_bps(asset)
         raise RuntimeError(f"unknown edge_side: {edge_side}")
 
     def _state_by_side(
@@ -1791,31 +1793,23 @@ class PreIpoStrategy(Strategy):
         buy_avg: Decimal | None,
         sell_avg: Decimal | None,
     ) -> None:
-        actual_edge = self._actual_entry_edge_bps(batch)
+        actual_edge = self._actual_action_edge_bps(batch)
         current_inventory = self._asset_inventory(batch.asset)
         reducing = self._reduces_inventory(current_inventory, batch.edge_side)
         close_fee = self._filled_fee_share(batch, batch.close_qty)
         open_fee = self._filled_fee_share(batch, batch.open_qty)
         pos_before_close = self.positions.get(batch.asset)
-        realized_capture = None
         if reducing:
-            exit_edge = actual_edge if actual_edge is not None else batch.edge_bps
             if pos_before_close is not None:
-                realized_capture = self._capture_bps(
-                    pos_before_close.edge_side,
-                    pos_before_close.actual_entry_edge_bps or pos_before_close.edge_bps,
-                    exit_edge,
-                )
                 self._record_realized(
                     batch.asset,
                     pos_before_close,
-                    exit_edge,
+                    actual_edge,
                     self._round_trip_pnl_usdt(pos_before_close, batch, close_fee),
                 )
                 self._reduce_position(batch, pos_before_close, close_fee)
-        entry_edge = actual_edge if actual_edge is not None else batch.edge_bps
         if batch.open_qty > 0 and not reducing:
-            self._increase_position(batch, buy_avg, sell_avg, open_fee, entry_edge, actual_edge)
+            self._increase_position(batch, buy_avg, sell_avg, open_fee, actual_edge)
         after_inventory = self._asset_inventory(batch.asset)
         self._clear_pending(batch)
         expected_buy_qty = self._leg_qty(batch.asset, batch.buy_id, batch.open_qty + batch.close_qty)
@@ -1842,7 +1836,6 @@ class PreIpoStrategy(Strategy):
                 after_inventory=after_inventory,
                 created_ns=batch.created_ns,
                 expected_capture_bps=batch.expected_capture_bps,
-                realized_capture_bps=realized_capture,
             ),
         )
         actual_text = self._fmt(actual_edge) if actual_edge is not None else "-"
@@ -1860,7 +1853,6 @@ class PreIpoStrategy(Strategy):
         buy_avg: Decimal | None,
         sell_avg: Decimal | None,
         fee: Decimal,
-        entry_edge: Decimal,
         actual_edge: Decimal | None,
     ) -> None:
         buy_qty = self._leg_qty(batch.asset, batch.buy_id, batch.open_qty)
@@ -1879,7 +1871,7 @@ class PreIpoStrategy(Strategy):
                 base_qty=batch.open_qty,
                 buy_qty=buy_qty,
                 sell_qty=sell_qty,
-                edge_bps=entry_edge,
+                edge_bps=actual_edge if actual_edge is not None else batch.edge_bps,
                 actual_entry_edge_bps=actual_edge,
                 mean_bps=batch.mean_bps,
                 std_bps=batch.std_bps,
@@ -1890,15 +1882,19 @@ class PreIpoStrategy(Strategy):
             )
             return
         total_base = pos.base_qty + batch.open_qty
-        old_actual_edge = pos.actual_entry_edge_bps or pos.edge_bps
         pos.entry_buy_avg_px = self._weighted_avg(pos.entry_buy_avg_px, pos.buy_qty, buy_avg, buy_qty)
         pos.entry_sell_avg_px = self._weighted_avg(pos.entry_sell_avg_px, pos.sell_qty, sell_avg, sell_qty)
         pos.entry_fee += fee
         pos.buy_qty += buy_qty
         pos.sell_qty += sell_qty
-        pos.edge_bps = (pos.edge_bps * pos.base_qty + entry_edge * batch.open_qty) / total_base
-        if actual_edge is not None:
-            pos.actual_entry_edge_bps = (old_actual_edge * pos.base_qty + actual_edge * batch.open_qty) / total_base
+        old_entry_edge = self._position_entry_edge(pos)
+        if old_entry_edge is not None and actual_edge is not None:
+            entry_edge = (old_entry_edge * pos.base_qty + actual_edge * batch.open_qty) / total_base
+            pos.edge_bps = entry_edge
+            pos.actual_entry_edge_bps = entry_edge
+        else:
+            pos.edge_bps = (pos.edge_bps * pos.base_qty + batch.edge_bps * batch.open_qty) / total_base
+            pos.actual_entry_edge_bps = None
         pos.base_qty = total_base
         pos.opened_ns = batch.created_ns
         pos.mean_bps = batch.mean_bps
@@ -1934,11 +1930,15 @@ class PreIpoStrategy(Strategy):
             return old_avg
         return (old_avg * old_qty + new_avg * new_qty) / total_qty
 
-    def _record_realized(self, asset: str, pos: ArbPos, exit_edge: Decimal, pnl_usdt: Decimal | None) -> None:
-        entry_edge = pos.actual_entry_edge_bps or pos.edge_bps
-        self.realized_edge_bps[asset] += self._capture_bps(pos.edge_side, entry_edge, exit_edge)
+    def _record_realized(self, asset: str, pos: ArbPos, exit_edge: Decimal | None, pnl_usdt: Decimal | None) -> None:
+        entry_edge = self._position_entry_edge(pos)
+        if entry_edge is not None and exit_edge is not None:
+            self.realized_edge_bps[asset] += self._capture_bps(pos.edge_side, entry_edge, exit_edge)
         if pnl_usdt is not None:
             self.realized_pnl_usdt[asset] += pnl_usdt
+
+    def _position_entry_edge(self, pos: ArbPos) -> Decimal | None:
+        return pos.actual_entry_edge_bps
 
     def _capture_bps(self, edge_side: str, entry_edge: Decimal, exit_edge: Decimal) -> Decimal:
         if edge_side == LONG_EDGE:
@@ -1997,13 +1997,10 @@ class PreIpoStrategy(Strategy):
             return Decimal("0")
         return self._filled_fee(batch) * qty / base_qty
 
-    # 实际入场 edge 用两腿成交均价计算，分母使用 Binance 腿成交价。
-    def _actual_entry_edge_bps(self, batch: PendingBatch) -> Decimal | None:
+    # 实际动作 edge 用两腿成交均价计算；open/add 是入场，close/reduce 是反向减仓。
+    def _actual_action_edge_bps(self, batch: PendingBatch) -> Decimal | None:
         buy_avg = self._filled_avg_px(batch, batch.buy_id)
         sell_avg = self._filled_avg_px(batch, batch.sell_id)
-        if buy_avg is None and sell_avg is None:
-            buy_avg = batch.buy_px
-            sell_avg = batch.sell_px
         if buy_avg is None or sell_avg is None:
             return None
         buy_avg = self._norm_price(batch.asset, batch.buy_id, buy_avg)
@@ -2014,8 +2011,8 @@ class PreIpoStrategy(Strategy):
         denom = sell_avg if self._venue(batch.sell_id) == "BINANCE" else buy_avg
         return self._edge_bps(buy_avg - sell_avg, denom)
 
-    # 用实际撮合里的最优价格计算理论最优成交 edge；成交均价相对它的偏离才是成交滑点。
-    def _best_entry_edge_bps(self, batch: PendingBatch) -> Decimal | None:
+    # 用实际撮合里的最优价格计算理论最优动作 edge；成交均价相对它的偏离才是成交滑点。
+    def _best_action_edge_bps(self, batch: PendingBatch) -> Decimal | None:
         buy_best = self._filled_best_avg_px(batch, batch.buy_id)
         sell_best = self._filled_best_avg_px(batch, batch.sell_id)
         if buy_best is None or sell_best is None:
@@ -2432,9 +2429,8 @@ class PreIpoStrategy(Strategy):
         after_inventory: Decimal,
         created_ns: int,
         expected_capture_bps: Decimal | None = None,
-        realized_capture_bps: Decimal | None = None,
     ) -> dict[str, str]:
-        best_edge = self._best_entry_edge_bps(batch) if batch is not None else None
+        best_edge = self._best_action_edge_bps(batch) if batch is not None else None
         latencies = self._fill_latency_rows(batch)
         return {
             "created_ns": str(created_ns),
@@ -2455,7 +2451,6 @@ class PreIpoStrategy(Strategy):
             "std": self._fmt(std_bps),
             "level": str(grid_level) if grid_level is not None else "-",
             "expected_capture": self._fmt(expected_capture_bps) if expected_capture_bps is not None else "-",
-            "realized_capture": self._fmt(realized_capture_bps) if realized_capture_bps is not None else "-",
             "inventory": f"{before_inventory}->{after_inventory}",
             "time": self._beijing_time_short(created_ns),
             "age_min": self._fmt(max((self.clock.timestamp_ns() - created_ns) / 60_000_000_000, 0.0)),
@@ -2482,7 +2477,6 @@ class PreIpoStrategy(Strategy):
             "std": self._fmt(batch.std_bps),
             "level": str(batch.grid_level) if batch.grid_level is not None else "-",
             "expected_capture": self._fmt(batch.expected_capture_bps) if batch.expected_capture_bps is not None else "-",
-            "realized_capture": "-",
             "inventory": f"{batch.before_inventory}->{batch.after_inventory}",
             "time": self._beijing_time_short(batch.created_ns),
             "age_min": self._fmt(max((self.clock.timestamp_ns() - batch.created_ns) / 60_000_000_000, 0.0)),
@@ -2506,13 +2500,14 @@ class PreIpoStrategy(Strategy):
         rows = {}
         for asset in self.assets:
             unrealized = self._unrealized_edge_bps(asset)
+            total_bps = self.realized_edge_bps[asset] + unrealized if unrealized is not None else None
             rows[asset] = {
                 "inventory": str(self._asset_inventory(asset)),
                 "realized_usdt": self._fmt(self.realized_pnl_usdt[asset]),
                 "unrealized_usdt": self._fmt(self._unrealized_pnl_usdt(asset)),
                 "realized_bps": self._fmt(self.realized_edge_bps[asset]),
-                "unrealized_bps": self._fmt(unrealized),
-                "total_bps": self._fmt(self.realized_edge_bps[asset] + unrealized),
+                "unrealized_bps": self._fmt(unrealized) if unrealized is not None else "-",
+                "total_bps": self._fmt(total_bps) if total_bps is not None else "-",
             }
         return rows
 
@@ -2526,17 +2521,21 @@ class PreIpoStrategy(Strategy):
                 total += pnl
         return total
 
-    def _unrealized_edge_bps(self, asset: str) -> Decimal:
+    def _unrealized_edge_bps(self, asset: str) -> Decimal | None:
         total = Decimal("0")
+        has_position = False
         for pos in self.positions.values():
             if pos.asset != asset:
                 continue
+            has_position = True
             current_edge = self._current_edge_for_pos(pos)
             if current_edge is None:
-                continue
-            entry_edge = pos.actual_entry_edge_bps or pos.edge_bps
+                return None
+            entry_edge = self._position_entry_edge(pos)
+            if entry_edge is None:
+                return None
             total += self._capture_bps(pos.edge_side, entry_edge, current_edge)
-        return total
+        return total if has_position else Decimal("0")
 
     def _current_edge_for_pos(self, pos: ArbPos) -> Decimal | None:
         states = self.last_spread_states.get(pos.asset, {})
@@ -2686,22 +2685,15 @@ class PreIpoStrategy(Strategy):
         return str(row.get(key, "-"))
 
     def _snapshot_action_label(self, row: dict[str, str]) -> str:
-        before, after = self._snapshot_inventory_transition(row.get("inventory"))
-        arrow = self._snapshot_action_arrow(before, after, row.get("edge_side"))
-        operation = self._snapshot_action_operation(before, after, row.get("action"))
+        arrow = self._snapshot_action_arrow(row.get("edge_side"))
+        operation = self._snapshot_action_operation(row.get("action"))
         if arrow == "-":
             return operation
         if operation == "-":
             return arrow
         return f"{arrow} {operation}"
 
-    def _snapshot_inventory_transition(self, value: object) -> tuple[float | None, float | None]:
-        parts = str(value or "").split("->", 1)
-        if len(parts) != 2:
-            return None, None
-        return self._snapshot_float(parts[0]), self._snapshot_float(parts[1])
-
-    def _snapshot_action_arrow(self, before: float | None, after: float | None, edge_side: object) -> str:
+    def _snapshot_action_arrow(self, edge_side: object) -> str:
         side = str(edge_side or "")
         if side == LONG_EDGE:
             return "↑"
@@ -2709,27 +2701,6 @@ class PreIpoStrategy(Strategy):
             return "↓"
         return "-"
 
-    def _snapshot_action_operation(
-        self,
-        before: float | None,
-        after: float | None,
-        raw_action: object,
-    ) -> str:
-        if before is not None and after is not None:
-            before_abs = abs(before)
-            after_abs = abs(after)
-            if after_abs > before_abs:
-                return "open" if before_abs == 0 else "add"
-            if after_abs < before_abs:
-                return "close" if after_abs == 0 else "reduce"
+    def _snapshot_action_operation(self, raw_action: object) -> str:
         action = str(raw_action or "").strip().lower()
         return action if action in {"open", "close", "add", "reduce"} else "-"
-
-    def _snapshot_float(self, value: object) -> float | None:
-        text = str(value).strip().replace(",", "")
-        if text in {"", "-", "nan", "None"}:
-            return None
-        try:
-            return float(text)
-        except ValueError:
-            return None

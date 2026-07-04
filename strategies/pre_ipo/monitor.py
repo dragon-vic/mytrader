@@ -90,9 +90,8 @@ def action_value(row: dict[str, str], key: str) -> str:
 
 
 def action_label(row: dict[str, str]) -> str:
-    before, after = inventory_transition(row.get("inventory"))
-    arrow = action_arrow(before, after, row.get("edge_side"))
-    operation = action_operation(before, after, row.get("action"))
+    arrow = action_arrow(row.get("edge_side"))
+    operation = action_operation(row.get("action"))
     if arrow == "-":
         return operation
     if operation == "-":
@@ -100,14 +99,7 @@ def action_label(row: dict[str, str]) -> str:
     return f"{arrow} {operation}"
 
 
-def inventory_transition(value: object) -> tuple[float | None, float | None]:
-    parts = str(value or "").split("->", 1)
-    if len(parts) != 2:
-        return None, None
-    return parse_number(parts[0]), parse_number(parts[1])
-
-
-def action_arrow(before: float | None, after: float | None, edge_side: object) -> str:
+def action_arrow(edge_side: object) -> str:
     side = str(edge_side or "")
     if side == "long_edge":
         return "↑"
@@ -116,14 +108,7 @@ def action_arrow(before: float | None, after: float | None, edge_side: object) -
     return "-"
 
 
-def action_operation(before: float | None, after: float | None, raw_action: object) -> str:
-    if before is not None and after is not None:
-        before_abs = abs(before)
-        after_abs = abs(after)
-        if after_abs > before_abs:
-            return "open" if before_abs == 0 else "add"
-        if after_abs < before_abs:
-            return "close" if after_abs == 0 else "reduce"
+def action_operation(raw_action: object) -> str:
     action = str(raw_action or "").strip().lower()
     return action if action in {"open", "close", "add", "reduce"} else "-"
 
