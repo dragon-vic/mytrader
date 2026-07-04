@@ -57,6 +57,10 @@ BEIJING_TZ = timezone(timedelta(hours=8))
 MINUTE_NS = 60_000_000_000
 COLLECTOR_RAW_MTIME_SAFETY_SEC = 2
 COLLECTOR_COLUMNS = ("ts_local_ns", "ts_exchange_ms", "venue", "symbol", "bid", "ask", "bid_size", "ask_size")
+STATE_RUNNING = "running"
+STATE_RISK = "risk"
+STATE_STOPPING = "stopping"
+STATE_STOPPED = "stopped"
 
 
 def decimal_param(value: object) -> Decimal:
@@ -291,8 +295,8 @@ class PreIpoStrategy(Strategy):
         self.fee_bps = {key.upper(): decimal_param(value) for key, value in config.fee_bps.items()}
         self.quotes: dict[InstrumentId, QuoteTick] = {}
         self.windows: dict[tuple[str, str, InstrumentId, InstrumentId], SpreadWindow] = {}
-        self.stopped = False
-        self.stop_requested = False
+        self.strategy_state = STATE_RUNNING
+        self.stop_reason = ""
         self.next_batch_id = 1
         self.positions: dict[str, ArbPos] = {}
         self.pending: dict[int, PendingBatch] = {}
@@ -368,7 +372,7 @@ class PreIpoStrategy(Strategy):
             if not 0 < sample_rate <= 1:
                 raise RuntimeError(f"quote_sample_rates must be in (0, 1] for {asset}")
         self._check_start_account_state()
-        if self.stopped:
+        if self.strategy_state == STATE_STOPPED:
             return
         for instrument_id in self.instruments:
             self.subscribe_quote_ticks(instrument_id)
@@ -383,7 +387,7 @@ class PreIpoStrategy(Strategy):
         )
 
     def on_quote_tick(self, tick: QuoteTick) -> None:
-        if self.stopped:
+        if self.strategy_state == STATE_STOPPED:
             return
         asset = self._asset(tick.instrument_id)
         if asset is not None and self._drop_quote(asset):
@@ -874,7 +878,7 @@ class PreIpoStrategy(Strategy):
 
     # 低频维护任务：rolling window、风控和 snapshot 不占用 quote 热路径。
     def _schedule_housekeeping_alert(self) -> None:
-        if self.stopped:
+        if self.strategy_state == STATE_STOPPED:
             return
         self.housekeeping_alert_seq += 1
         self.clock.set_time_alert_ns(
@@ -885,12 +889,17 @@ class PreIpoStrategy(Strategy):
         )
 
     def _on_housekeeping_alert(self) -> None:
-        if self.stopped:
+        if self.strategy_state == STATE_STOPPED:
             return
+        now_ns = self.clock.timestamp_ns()
         for asset in self.assets:
             self._update_spreads(asset, update_window=True)
         self._check_risk_limits()
-        if not self.stopped:
+        if self.strategy_state in {STATE_RISK, STATE_STOPPING}:
+            for asset in self.assets:
+                self._maybe_apply_grid(asset, self.last_spread_states.get(asset, {}), now_ns)
+        self._maybe_finish_stopping()
+        if self.strategy_state != STATE_STOPPED:
             self._maybe_update_snapshot()
         self._schedule_housekeeping_alert()
 
@@ -902,7 +911,7 @@ class PreIpoStrategy(Strategy):
         return mean, std
 
     def _maybe_open(self, asset: str, states: dict[tuple[str, InstrumentId, InstrumentId], SpreadState]) -> None:
-        if self.stopped:
+        if self.strategy_state in {STATE_STOPPING, STATE_STOPPED}:
             return
         self._maybe_apply_grid(asset, states, self.clock.timestamp_ns())
 
@@ -910,6 +919,11 @@ class PreIpoStrategy(Strategy):
         if self._asset_trade_qty(asset) <= 0:
             return
         if any(batch.asset == asset for batch in self.pending.values()):
+            return
+        if self.strategy_state in {STATE_RISK, STATE_STOPPING}:
+            candidate = self._risk_reduce_candidate(asset, states, now_ns)
+            if candidate is not None:
+                self._submit_grid_candidate(asset, candidate, now_ns)
             return
         candidates = self._grid_action_candidates(asset, states, now_ns)
         if not candidates:
@@ -937,6 +951,31 @@ class PreIpoStrategy(Strategy):
         if candidates:
             return candidates
         return self._entry_candidates(asset, states, edge_side, inventory)
+
+    def _risk_reduce_candidate(
+        self,
+        asset: str,
+        states: dict[tuple[str, InstrumentId, InstrumentId], SpreadState],
+        now_ns: int,
+    ) -> ActionCandidate | None:
+        inventory = self._asset_inventory(asset, include_pending=True)
+        pos = self.positions.get(asset)
+        if pos is None or inventory == 0:
+            return None
+        reduce_side = SHORT_EDGE if pos.edge_side == LONG_EDGE else LONG_EDGE
+        reduce_state = self._state_by_side(states, reduce_side)
+        if reduce_state is None:
+            return None
+        entry_edge = self._position_entry_edge(pos)
+        capture = self._capture_bps(pos.edge_side, entry_edge, reduce_state.edge_bps) if entry_edge is not None else None
+        return ActionCandidate(
+            score=abs(float(reduce_state.edge_bps) - reduce_state.mean_bps),
+            order_state=reduce_state,
+            signal_edge_side=reduce_state.edge_side,
+            action=CLOSE,
+            order_qty=self._close_qty(asset, inventory),
+            expected_capture_bps=capture,
+        )
 
     def _entry_candidates(
         self,
@@ -1078,7 +1117,7 @@ class PreIpoStrategy(Strategy):
             return
         self.signal_alerts.discard(asset)
         self.signal_alert_sides.pop(asset, None)
-        if self.stopped:
+        if self.strategy_state in {STATE_STOPPING, STATE_STOPPED}:
             return
         if self._asset_trade_qty(asset) <= 0:
             return
@@ -1090,7 +1129,10 @@ class PreIpoStrategy(Strategy):
         candidates = self._grid_action_candidates(asset, states, now_ns, edge_side=edge_side)
         if not candidates:
             return
-        self._submit_grid_candidate(asset, max(candidates, key=lambda item: item.score), now_ns)
+        candidate = max(candidates, key=lambda item: item.score)
+        if self.strategy_state == STATE_RISK and candidate.action != CLOSE:
+            return
+        self._submit_grid_candidate(asset, candidate, now_ns)
 
     def _cancel_signal_alert(self, asset: str) -> None:
         if asset not in self.signal_alerts:
@@ -1635,7 +1677,7 @@ class PreIpoStrategy(Strategy):
                 "unrealized_usdt": self._fmt(item["unrealized_usdt"]),
                 "risk_rate": self._fmt(item["risk_rate"] * Decimal("100"), "%") if item["wallet_usdt"] > 0 else "-",
                 "positions": str(item["positions"]),
-                "status": "HIGH" if item["high_risk"] else "OK",
+                "status": "RISK" if self.strategy_state == STATE_RISK and item["high_risk"] else ("HIGH" if item["high_risk"] else "OK"),
             }
         return rows
 
@@ -1694,27 +1736,25 @@ class PreIpoStrategy(Strategy):
         return rows
 
     def _check_risk_limits(self) -> None:
-        if not self.risk_enabled:
+        if not self.risk_enabled or self.strategy_state in {STATE_STOPPING, STATE_STOPPED}:
             return
-        for venue, row in self._risk_state().items():
-            if int(row["positions"]) <= 0:
-                continue
-            wallet = Decimal(str(row["wallet_usdt"]))
-            unrealized = Decimal(str(row["unrealized_usdt"]))
-            risk_rate = Decimal(str(row["risk_rate"]))
-            if wallet <= 0:
-                self.log.error(f"risk_check_failed venue={venue} wallet_usdt={wallet}")
-                self._flatten_cache_positions(f"risk wallet missing {venue}")
-                self._request_stop(f"preipo 风控 {venue} 钱包余额异常")
-                return
-            if bool(row["high_risk"]):
-                self.log.error(
-                    f"risk_limit_triggered venue={venue} wallet_usdt={wallet} unrealized_usdt={unrealized} "
-                    f"risk_rate={risk_rate * Decimal('100'):.2f}% threshold={self.risk_max_unrealized_loss_ratio * Decimal('100'):.2f}%",
+        rows = self._risk_state()
+        high_rows = [(venue, row) for venue, row in rows.items() if int(row["positions"]) > 0 and bool(row["high_risk"])]
+        if high_rows:
+            if self.strategy_state != STATE_RISK:
+                self.strategy_state = STATE_RISK
+                details = "; ".join(
+                    f"{venue} wallet={row['wallet_usdt']} unrealized={row['unrealized_usdt']} "
+                    f"risk={Decimal(str(row['risk_rate'])) * Decimal('100'):.2f}%"
+                    for venue, row in high_rows
                 )
-                self._flatten_cache_positions(f"risk limit {venue}")
-                self._request_stop(f"preipo 风控 {venue} 未实现亏损超过阈值")
-                return
+                self.log.error(
+                    f"state_enter_risk threshold={self.risk_max_unrealized_loss_ratio * Decimal('100'):.2f}% {details}",
+                )
+            return
+        if self.strategy_state == STATE_RISK:
+            self.strategy_state = STATE_RUNNING
+            self.log.warning("state_exit_risk risk_rate_below_threshold")
 
     # 策略停止时按内部持仓记录提交反向市价单。
     def _flatten_on_stop(self) -> None:
@@ -1823,7 +1863,6 @@ class PreIpoStrategy(Strategy):
             self._filled_action_row(
                 batch=batch,
                 asset=batch.asset,
-                action=batch.action,
                 edge_side=batch.edge_side,
                 route=self._route(batch.buy_id, batch.sell_id),
                 qty=batch.open_qty + batch.close_qty,
@@ -1846,6 +1885,7 @@ class PreIpoStrategy(Strategy):
             f"signal_edge={batch.edge_bps:.2f}bps actual_edge={actual_text}bps",
         )
         self._log_next_notional(batch.asset)
+        self._maybe_finish_stopping()
 
     def _increase_position(
         self,
@@ -2086,7 +2126,7 @@ class PreIpoStrategy(Strategy):
             return
         if order_id == leg.hedge_order_id:
             self.log.error(f"resolve_order_failed {batch.asset} batch={batch.batch_id} order={order_id} reason={reason}")
-            self._request_stop(f"preipo 恢复订单失败: {reason}")
+            leg.hedge_terminal = True
             return
         leg.failed = True
         leg.terminal = True
@@ -2150,7 +2190,6 @@ class PreIpoStrategy(Strategy):
                         f"resolve_cancel_failed {batch.asset} batch={batch.batch_id} "
                         f"order={leg.order.client_order_id} error={exc}",
                     )
-                    self._request_stop(f"preipo 恢复取消订单失败: {exc}")
                 return
         for leg in batch.legs.values():
             if leg.filled_qty <= leg.hedge_filled_qty:
@@ -2163,6 +2202,7 @@ class PreIpoStrategy(Strategy):
             reason = batch.resolved_reason or "unknown"
             self._clear_pending(batch)
             self.log.error(f"action_resolved_removed {batch.asset} action={batch.action} batch={batch.batch_id} reason={reason}")
+            self._maybe_finish_stopping()
 
     def _submit_resolution_order(self, batch: PendingBatch, leg: PendingLeg, qty: Decimal) -> None:
         if qty <= 0:
@@ -2188,10 +2228,21 @@ class PreIpoStrategy(Strategy):
 
     # 请求 live 入口停止整个 node，保证 finally 仍能写报告。
     def _request_stop(self, reason: str) -> None:
-        self.stopped = True
-        if self.stop_requested:
+        if self.strategy_state in {STATE_STOPPING, STATE_STOPPED}:
             return
-        self.stop_requested = True
+        self.strategy_state = STATE_STOPPING
+        self.stop_reason = reason
+        self.log.error(f"strategy_stopping reason={reason}")
+        self._maybe_finish_stopping()
+
+    # stopping 状态只负责有序减仓；空仓且无 pending 后才真正停止 node。
+    def _maybe_finish_stopping(self) -> None:
+        if self.strategy_state != STATE_STOPPING:
+            return
+        if self.pending or self.positions:
+            return
+        self.strategy_state = STATE_STOPPED
+        reason = self.stop_reason or "preipo stopping complete"
         self.log.error(f"strategy_stop reason={reason}")
         self.msgbus.publish(NODE_STOP_TOPIC, {"source": "pre_ipo", "reason": reason})
 
@@ -2416,7 +2467,6 @@ class PreIpoStrategy(Strategy):
         self,
         batch: PendingBatch | None,
         asset: str,
-        action: str,
         edge_side: str,
         route: str,
         qty: Decimal,
@@ -2435,7 +2485,7 @@ class PreIpoStrategy(Strategy):
         return {
             "created_ns": str(created_ns),
             "asset": asset,
-            "action": action,
+            "action": self._display_action(before_inventory, after_inventory),
             "edge_side": edge_side,
             "route": route,
             "status": "filled",
@@ -2461,7 +2511,7 @@ class PreIpoStrategy(Strategy):
         return {
             "created_ns": str(batch.created_ns),
             "asset": batch.asset,
-            "action": batch.action,
+            "action": self._display_action(batch.before_inventory, batch.after_inventory),
             "edge_side": batch.edge_side,
             "route": self._route(batch.buy_id, batch.sell_id),
             "status": "resolving" if batch.resolving else "pending",
@@ -2481,6 +2531,18 @@ class PreIpoStrategy(Strategy):
             "time": self._beijing_time_short(batch.created_ns),
             "age_min": self._fmt(max((self.clock.timestamp_ns() - batch.created_ns) / 60_000_000_000, 0.0)),
         }
+
+    # 展示动作只看库存变化：箭头表示交易方向，open/close 只表示仓位起点和终点。
+    def _display_action(self, before: Decimal, after: Decimal) -> str:
+        if before == 0 and after != 0:
+            return "open"
+        if before != 0 and after == 0:
+            return "close"
+        if abs(after) > abs(before):
+            return "add"
+        if abs(after) < abs(before):
+            return "reduce"
+        return "-"
 
     def _fill_latency_rows(self, batch: PendingBatch | None) -> dict[str, str]:
         rows = {"BINANCE": "-", "OKX": "-"}
