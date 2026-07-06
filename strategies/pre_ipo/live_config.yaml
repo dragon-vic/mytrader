@@ -1,79 +1,27 @@
 strategy:
-  module: pre_ipo
-  class: PreIpoStrategy
-  config: PreIpoConfig
+  module: anthropic_arb
+  class: AnthropicArbStrategy
+  config: AnthropicArbConfig
   params:
-    assets: [OPENAI, ANTHROPIC]
     instruments: enabled
 
     # window_minutes 同时控制启动时读取 collector 的范围，以及 edge 均值/std 的时间窗口；360 = 6h。
     window_minutes: 360
 
-    # OKX 2026-06-30 对 OPENAI/ANTHROPIC 做 rebase：价格 /10，数量 *10。
-    # edge 用 price_multipliers 归一化；下单用 qty_multipliers 对齐名义敞口。
-    price_multipliers:
-      BINANCE: 1
-      OKX: 10
-    qty_multipliers:
-      BINANCE: 1
-      OKX: 10
+    # OKX 2026-06-30 对 ANTHROPIC 做 rebase：价格 /10，数量 *10。
+    okx_price_multiplier: 10
+    okx_qty_multiplier: 10
 
-    # 每个标的单独配置交易参数，信号字段和回测配置保持一致。
-    # entry = max(entry_bps, std_mult * 6h_std)。long_edge 低于均线 entry 开 long；short_edge 高于均线 entry 开 short。
-    # 绝对边界：long_edge 高于 long_max_bps 不开 long；short_edge 低于 short_min_bps 不开 short。
-    # signal_delay_ms: 第一次过线后等待多少毫秒，再用最新 quote 复查；仍过线才交易。
-    # capture_bps: 持仓后，只要同一条 edge 线达到该收益就平仓。
-    # *_exit_bps: 未达到 capture 时的均线平仓条件，和 backtest 策略一致。
-    # trade_qty: 单个标的每次开仓 qty；max_position 是该标的最大持仓 qty；trade_qty=0 时只监控。
-    asset_grid_params:
-      OPENAI:
-        trade_qty: 0
-        max_position: 3
-        short_entry_bps: 50
-        long_entry_bps: 50
-        short_min_bps: 100
-        long_max_bps: 450
-        std_mult: 2.6
-        signal_delay_ms: 0
-        capture_bps: 70
-        short_exit_bps: -15
-        long_exit_bps: -15
-        min_hold_sec: 0
-      ANTHROPIC:
-        trade_qty: 0.2
-        max_position: 4
-        short_entry_bps: 50
-        long_entry_bps: 50
-        short_min_bps: 250
-        long_max_bps: 550
-        std_mult: 2.6
-        signal_delay_ms: 0
-        capture_bps: 70
-        short_exit_bps: -20
-        long_exit_bps: -20
-        min_hold_sec: 0
+    # long_edge 低于均线 entry 开 long；short_edge 高于均线 entry 开 short。
+    # 持仓后反向 edge 偏离 exit 就减仓或翻向；reduce mode 只允许减仓方向。
+    entry_bps: 50
+    exit_bps: -20
+    short_min_bps: 250
+    long_max_bps: 550
+    qty: 0.2
+
     # live 运行时 snapshot 写到当前 report 目录，monitor/start 会读取这个文件显示 rich 表格。
-    snapshot_interval_sec: 1
-    snapshot_display: file
     snapshot_path: auto
-    slippage_bps: 2
-    # 只用于策略开仓前的可用 USDT 检查：required_margin = price * qty / margin_leverage * 1.1。
-    # 交易所账户侧杠杆需要单独通过 API/界面保持一致。
-    margin_leverage: 5
-    # 每个 quote 后按交易所聚合持仓风险；未实现亏损超过钱包余额 80% 时全平并停止。
-    risk_enabled: true
-    risk_max_unrealized_loss_ratio: 0.8
-    quote_sample_rates: {}
-    # quote 在本地 NT 队列中从 ts_init 到 on_quote_tick 超过该值时聚合记录 error summary。
-    quote_delay_log_enabled: false
-    max_quote_delay_ms: 100
-    quote_summary_interval_sec: 5
-    use_hyphens_in_client_order_ids: false
-    fee_bps:
-      BINANCE: 5
-      OKX: 5
-      KRAKEN: 10
-      HYPERLIQUID: 5
 
 logging:
   component_levels:
@@ -87,13 +35,11 @@ data:
     binance_futures:
       enabled: true
       markets:
-        - OPENAI
         - ANTHROPIC
 
     okx_swap:
       enabled: true
       markets:
-        - OPENAI
         - ANTHROPIC
 
     kraken_futures:
@@ -130,13 +76,11 @@ exec:
     binance_futures:
       enabled: true
       markets:
-        - OPENAI
         - ANTHROPIC
 
     okx_swap:
       enabled: true
       markets:
-        - OPENAI
         - ANTHROPIC
 
     kraken_futures:

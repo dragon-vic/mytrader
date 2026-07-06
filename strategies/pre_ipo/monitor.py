@@ -205,7 +205,7 @@ def build_view(payload: dict, path: Path, session_name: str | None, page: int = 
     if stopping:
         keys = "正在停止node..."
     else:
-        keys = "↑/↓翻页 | t日志(q返回) | p暂停 | r恢复 | s优雅停止 | Esc退出监控" if session_name else "↑/↓翻页 | t日志(q返回) | Esc退出监控"
+        keys = "↑/↓翻页 | t日志(q返回) | p减仓模式 | r恢复 | s优雅停止 | Esc退出监控" if session_name else "↑/↓翻页 | t日志(q返回) | Esc退出监控"
     state = payload.get("strategy_state", "-")
     header = f"PRE IPO Live | State {state} | Page {page + 1}/{MONITOR_PAGES} | 北京时间 {beijing_time} | {keys} | {path}"
     if notice:
@@ -370,7 +370,7 @@ def main(path: Path, refresh_sec: float, session_name: str | None = None) -> Non
                         notice = ""
                         page = min(page + 1, MONITOR_PAGES - 1)
                     if key == "p" and session_name:
-                        notice = send_command("pause") or "已发送pause"
+                        notice = send_command("reduce") or "已发送reduce"
                     if key == "r" and session_name:
                         notice = send_command("resume") or "已发送resume"
                     if key == "s" and session_name:

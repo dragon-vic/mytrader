@@ -1,5 +1,5 @@
-from strategies.pre_ipo.pre_ipo import PreIpoConfig
-from strategies.pre_ipo.pre_ipo import PreIpoStrategy
+from strategies.pre_ipo.anthropic_arb import AnthropicArbConfig
+from strategies.pre_ipo.anthropic_arb import AnthropicArbStrategy
 
-__all__ = ["PreIpoConfig", "PreIpoStrategy"]
+__all__ = ["AnthropicArbConfig", "AnthropicArbStrategy"]
 
