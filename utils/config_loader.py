@@ -82,6 +82,11 @@ CLIENTS = {
         "adapter": "external_signal",
         "client_id": "EXTERNAL_SIGNAL",
     },
+    "external_command": {
+        "venue": "EXTERNAL_COMMAND",
+        "adapter": "external_command",
+        "client_id": "EXTERNAL_COMMAND",
+    },
 }
 
 
@@ -413,7 +418,7 @@ def normalize_client_markets(
     if "instrument_kind" in meta:
         cfg["instrument_kind"] = meta["instrument_kind"]
 
-    if meta["adapter"] == "external_signal":
+    if meta["adapter"] in {"external_signal", "external_command"}:
         return
 
     markets = cfg["markets"]

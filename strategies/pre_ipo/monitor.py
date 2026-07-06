@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -16,6 +17,9 @@ from rich.console import Group
 from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
+
+from utils.arguments import EXTERNAL_COMMAND_DEFAULT_HOST
+from utils.arguments import EXTERNAL_COMMAND_DEFAULT_PORT
 
 
 BEIJING_TZ = timezone(timedelta(hours=8))
@@ -39,6 +43,7 @@ def load_snapshot(path: Path) -> dict:
             "summary": {},
             "risk": {},
             "inventories": {},
+            "strategy_state": "-",
         }
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -65,12 +70,13 @@ def action_table(rows: list[dict[str, str]]) -> Table:
         ("status", "状态", "center"),
         ("qty", "qty", "right"),
         ("signal_edge", "信号edge", "right"),
+        ("actual_edge", "实际edge", "right"),
         ("edge_slippage", "edge滑点", "right"),
         ("fill_slippage", "成交滑点", "right"),
-        ("bn_latency", "bn_latency", "right"),
-        ("okx_latency", "okx_latency", "right"),
         ("mean", "均值", "right"),
         ("std", "波动", "right"),
+        ("bn_latency", "bn_latency", "right"),
+        ("okx_latency", "okx_latency", "right"),
         ("time", "北京时间", "left"),
     )
     for key, label, justify in columns:
@@ -192,15 +198,19 @@ def format_number(value: float, suffix: str = "") -> str:
     return f"{value:.2f}".rstrip("0").rstrip(".") + suffix
 
 
-def build_view(payload: dict, path: Path, session_name: str | None, page: int = 0, stopping: bool = False) -> Group:
+def build_view(payload: dict, path: Path, session_name: str | None, page: int = 0, stopping: bool = False, notice: str = "") -> Group:
     market_tables = payload.get("market_tables") or {}
     assets = payload.get("assets") or sorted(market_tables)
     beijing_time = datetime.now(tz=BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
     if stopping:
         keys = "正在停止node..."
     else:
-        keys = "↑/↓翻页 | t查看日志 | Esc退出监控 | s停止node" if session_name else "↑/↓翻页 | t查看日志 | Esc退出监控"
-    parts = [Panel.fit(f"PRE IPO Live | Page {page + 1}/{MONITOR_PAGES} | 北京时间 {beijing_time} | {keys} | {path}", border_style="cyan")]
+        keys = "↑/↓翻页 | t日志(q返回) | p暂停 | r恢复 | s优雅停止 | Esc退出监控" if session_name else "↑/↓翻页 | t日志(q返回) | Esc退出监控"
+    state = payload.get("strategy_state", "-")
+    header = f"PRE IPO Live | State {state} | Page {page + 1}/{MONITOR_PAGES} | 北京时间 {beijing_time} | {keys} | {path}"
+    if notice:
+        header = f"{header} | {notice}"
+    parts = [Panel.fit(header, border_style="cyan")]
     if page == 1:
         parts.append(action_table(payload.get("action_rows") or []))
         return Group(*parts)
@@ -273,10 +283,20 @@ def read_key(timeout_sec: float) -> str:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
-def stop_node(session_name: str | None) -> None:
-    if not session_name:
-        return
-    subprocess.run(["tmux", "send-keys", "-t", session_name, "C-c"], check=False)
+def send_command(command: str, reason: str = "monitor") -> str:
+    payload = {
+        "command": command,
+        "reason": reason,
+        "source": "pre_ipo_monitor",
+        "sent_ns": time.time_ns(),
+    }
+    data = json.dumps(payload).encode("utf-8") + b"\n"
+    try:
+        with socket.create_connection((EXTERNAL_COMMAND_DEFAULT_HOST, EXTERNAL_COMMAND_DEFAULT_PORT), timeout=2.0) as client:
+            client.sendall(data)
+    except OSError as exc:
+        return f"{command}命令发送失败: {exc}"
+    return ""
 
 
 def node_running(session_name: str) -> bool:
@@ -289,24 +309,21 @@ def tail_node_log(snapshot: Path) -> None:
     if not log_path.exists():
         print(f"node.log不存在：{log_path}")
         return
-
     try:
         if os.name == "nt":
             follow_log(log_path)
             return
-
         import signal
 
         old_handler = signal.getsignal(signal.SIGINT)
         signal.signal(signal.SIGINT, signal.SIG_IGN)
-
         try:
             subprocess.run(["less", "+F", str(log_path)], check=False)
         finally:
             signal.signal(signal.SIGINT, old_handler)
-
     except KeyboardInterrupt:
         return
+
 
 def follow_log(log_path: Path) -> None:
     print(f"查看日志：{log_path}")
@@ -325,14 +342,15 @@ def main(path: Path, refresh_sec: float, session_name: str | None = None) -> Non
     console = Console()
     stopping = False
     page = 0
+    notice = ""
     try:
         while True:
             show_log = False
             payload = load_snapshot(path)
-            with Live(build_view(payload, path, session_name, page), console=console, screen=True, refresh_per_second=1) as live:
+            with Live(build_view(payload, path, session_name, page, notice=notice), console=console, screen=True, refresh_per_second=1) as live:
                 while True:
                     payload = load_snapshot(path)
-                    live.update(build_view(payload, path, session_name, page, stopping), refresh=True)
+                    live.update(build_view(payload, path, session_name, page, stopping, notice), refresh=True)
                     if stopping:
                         if session_name is None or not node_running(session_name):
                             return
@@ -342,15 +360,23 @@ def main(path: Path, refresh_sec: float, session_name: str | None = None) -> Non
                     if key == "escape":
                         return
                     if key == "t":
+                        notice = ""
                         show_log = True
                         break
                     if key == "up":
+                        notice = ""
                         page = max(page - 1, 0)
                     if key == "down":
+                        notice = ""
                         page = min(page + 1, MONITOR_PAGES - 1)
+                    if key == "p" and session_name:
+                        notice = send_command("pause") or "已发送pause"
+                    if key == "r" and session_name:
+                        notice = send_command("resume") or "已发送resume"
                     if key == "s" and session_name:
-                        stop_node(session_name)
-                        stopping = True
+                        notice = send_command("stop")
+                        if not notice:
+                            stopping = True
             if show_log:
                 tail_node_log(path)
                 continue

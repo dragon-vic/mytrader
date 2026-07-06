@@ -347,9 +347,21 @@ class PreIpoQuoteBacktestStrategy(Strategy):
         short_edge, short_mean, short_std, long_edge, long_mean, long_std = state
         short_band = max(self.short_entry_bps, self.std_mult * short_std)
         long_band = max(self.long_entry_bps, self.std_mult * long_std)
-        if self.side == SHORT and edge_side in (None, LONG) and self._can_exit(ts_ns) and self._long_reduce(long_edge, long_mean):
+        if (
+            self.side == SHORT
+            and edge_side in (None, LONG)
+            and self._can_exit(ts_ns)
+            and long_edge <= self.long_max_bps
+            and self._long_reduce(long_edge, long_mean)
+        ):
             return Candidate(target="flat", edge_side=LONG, edge=long_edge)
-        if self.side == LONG and edge_side in (None, SHORT) and self._can_exit(ts_ns) and self._short_reduce(short_edge, short_mean):
+        if (
+            self.side == LONG
+            and edge_side in (None, SHORT)
+            and self._can_exit(ts_ns)
+            and short_edge >= self.short_min_bps
+            and self._short_reduce(short_edge, short_mean)
+        ):
             return Candidate(target="flat", edge_side=SHORT, edge=short_edge)
         if (
             self._can_open(SHORT)

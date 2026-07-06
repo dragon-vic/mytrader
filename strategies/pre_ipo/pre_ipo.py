@@ -26,8 +26,11 @@ from rich.console import Console
 from rich.live import Live
 from rich.table import Table
 
+from adapters.external_command import ExternalCommand
+from adapters.external_command import external_command_type
 from nautilus_trader.config import StrategyConfig
 from nautilus_trader.model.currencies import USDT
+from nautilus_trader.model.data import CustomData
 from nautilus_trader.model.data import QuoteTick
 from nautilus_trader.model.enums import OrderSide
 from nautilus_trader.model.enums import TimeInForce
@@ -58,6 +61,7 @@ MINUTE_NS = 60_000_000_000
 COLLECTOR_RAW_MTIME_SAFETY_SEC = 2
 COLLECTOR_COLUMNS = ("ts_local_ns", "ts_exchange_ms", "venue", "symbol", "bid", "ask", "bid_size", "ask_size")
 STATE_RUNNING = "running"
+STATE_PAUSED = "paused"
 STATE_RISK = "risk"
 STATE_STOPPING = "stopping"
 STATE_STOPPED = "stopped"
@@ -376,6 +380,7 @@ class PreIpoStrategy(Strategy):
             return
         for instrument_id in self.instruments:
             self.subscribe_quote_ticks(instrument_id)
+        self.subscribe_data(external_command_type())
         self._start_snapshot_display()
         self._schedule_housekeeping_alert()
         self.log.info(
@@ -414,6 +419,31 @@ class PreIpoStrategy(Strategy):
             self._record_quote_profile(tick.instrument_id, "signal_and_order_check", time.perf_counter_ns() - section_start)
         self._record_quote_profile(tick.instrument_id, "total", time.perf_counter_ns() - total_start)
         self._maybe_log_quote_summary()
+
+    def on_data(self, data) -> None:
+        command = self._external_command(data)
+        if command is None:
+            return
+        name = command.command.strip().lower()
+        if name == "stop":
+            reason = command.reason or f"external_command:{command.source}"
+            self.log.warning(f"external_command_stop source={command.source} reason={reason}")
+            self._request_stop(reason)
+            return
+        if name == "pause":
+            self._pause_trading(command.source)
+            return
+        if name == "resume":
+            self._resume_trading(command.source)
+            return
+        self.log.warning(f"external_command_ignored command={command.command} source={command.source}")
+
+    def _external_command(self, data) -> ExternalCommand | None:
+        if isinstance(data, ExternalCommand):
+            return data
+        if isinstance(data, CustomData) and isinstance(data.data, ExternalCommand):
+            return data.data
+        return None
 
     def _drop_quote(self, asset: str) -> bool:
         sample_rate = self.quote_sample_rates.get(asset.upper(), 1.0)
@@ -608,6 +638,7 @@ class PreIpoStrategy(Strategy):
     def on_stop(self) -> None:
         self._flatten_on_stop()
         self._stop_snapshot_display()
+        self.unsubscribe_data(external_command_type())
         for instrument_id in self.instruments:
             self.unsubscribe_quote_ticks(instrument_id)
 
@@ -911,7 +942,7 @@ class PreIpoStrategy(Strategy):
         return mean, std
 
     def _maybe_open(self, asset: str, states: dict[tuple[str, InstrumentId, InstrumentId], SpreadState]) -> None:
-        if self.strategy_state in {STATE_STOPPING, STATE_STOPPED}:
+        if self.strategy_state in {STATE_PAUSED, STATE_STOPPING, STATE_STOPPED}:
             return
         self._maybe_apply_grid(asset, states, self.clock.timestamp_ns())
 
@@ -924,6 +955,8 @@ class PreIpoStrategy(Strategy):
             candidate = self._risk_reduce_candidate(asset, states, now_ns)
             if candidate is not None:
                 self._submit_grid_candidate(asset, candidate, now_ns)
+            return
+        if self.strategy_state == STATE_PAUSED:
             return
         candidates = self._grid_action_candidates(asset, states, now_ns)
         if not candidates:
@@ -965,6 +998,8 @@ class PreIpoStrategy(Strategy):
         reduce_side = SHORT_EDGE if pos.edge_side == LONG_EDGE else LONG_EDGE
         reduce_state = self._state_by_side(states, reduce_side)
         if reduce_state is None:
+            return None
+        if not self._edge_side_allowed(asset, reduce_state):
             return None
         entry_edge = self._position_entry_edge(pos)
         capture = self._capture_bps(pos.edge_side, entry_edge, reduce_state.edge_bps) if entry_edge is not None else None
@@ -1023,6 +1058,8 @@ class PreIpoStrategy(Strategy):
             return []
         reduce_state = self._state_by_side(states, reduce_side)
         if reduce_state is None:
+            return []
+        if not self._edge_side_allowed(asset, reduce_state):
             return []
         entry_edge = self._position_entry_edge(pos)
         capture = self._capture_bps(pos.edge_side, entry_edge, reduce_state.edge_bps) if entry_edge is not None else None
@@ -1117,7 +1154,7 @@ class PreIpoStrategy(Strategy):
             return
         self.signal_alerts.discard(asset)
         self.signal_alert_sides.pop(asset, None)
-        if self.strategy_state in {STATE_STOPPING, STATE_STOPPED}:
+        if self.strategy_state in {STATE_PAUSED, STATE_STOPPING, STATE_STOPPED}:
             return
         if self._asset_trade_qty(asset) <= 0:
             return
@@ -1164,13 +1201,25 @@ class PreIpoStrategy(Strategy):
         return min(self._asset_trade_qty(asset), abs(inventory))
 
     def _entry_signal(self, asset: str, state: SpreadState) -> bool:
+        if not self._edge_side_allowed(asset, state):
+            return False
         band = self._grid_entry_band_bps(asset, state)
         deviation = float(state.edge_bps) - state.mean_bps
         if state.edge_side == SHORT_EDGE:
-            return float(state.edge_bps) >= self._short_min_bps(asset) and deviation >= band
+            return deviation >= band
         if state.edge_side == LONG_EDGE:
-            return float(state.edge_bps) <= self._long_max_bps(asset) and deviation <= -band
+            return deviation <= -band
         return False
+
+    # 价格边界限制正常交易；risk/stopping 为了退出风险不受限制。
+    def _edge_side_allowed(self, asset: str, state: SpreadState) -> bool:
+        if self.strategy_state in {STATE_RISK, STATE_STOPPING}:
+            return True
+        if state.edge_side == SHORT_EDGE:
+            return float(state.edge_bps) >= self._short_min_bps(asset)
+        if state.edge_side == LONG_EDGE:
+            return float(state.edge_bps) <= self._long_max_bps(asset)
+        raise RuntimeError(f"unknown edge_side: {state.edge_side}")
 
     def _exit_signal(
         self,
@@ -2246,6 +2295,25 @@ class PreIpoStrategy(Strategy):
         self.log.error(f"strategy_stop reason={reason}")
         self.msgbus.publish(NODE_STOP_TOPIC, {"source": "pre_ipo", "reason": reason})
 
+    def _pause_trading(self, source: str) -> None:
+        if self.strategy_state in {STATE_STOPPING, STATE_STOPPED}:
+            self.log.warning(f"external_command_pause_ignored state={self.strategy_state} source={source}")
+            return
+        if self.strategy_state == STATE_RISK:
+            self.log.warning(f"external_command_pause_ignored state=risk source={source}")
+            return
+        if self.strategy_state == STATE_PAUSED:
+            return
+        self.strategy_state = STATE_PAUSED
+        self.log.warning(f"strategy_paused source={source}")
+
+    def _resume_trading(self, source: str) -> None:
+        if self.strategy_state != STATE_PAUSED:
+            self.log.warning(f"external_command_resume_ignored state={self.strategy_state} source={source}")
+            return
+        self.strategy_state = STATE_RUNNING
+        self.log.warning(f"strategy_resumed source={source}")
+
     def _emergency_flatten(self, batch: PendingBatch) -> None:
         for leg in batch.legs.values():
             if leg.filled_qty > 0:
@@ -2489,7 +2557,7 @@ class PreIpoStrategy(Strategy):
             "edge_side": edge_side,
             "route": route,
             "status": "filled",
-            "qty": self._fmt(qty),
+            "qty": self._fmt(abs(after_inventory)),
             "signal_edge": self._fmt(signal_edge),
             "best_edge": self._fmt(best_edge) if best_edge is not None else "-",
             "actual_edge": self._fmt(actual_edge) if actual_edge is not None else "-",
@@ -2515,7 +2583,7 @@ class PreIpoStrategy(Strategy):
             "edge_side": batch.edge_side,
             "route": self._route(batch.buy_id, batch.sell_id),
             "status": "resolving" if batch.resolving else "pending",
-            "qty": self._fmt(self._batch_target_qty(batch)),
+            "qty": self._fmt(abs(batch.after_inventory)),
             "signal_edge": self._fmt(batch.edge_bps),
             "best_edge": "-",
             "actual_edge": "-",
@@ -2554,9 +2622,6 @@ class PreIpoStrategy(Strategy):
                 continue
             rows[venue] = self._fmt((leg.fill_event_ns - leg.submit_ns) / 1_000_000)
         return rows
-
-    def _batch_target_qty(self, batch: PendingBatch) -> Decimal:
-        return batch.open_qty + batch.close_qty
 
     def _summary_rows(self) -> dict[str, dict[str, str]]:
         rows = {}
@@ -2692,6 +2757,7 @@ class PreIpoStrategy(Strategy):
         asset_rows = {key: value for key, value in rows.items() if not key.startswith("__")}
         payload = {
             "strategy": "pre_ipo",
+            "strategy_state": self.strategy_state,
             "assets": self.assets,
             "rows": [asset_rows[asset] for asset in self.assets if asset in asset_rows],
             "market_tables": market_tables,
@@ -2723,12 +2789,13 @@ class PreIpoStrategy(Strategy):
             ("status", "status", "center"),
             ("qty", "qty", "right"),
             ("signal_edge", "signal_edge", "right"),
+            ("actual_edge", "actual_edge", "right"),
             ("edge_slippage", "edge_slip", "right"),
             ("fill_slippage", "fill_slip", "right"),
-            ("bn_latency", "bn_latency", "right"),
-            ("okx_latency", "okx_latency", "right"),
             ("mean", "mean", "right"),
             ("std", "std", "right"),
+            ("bn_latency", "bn_latency", "right"),
+            ("okx_latency", "okx_latency", "right"),
             ("time", "time", "left"),
         )
         for key, label, justify in columns:

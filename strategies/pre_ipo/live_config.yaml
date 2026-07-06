@@ -81,6 +81,9 @@ logging:
 
 data:
   clients:
+    external_command:
+      enabled: true
+
     binance_futures:
       enabled: true
       markets:

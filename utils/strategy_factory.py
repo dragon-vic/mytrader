@@ -43,6 +43,8 @@ def enabled_instruments(settings: dict[str, Any]) -> list[str]:
     for cfg in settings["data"]["clients"].values():
         if not cfg.get("enabled") or cfg.get("markets_all"):
             continue
+        if cfg["adapter"] in {"external_signal", "external_command"}:
+            continue
         factory = InstrumentFactory.from_client(cfg)
         values.extend(str(factory.instrument_id(market)) for market in factory.markets)
     return values

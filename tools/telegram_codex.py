@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,24 @@ SESSION_FILE = Path(__file__).resolve().parent / ".telegram_codex_session"
 MAX_MESSAGE = 3800
 POLL_TIMEOUT = 5
 TMUX_SESSION = "telegram-codex"
+ORDER_PROMPT = """给我当前正在运行的策略的 snapshot 信息。
+
+重点看订单/动作记录。每一行代表一次 long 或 short，用 ↑ 表示 long，用 ↓ 表示 short。
+
+输出字段要窄，适合手机 Telegram 查看：
+- 北京时间只显示小时:分钟
+- 方向用 ↑/↓
+- actual edge
+- signal edge
+- 累计 qty
+- 列名写完整，使用 <pre> 等宽文本对齐
+
+参考格式：
+<pre>方向  actual  signal  累计qty  时间
+↑     554     557     2        16:30
+↓     520     525     1        16:42</pre>
+
+数值默认不要小数点；除非不带小数会影响判断。不要输出宽表，不要倾倒完整 JSON。"""
 SYSTEM_PROMPT = """你是通过 Telegram 操作本机项目 /home/ubuntu/pycharm_nt 的 Codex。用户发来的每条 Telegram 消息都是真实任务指令，不是闲聊模拟。
 
 默认使用中文，回答要简短、直接、可执行。除非用户要求解释，不要长篇分析。能直接做的事就直接做；需要运行命令或改文件时可以执行。你拥有当前项目的完整读写和运行权限，但不要改动与任务无关的文件。
@@ -38,7 +57,11 @@ SYSTEM_PROMPT = """你是通过 Telegram 操作本机项目 /home/ubuntu/pycharm
 
 根据任务复杂度和回复长度设计返回 HTML 的结构。简单任务用一两句话即可，不要硬拆块；复杂任务可以用 <b>短标题</b> 分块，用空行分隔，用 <code>...</code> 标记路径、命令、数值或关键词，用 <pre>...</pre> 放多行代码、表格文本或日志摘录。
 
+用户主要在手机上查看 Telegram 回复。发送数据表、snapshot、订单、持仓、日志摘要时，列要窄，字段名要短，避免宽表；数值默认不要带小数点，除非小数对判断很关键或用户明确要求。
+
 除非用户明确指定，不要主动执行长耗时、高 CPU、高内存、海量 IO、全仓库大规模计算或可能长期占用资源的任务。需要这类任务时，先说明你将采用较轻量的检查或给出建议。
+
+不要主动重启 Telegram bot、live 策略、collector、tmux session 或其它本机服务；如果判断需要重启，只说明原因和建议命令，等待用户明确下令后再执行。
 
 不要在最终回答里倾倒完整日志。只汇报关键结果、改了什么、验证了什么、还有什么风险。路径、命令、数值要写清楚。"""
 
@@ -63,6 +86,13 @@ class Telegram:
             self.offset = max(self.offset, int(update["update_id"]) + 1)
         return updates
 
+    def confirm_updates(self) -> None:
+        requests.get(
+            f"{self.base}/getUpdates",
+            params={"offset": self.offset, "timeout": 0, "allowed_updates": json.dumps(["message"])},
+            timeout=5,
+        ).raise_for_status()
+
     def send(self, chat_id: str, text: str) -> list[int]:
         message_ids: list[int] = []
         for part in split_text(text):
@@ -72,24 +102,18 @@ class Telegram:
                 message_ids.append(self._send_html(chat_id, f"<pre>{html.escape(part)}</pre>"))
         return message_ids
 
-    def react(self, chat_id: str, message_id: int, emoji: str) -> None:
-        try:
-            response = requests.post(
-                f"{self.base}/setMessageReaction",
-                json={
-                    "chat_id": chat_id,
-                    "message_id": message_id,
-                    "reaction": [{"type": "emoji", "emoji": emoji}],
-                },
-                timeout=5,
-            )
-            if not response.ok:
-                print(
-                    f"telegram_reaction_error status={response.status_code} body={response.text[:200]}",
-                    flush=True,
+    def delete(self, chat_id: str, message_ids: list[int]) -> None:
+        for message_id in message_ids:
+            if not message_id:
+                continue
+            try:
+                requests.post(
+                    f"{self.base}/deleteMessage",
+                    json={"chat_id": chat_id, "message_id": message_id},
+                    timeout=5,
                 )
-        except requests.RequestException as exc:
-            print(f"telegram_reaction_error {type(exc).__name__}", flush=True)
+            except requests.RequestException as exc:
+                print(f"telegram_delete_error {type(exc).__name__}", flush=True)
 
     def _send_html(self, chat_id: str, text: str) -> int:
         response = requests.post(
@@ -117,6 +141,10 @@ class CodexRunner:
         self.queued_ids: set[int] = set()
         self.proc: subprocess.Popen[str] | None = None
         self.cancel_requested = False
+        self.notice_ids: list[int] = []
+        self.notice_open = False
+        self.notice_gen = 0
+        self.notice_sent = False
 
     def submit(self, chat_id: str, message_id: int, prompt: str) -> None:
         proc = None
@@ -126,23 +154,27 @@ class CodexRunner:
                 self.queued_ids.add(message_id)
                 self.cancel_requested = True
                 proc = self.proc
+                notice_gen = self.notice_gen
                 busy = True
             else:
                 self.busy = True
+                self.notice_open = True
+                self.notice_gen += 1
+                self.notice_sent = False
+                notice_gen = self.notice_gen
                 busy = False
         if busy:
-            self.bot.react(chat_id, message_id, "⚡")
+            self._notice(chat_id, "<i>插入</i>", notice_gen)
             stop_proc(proc)
             return
-        thread = threading.Thread(target=self._run, args=(chat_id, [(message_id, prompt)]), daemon=True)
+        thread = threading.Thread(target=self._run, args=(chat_id, [(message_id, prompt)], notice_gen), daemon=True)
         thread.start()
 
-    def _run(self, chat_id: str, batch: list[tuple[int, str]]) -> None:
+    def _run(self, chat_id: str, batch: list[tuple[int, str]], notice_gen: int) -> None:
         start = time.monotonic()
         while True:
-            for message_id, _prompt in batch:
-                if not self._is_queued(message_id):
-                    self.bot.react(chat_id, message_id, "👀")
+            if any(not self._is_queued(message_id) for message_id, _prompt in batch):
+                self._notice(chat_id, "<i>推理中</i>", notice_gen)
             try:
                 result, usage = run_codex(merge_prompts(batch), self.session_file, self._set_proc, self._clear_proc)
             except CodexCancelled:
@@ -150,10 +182,9 @@ class CodexRunner:
                 continue
             except Exception as exc:
                 batch = self._finish(batch)
-                for message_id, _prompt in batch:
-                    self.bot.react(chat_id, message_id, "😱")
                 detail = str(exc) if isinstance(exc, RuntimeError) else f"{type(exc).__name__}: {exc}"
-                text = html.escape(f"Codex 运行失败：{detail}")
+                text = html.escape(detail)
+                self._delete_notices(chat_id, notice_gen)
                 self.bot.send(chat_id, with_stats(text, start, None))
                 return
 
@@ -165,10 +196,39 @@ class CodexRunner:
                     continue
                 self.busy = False
                 self._clear_queued(batch)
-            for message_id, _prompt in batch:
-                self.bot.react(chat_id, message_id, "👌")
+            self._delete_notices(chat_id, notice_gen)
             self.bot.send(chat_id, with_stats(result or "Codex 没有返回内容", start, usage))
             return
+
+    def _notice(self, chat_id: str, text: str, notice_gen: int) -> None:
+        with self.lock:
+            if notice_gen != self.notice_gen or self.notice_sent:
+                return
+            self.notice_sent = True
+        thread = threading.Thread(target=self._send_notice, args=(chat_id, text, notice_gen), daemon=True)
+        thread.start()
+
+    def _send_notice(self, chat_id: str, text: str, notice_gen: int) -> None:
+        message_ids = self.bot.send(chat_id, text)
+        should_delete = False
+        with self.lock:
+            if self.notice_open and notice_gen == self.notice_gen:
+                self.notice_ids.extend(message_ids)
+            else:
+                should_delete = True
+        if should_delete:
+            self.bot.delete(chat_id, message_ids)
+
+    def _delete_notices(self, chat_id: str, notice_gen: int) -> None:
+        with self.lock:
+            if notice_gen != self.notice_gen:
+                message_ids = []
+            else:
+                self.notice_open = False
+                self.notice_sent = False
+                message_ids = self.notice_ids
+                self.notice_ids = []
+        self.bot.delete(chat_id, message_ids)
 
     def _set_proc(self, proc: subprocess.Popen[str]) -> None:
         with self.lock:
@@ -209,6 +269,9 @@ class CodexRunner:
             self.proc = None
         return batch
 
+    def status_html(self) -> str:
+        return codex_status_html(self.session_file)
+
 
 def split_text(text: str) -> list[str]:
     if len(text) <= MAX_MESSAGE:
@@ -243,6 +306,100 @@ def format_k(value: int) -> str:
     if value >= 1_000_000:
         return f"{value / 1_000_000:.1f}M"
     return f"{value / 1000:.1f}K"
+
+
+# 读取最近的 Codex token_count 事件，给 /status 展示额度和上下文。
+def codex_status_html(session_file: Path) -> str:
+    event = latest_token_count(session_file)
+    if event is None:
+        return "<b>Codex</b>\n\n<i>还没有找到用量记录</i>"
+    payload = event.get("payload") or {}
+    info = payload.get("info") or {}
+    limits = payload.get("rate_limits") or {}
+    last_usage = info.get("last_token_usage") or {}
+    context_used = int(last_usage.get("input_tokens") or 0)
+    context_total = int(info.get("model_context_window") or 0)
+    return (
+        "<b>Codex</b>\n"
+        "<pre>"
+        f"5h  {limit_line(limits.get('primary'))}\n"
+        f"7d  {limit_line(limits.get('secondary'))}\n"
+        f"上下文 {format_tokens(context_used)}/{format_tokens(context_total)}"
+        "</pre>"
+    )
+
+
+# 优先找当前 Telegram resume session，找不到再退到最近的 Codex session 文件。
+def latest_token_count(session_file: Path) -> dict[str, Any] | None:
+    session_path = codex_session_path(read_session(session_file))
+    paths = [session_path] if session_path else []
+    paths.extend(recent_codex_sessions())
+    seen: set[Path] = set()
+    for path in paths:
+        if path in seen:
+            continue
+        seen.add(path)
+        event = last_token_count(path)
+        if event is not None:
+            return event
+    return None
+
+
+def codex_session_path(session_id: str | None) -> Path | None:
+    if not session_id:
+        return None
+    root = Path.home() / ".codex" / "sessions"
+    matches = list(root.glob(f"**/*{session_id}.jsonl"))
+    if not matches:
+        return None
+    return max(matches, key=lambda path: path.stat().st_mtime)
+
+
+def recent_codex_sessions() -> list[Path]:
+    root = Path.home() / ".codex" / "sessions"
+    if not root.exists():
+        return []
+    return sorted(root.glob("**/*.jsonl"), key=lambda path: path.stat().st_mtime, reverse=True)
+
+
+def last_token_count(path: Path) -> dict[str, Any] | None:
+    last = None
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for line in lines:
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        payload = event.get("payload") or {}
+        if event.get("type") == "event_msg" and payload.get("type") == "token_count":
+            last = event
+    return last
+
+
+def limit_line(raw_limit: Any) -> str:
+    if not isinstance(raw_limit, dict):
+        return "剩余 ? | 刷新 ?"
+    used = float(raw_limit.get("used_percent") or 0)
+    remain = max(0.0, 100.0 - used)
+    return f"剩余 {remain:.0f}% | 刷新 {format_reset(raw_limit.get('resets_at'))}"
+
+
+def format_reset(value: Any) -> str:
+    if not value:
+        return "?"
+    tz = timezone(timedelta(hours=8))
+    return datetime.fromtimestamp(int(value), tz).strftime("%m-%d %H:%M")
+
+
+def format_tokens(value: int) -> str:
+    if value >= 1_000_000:
+        return f"{value / 1_000_000:.2f}M"
+    if value >= 1000:
+        return f"{value / 1000:.1f}K"
+    return str(value)
 
 
 class CodexCancelled(Exception):
@@ -316,7 +473,9 @@ def run_codex(
         session_file.parent.mkdir(parents=True, exist_ok=True)
         session_file.write_text(new_session, encoding="utf-8")
     if proc.returncode != 0:
-        detail = stderr.strip() or output or f"exit code {proc.returncode}"
+        detail = "\n\n".join(part for part in [stderr.strip(), output] if part).strip()
+        if not detail:
+            detail = f"codex exited with code {proc.returncode}"
         raise RuntimeError(detail[-MAX_MESSAGE:])
     return output, usage
 
@@ -353,15 +512,14 @@ def parse_codex_output(stdout: str) -> tuple[str, str | None, dict[str, Any] | N
             if isinstance(raw_usage, dict):
                 usage = raw_usage
         if event.get("type") == "error":
-            message = event.get("message")
-            if message:
-                errors.append(str(message))
+            text = codex_error_text(event)
+            if text:
+                errors.append(text)
         if event.get("type") == "turn.failed":
             error = event.get("error")
-            if isinstance(error, dict):
-                message = error.get("message")
-                if message:
-                    errors.append(str(message))
+            text = codex_error_text(error)
+            if text:
+                errors.append(text)
         item = event.get("item") or {}
         if item.get("type") == "agent_message":
             text = item.get("text")
@@ -372,6 +530,14 @@ def parse_codex_output(stdout: str) -> tuple[str, str | None, dict[str, Any] | N
     if errors:
         return errors[-1], session_id, usage
     return "\n".join(fallback).strip(), session_id, usage
+
+
+def codex_error_text(error: Any) -> str:
+    if isinstance(error, dict):
+        return json.dumps(error, ensure_ascii=False, indent=2)
+    if error:
+        return str(error)
+    return ""
 
 
 def allowed(chat_id: str, allowed_chat: str | None) -> bool:
@@ -414,6 +580,59 @@ def sh_quote(value: str) -> str:
     return "'" + value.replace("'", "'\"'\"'") + "'"
 
 
+def bot_command(text: str) -> str:
+    command = text.split(maxsplit=1)[0].split("@", maxsplit=1)[0]
+    return command.lower()
+
+
+def is_reset_command(text: str) -> bool:
+    return bot_command(text) == "/reset"
+
+
+def is_status_command(text: str) -> bool:
+    return bot_command(text) == "/status"
+
+
+def is_order_command(text: str) -> bool:
+    return bot_command(text) == "/order"
+
+
+def restart_bot(bot: Telegram, chat_id: str) -> None:
+    bot.send(chat_id, "<i>正在重启Bot</i>")
+    bot.confirm_updates()
+    restart_self()
+    os._exit(0)
+
+
+# 从 tmux 内触发重启时，先在 tmux 外启动一个同脚本进程，让 ensure_tmux 重建会话。
+def restart_self() -> None:
+    env = os.environ.copy()
+    env.pop("TMUX", None)
+    script = Path(__file__).resolve()
+    command = f"sleep 0.5; exec {sh_quote(sys.executable)} {sh_quote(str(script))}"
+    subprocess.Popen(
+        ["/bin/sh", "-c", command],
+        cwd=ROOT,
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
+def handle_bot_command(bot: Telegram, runner: CodexRunner, chat_id: str, message_id: int, text: str) -> bool:
+    if is_status_command(text):
+        bot.send(chat_id, runner.status_html())
+        return True
+    if is_reset_command(text):
+        restart_bot(bot, chat_id)
+        return True
+    if is_order_command(text):
+        runner.submit(chat_id, message_id, ORDER_PROMPT)
+        return True
+    return False
+
+
 def main() -> None:
     if not ensure_tmux():
         return
@@ -440,8 +659,11 @@ def main() -> None:
                     if not allowed(incoming_chat, chat_id):
                         continue
                     text = str(message.get("text") or "").strip()
+                    message_id = int(message["message_id"])
+                    if text and handle_bot_command(bot, runner, incoming_chat, message_id, text):
+                        continue
                     if text:
-                        runner.submit(incoming_chat, int(message["message_id"]), text)
+                        runner.submit(incoming_chat, message_id, text)
             except Exception as exc:
                 print(f"telegram_codex_error {type(exc).__name__}: {exc}", flush=True)
                 time.sleep(5)
