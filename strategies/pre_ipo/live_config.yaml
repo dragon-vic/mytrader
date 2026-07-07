@@ -4,13 +4,11 @@ strategy:
   config: AnthropicArbConfig
   params:
     instruments: enabled
-
+    # OKX 2026-06-30 对 ANTHROPIC 做 rebase：价格 /10，数量 *10。
+    okx_multiplier: 10
     # window_minutes 同时控制启动时读取 collector 的范围，以及 edge 均值/std 的时间窗口；360 = 6h。
     window_minutes: 360
 
-    # OKX 2026-06-30 对 ANTHROPIC 做 rebase：价格 /10，数量 *10。
-    okx_price_multiplier: 10
-    okx_qty_multiplier: 10
 
     # long_edge 低于均线 entry 开 long；short_edge 高于均线 entry 开 short。
     # 持仓后反向 edge 偏离 exit 就减仓或翻向；reduce mode 只允许减仓方向。

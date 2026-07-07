@@ -57,7 +57,7 @@ class AnthropicArbConfig(StrategyConfig, frozen=True):
     instruments: list[str]
     window_minutes: Decimal
     snapshot_path: str
-    okx_price_multiplier: Decimal
+    okx_multiplier: Decimal
     entry_bps: Decimal
     exit_bps: Decimal
     std_mult: Decimal
@@ -65,7 +65,7 @@ class AnthropicArbConfig(StrategyConfig, frozen=True):
     short_min_bps: Decimal
     max_position: Decimal
     qty: Decimal
-    okx_qty_multiplier: Decimal
+    okx_multiplier: Decimal
     margin_leverage: Decimal
     margin_buffer: Decimal
 
@@ -82,7 +82,7 @@ class AnthropicArbStrategy(Strategy):
         self.snapshot_path = Path(config.snapshot_path)
         self.edge = EdgePair(
             window_ns=int(config.window_minutes * Decimal(MINUTE_NS)),
-            okx_price_multiplier=config.okx_price_multiplier,
+            okx_price_multiplier=config.okx_multiplier,
             long_mean_bps=Decimal("0"),
             short_mean_bps=Decimal("0"),
             long_std_bps=Decimal("0"),
@@ -94,7 +94,7 @@ class AnthropicArbStrategy(Strategy):
             short_min_bps=config.short_min_bps,
         )
         self.qty = config.qty
-        self.okx_qty_multiplier = config.okx_qty_multiplier
+        self.okx_qty_multiplier = config.okx_multiplier
         self.max_position = config.max_position
         self.margin_leverage = config.margin_leverage
         self.margin_buffer = config.margin_buffer
