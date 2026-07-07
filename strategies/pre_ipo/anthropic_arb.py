@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import time
 from collections import deque
-from dataclasses import dataclass
 from datetime import datetime
 from datetime import timedelta
 from datetime import timezone
@@ -27,233 +26,31 @@ from nautilus_trader.model.events import OrderDenied
 from nautilus_trader.model.events import OrderExpired
 from nautilus_trader.model.events import OrderFilled
 from nautilus_trader.model.events import OrderRejected
+from nautilus_trader.model.identifiers import ClientId
 from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.trading.strategy import Strategy
+from strategies.pre_ipo.anthropic_core import ASSET
+from strategies.pre_ipo.anthropic_core import BPS
+from strategies.pre_ipo.anthropic_core import BINANCE_EXIT_SLIPPAGE_BPS
+from strategies.pre_ipo.anthropic_core import LONG_EDGE
+from strategies.pre_ipo.anthropic_core import MINUTE_NS
+from strategies.pre_ipo.anthropic_core import OKX_EXIT_SLIPPAGE_BPS
+from strategies.pre_ipo.anthropic_core import SHORT_EDGE
+from strategies.pre_ipo.anthropic_core import STATE_FAIL
+from strategies.pre_ipo.anthropic_core import STATE_FLAT
+from strategies.pre_ipo.anthropic_core import STATE_LONG
+from strategies.pre_ipo.anthropic_core import STATE_PENDING
+from strategies.pre_ipo.anthropic_core import STATE_SHORT
+from strategies.pre_ipo.anthropic_core import EdgePair
+from strategies.pre_ipo.anthropic_core import PendingLeg
+from strategies.pre_ipo.anthropic_core import PendingPair
+from strategies.pre_ipo.anthropic_core import PositionState
+from utils.arguments import EXTERNAL_COMMAND_CLIENT_NAME
 from utils.arguments import NODE_STOP_TOPIC
 
 
-BPS = Decimal("10000")
-MINUTE_NS = 60_000_000_000
-ASSET = "ANTHROPIC"
-LONG_EDGE = "long_edge"
-SHORT_EDGE = "short_edge"
 BEIJING_TZ = timezone(timedelta(hours=8))
 COLLECTOR_COLUMNS = ("ts_local_ns", "ts_exchange_ms", "venue", "symbol", "bid", "ask", "bid_size", "ask_size")
-STATE_FLAT = "flat"
-STATE_PENDING = "pending"
-STATE_LONG = "long"
-STATE_SHORT = "short"
-STATE_FAIL = "fail"
-
-
-@dataclass
-class PendingLeg:
-    order_id: str
-    instrument_id: InstrumentId
-    side: OrderSide
-    target_qty: Decimal
-    filled_qty: Decimal = Decimal("0")
-    filled_notional: Decimal = Decimal("0")
-    submit_ns: int | None = None
-    fill_event_ns: int | None = None
-    failed: bool = False
-
-    def filled(self) -> bool:
-        return self.filled_qty >= self.target_qty
-
-    def done(self) -> bool:
-        return self.failed or self.filled()
-
-
-@dataclass
-class PendingPair:
-    legs: dict[str, PendingLeg]
-    signal: str
-    edge_side: str
-    signal_edge_bps: Decimal
-    mean_bps: Decimal
-    created_ns: int
-    before_inventory: Decimal
-    after_inventory: Decimal
-    repair: PendingLeg | None = None
-
-    def record_fill(self, order_id: str, qty: Decimal, px: Decimal, event_ns: int) -> None:
-        leg = self.leg(order_id)
-        leg.filled_qty += qty
-        leg.filled_notional += qty * px
-        leg.fill_event_ns = max(leg.fill_event_ns or 0, event_ns)
-
-    def record_failed(self, order_id: str) -> None:
-        self.leg(order_id).failed = True
-
-    def is_done(self) -> bool:
-        return all(leg.done() for leg in self.legs.values())
-
-    def failed_count(self) -> int:
-        return sum(1 for leg in self.legs.values() if leg.failed)
-
-    def is_complete(self) -> bool:
-        return all(leg.filled() for leg in self.legs.values())
-
-    def is_all_failed(self) -> bool:
-        return self.is_done() and self.failed_count() == len(self.legs)
-
-    def has_order(self, order_id: str) -> bool:
-        return order_id in self.legs or (self.repair is not None and self.repair.order_id == order_id)
-
-    def leg(self, order_id: str) -> PendingLeg:
-        if order_id in self.legs:
-            return self.legs[order_id]
-        return self.repair
-
-    def filled_legs(self) -> list[PendingLeg]:
-        return [leg for leg in self.legs.values() if leg.filled()]
-
-    def repair_done(self) -> bool:
-        return self.repair is not None and self.repair.filled()
-
-    def avg_px(self, instrument_id: InstrumentId) -> Decimal | None:
-        for leg in self.legs.values():
-            if leg.instrument_id == instrument_id and leg.filled_qty > 0:
-                return leg.filled_notional / leg.filled_qty
-        return None
-
-
-@dataclass
-class EdgePair:
-    window_ns: int
-    okx_price_multiplier: Decimal
-    long_mean_bps: Decimal
-    short_mean_bps: Decimal
-    entry_bps: Decimal
-    exit_bps: Decimal
-    long_max_bps: Decimal
-    short_min_bps: Decimal
-    long_bps: Decimal | None = None
-    short_bps: Decimal | None = None
-    long_values: deque[tuple[int, Decimal]] = None
-    short_values: deque[tuple[int, Decimal]] = None
-    minute_ns: int | None = None
-    minute_prices: dict[InstrumentId, tuple[Decimal, Decimal, int]] = None
-    last_price_means: dict[InstrumentId, tuple[Decimal, Decimal]] = None
-
-    def __post_init__(self) -> None:
-        self.long_values = deque()
-        self.short_values = deque()
-        self.minute_prices = {}
-        self.last_price_means = {}
-
-    def update(self, binance: QuoteTick, okx: QuoteTick) -> None:
-        bn_bid = Decimal(str(binance.bid_price))
-        bn_ask = Decimal(str(binance.ask_price))
-        okx_bid = Decimal(str(okx.bid_price)) * self.okx_price_multiplier
-        okx_ask = Decimal(str(okx.ask_price)) * self.okx_price_multiplier
-        self.long_bps, self.short_bps = self.from_prices(bn_bid, bn_ask, okx_bid, okx_ask)
-
-    def record_quote(self, tick: QuoteTick, binance_id: InstrumentId, okx_id: InstrumentId) -> None:
-        minute_ns = int(tick.ts_event) // MINUTE_NS * MINUTE_NS
-        if self.minute_ns is None:
-            self.minute_ns = minute_ns
-        while minute_ns > self.minute_ns:
-            self.close_minute(self.minute_ns, binance_id, okx_id)
-            self.minute_ns += MINUTE_NS
-        bid_sum, ask_sum, count = self.minute_prices.get(tick.instrument_id, (Decimal("0"), Decimal("0"), 0))
-        self.minute_prices[tick.instrument_id] = (
-            bid_sum + Decimal(str(tick.bid_price)),
-            ask_sum + Decimal(str(tick.ask_price)),
-            count + 1,
-        )
-
-    def fill_to(self, now_ns: int, binance_id: InstrumentId, okx_id: InstrumentId) -> None:
-        current_minute_ns = now_ns // MINUTE_NS * MINUTE_NS
-        while self.minute_ns is not None and self.minute_ns < current_minute_ns:
-            self.close_minute(self.minute_ns, binance_id, okx_id)
-            self.minute_ns += MINUTE_NS
-
-    def close_minute(self, minute_ns: int, binance_id: InstrumentId, okx_id: InstrumentId) -> None:
-        for instrument_id, (bid_sum, ask_sum, count) in self.minute_prices.items():
-            self.last_price_means[instrument_id] = bid_sum / Decimal(count), ask_sum / Decimal(count)
-        bn_bid, bn_ask = self.last_price_means[binance_id]
-        okx_bid, okx_ask = self.last_price_means[okx_id]
-        okx_bid *= self.okx_price_multiplier
-        okx_ask *= self.okx_price_multiplier
-        long_bps, short_bps = self.from_prices(bn_bid, bn_ask, okx_bid, okx_ask)
-        self._add_value(self.long_values, minute_ns, long_bps)
-        self._add_value(self.short_values, minute_ns, short_bps)
-        self.update_mean(self._mean(self.long_values), self._mean(self.short_values))
-        self.minute_prices.clear()
-
-    def _add_value(self, values: deque[tuple[int, Decimal]], ts_ns: int, value: Decimal) -> None:
-        values.append((ts_ns, value))
-        cutoff = ts_ns - self.window_ns
-        while values and values[0][0] < cutoff:
-            values.popleft()
-
-    def _mean(self, values: deque[tuple[int, Decimal]]) -> Decimal:
-        return sum((value for _, value in values), Decimal("0")) / Decimal(len(values))
-
-    def warm_from_rows(self, rows: list[dict[str, object]], end_ns: int, binance_id: InstrumentId, okx_id: InstrumentId) -> None:
-        minute_prices: dict[int, dict[str, tuple[Decimal, Decimal, int]]] = {}
-        for row in rows:
-            minute_ns = int(row["ts_local_ns"]) // MINUTE_NS * MINUTE_NS
-            venue = str(row["venue"]).upper()
-            item = minute_prices.setdefault(minute_ns, {})
-            bid = Decimal(str(row["bid"]))
-            ask = Decimal(str(row["ask"]))
-            old = item.get(venue)
-            if old is None:
-                item[venue] = bid, ask, 1
-            else:
-                item[venue] = old[0] + bid, old[1] + ask, old[2] + 1
-        last: dict[str, tuple[Decimal, Decimal]] = {}
-        minute_ns = min(minute_prices)
-        end_minute_ns = end_ns // MINUTE_NS * MINUTE_NS
-        while minute_ns <= end_minute_ns:
-            for venue, (bid_sum, ask_sum, count) in minute_prices.get(minute_ns, {}).items():
-                last[venue] = bid_sum / Decimal(count), ask_sum / Decimal(count)
-            if "BINANCE" in last and "OKX" in last:
-                bn_bid, bn_ask = last["BINANCE"]
-                okx_bid, okx_ask = last["OKX"]
-                long_bps, short_bps = self.from_prices(
-                    bn_bid,
-                    bn_ask,
-                    okx_bid * self.okx_price_multiplier,
-                    okx_ask * self.okx_price_multiplier,
-                )
-                self._add_value(self.long_values, minute_ns, long_bps)
-                self._add_value(self.short_values, minute_ns, short_bps)
-            minute_ns += MINUTE_NS
-        if not self.long_values or not self.short_values:
-            return
-        self.update_mean(self._mean(self.long_values), self._mean(self.short_values))
-        self.last_price_means[binance_id] = last["BINANCE"]
-        self.last_price_means[okx_id] = last["OKX"]
-        if self.minute_ns is None:
-            self.minute_ns = end_minute_ns
-
-    def from_prices(
-        self,
-        bn_bid: Decimal,
-        bn_ask: Decimal,
-        okx_bid: Decimal,
-        okx_ask: Decimal,
-    ) -> tuple[Decimal, Decimal]:
-        bn_mid = (bn_bid + bn_ask) / Decimal("2")
-        # edge 定义为 OKX 相对 Binance 的溢价；long 买 OKX/卖 Binance，short 卖 OKX/买 Binance。
-        return (okx_ask - bn_bid) / bn_mid * BPS, (okx_bid - bn_ask) / bn_mid * BPS
-
-    def update_mean(self, long_mean_bps: Decimal, short_mean_bps: Decimal) -> None:
-        self.long_mean_bps = long_mean_bps
-        self.short_mean_bps = short_mean_bps
-
-    def signal(self, state: str) -> str | None:
-        long_threshold = self.exit_bps if state == STATE_SHORT else self.entry_bps
-        short_threshold = self.exit_bps if state == STATE_LONG else self.entry_bps
-        if self.long_mean_bps - self.long_bps > long_threshold and self.long_bps <= self.long_max_bps:
-            return "long"
-        if self.short_bps - self.short_mean_bps > short_threshold and self.short_bps >= self.short_min_bps:
-            return "short"
-        return None
 
 
 class AnthropicArbConfig(StrategyConfig, frozen=True):
@@ -263,16 +60,23 @@ class AnthropicArbConfig(StrategyConfig, frozen=True):
     okx_price_multiplier: Decimal
     entry_bps: Decimal
     exit_bps: Decimal
+    std_mult: Decimal
     long_max_bps: Decimal
     short_min_bps: Decimal
+    max_position: Decimal
     qty: Decimal
     okx_qty_multiplier: Decimal
+    margin_leverage: Decimal
+    margin_buffer: Decimal
 
 
 class AnthropicArbStrategy(Strategy):
     def __init__(self, config: AnthropicArbConfig) -> None:
         super().__init__(config)
-        self.instruments = [InstrumentId.from_str(value) for value in config.instruments]
+        instruments = [InstrumentId.from_str(value) for value in config.instruments]
+        self.binance_id = instruments[0]
+        self.okx_id = instruments[1]
+        self.instrument_ids = [self.binance_id, self.okx_id]
         self.quotes: dict[InstrumentId, QuoteTick] = {}
         self.housekeeping_interval_ns = 1_000_000_000
         self.snapshot_path = Path(config.snapshot_path)
@@ -281,72 +85,91 @@ class AnthropicArbStrategy(Strategy):
             okx_price_multiplier=config.okx_price_multiplier,
             long_mean_bps=Decimal("0"),
             short_mean_bps=Decimal("0"),
+            long_std_bps=Decimal("0"),
+            short_std_bps=Decimal("0"),
             entry_bps=config.entry_bps,
             exit_bps=config.exit_bps,
+            std_mult=config.std_mult,
             long_max_bps=config.long_max_bps,
             short_min_bps=config.short_min_bps,
         )
         self.qty = config.qty
         self.okx_qty_multiplier = config.okx_qty_multiplier
+        self.max_position = config.max_position
+        self.margin_leverage = config.margin_leverage
+        self.margin_buffer = config.margin_buffer
         self.trade_state = STATE_FLAT
-        self.reduce_mode = False
+        self.mode = "normal"
         self.pending: PendingPair | None = None
+        self.positions = {
+            self.binance_id: PositionState(self.binance_id),
+            self.okx_id: PositionState(self.okx_id),
+        }
         self.housekeeping_seq = 0
         self.action_rows: deque[dict[str, str]] = deque(maxlen=200)
 
-    # 策略启动入口，后续逐步补订阅、warmup 和状态初始化。
+    # 策略启动入口：检查空仓、初始化窗口、订阅 quote 和外部命令。
     def on_start(self) -> None:
         self._warm_initial_window()
-        for instrument_id in self.instruments:
+        self._check_startup()
+        for instrument_id in self.instrument_ids:
             self.subscribe_quote_ticks(instrument_id)
-        self.subscribe_data(external_command_type())
+        self.subscribe_data(external_command_type(), client_id=ClientId(EXTERNAL_COMMAND_CLIENT_NAME))
         self._schedule_housekeeping()
-        self._maybe_write_snapshot(self.clock.timestamp_ns())
+        self._write_snapshot(self.clock.timestamp_ns())
 
-    # 策略停止入口，后续补充清理和退出状态写入。
+    # 策略停止入口：stop mode 已负责减仓，这里只取消订阅。
     def on_stop(self) -> None:
-        self._flatten_on_stop()
-        self.unsubscribe_data(external_command_type())
-        for instrument_id in self.instruments:
+        self.unsubscribe_data(external_command_type(), client_id=ClientId(EXTERNAL_COMMAND_CLIENT_NAME))
+        for instrument_id in self.instrument_ids:
             self.unsubscribe_quote_ticks(instrument_id)
 
+    # 外部命令入口：monitor 通过 external_command 控制 normal/reduce/stop。
     def on_data(self, data) -> None:
-        command = self._external_command(data)
-        if command is None:
+        if isinstance(data, ExternalCommand):
+            command = data
+        elif isinstance(data, CustomData) and isinstance(data.data, ExternalCommand):
+            command = data.data
+        else:
             return
         name = command.command.strip().lower()
         if name == "stop":
             self.log.warning(f"external_command_stop source={command.source} reason={command.reason}")
-            self._flatten_on_stop()
-            self.msgbus.publish(NODE_STOP_TOPIC, {"source": "anthropic_arb", "reason": command.reason or "monitor"})
+            self.mode = "stop"
             return
         if name == "reduce":
-            self.reduce_mode = True
-            self.log.warning(f"reduce_mode_on source={command.source}")
+            self.mode = "reduce"
+            self.log.warning(f"mode_reduce source={command.source}")
             return
-        if name == "resume":
-            self.reduce_mode = False
-            self.log.warning(f"reduce_mode_off source={command.source}")
+        if name == "normal":
+            self.mode = "normal"
+            self.log.warning(f"mode_normal source={command.source}")
             return
         self.log.warning(f"external_command_ignored command={command.command} source={command.source}")
 
+    # quote 主入口：更新 edge，生成 signal，检查通过后提交双腿订单。
     def on_quote_tick(self, tick: QuoteTick) -> None:
         self.quotes[tick.instrument_id] = tick
-        self.edge.record_quote(tick, self.instruments[0], self.instruments[1])
-        self._update_edges()
+        self.edge.record_quote(tick, self.binance_id, self.okx_id)
+        self.edge.update(self.quotes[self.binance_id], self.quotes[self.okx_id])
         if self.trade_state not in {STATE_PENDING, STATE_FAIL}:
-            signal = self._signal_determination()
-            if signal is not None and self._signal_allowed(signal):
+            signal = self.edge.signal(self.trade_state)
+            signal = self._checked_signal(signal)
+            if signal is not None:
                 self._submit_signal(signal)
 
+    # 成交事件入口：先更新仓位账本，再推进 pending 生命周期。
     def on_order_filled(self, event: OrderFilled) -> None:
         order_id = str(event.client_order_id)
+        event_qty = self._event_qty(event)
+        event_px = self._event_px(event)
+        self.positions[event.instrument_id].apply_fill(event.order_side, event_qty, event_px, self._event_fee(event))
         if self.pending is None or not self.pending.has_order(order_id):
             return
         self.pending.record_fill(
             order_id,
-            Decimal(str(event.last_qty)),
-            Decimal(str(event.last_px).split()[0].replace("_", "")),
+            event_qty,
+            event_px,
             int(event.ts_event),
         )
         self._resolve_pending_if_done()
@@ -363,24 +186,124 @@ class AnthropicArbStrategy(Strategy):
     def on_order_expired(self, event: OrderExpired) -> None:
         self._mark_order_failed(str(event.client_order_id))
 
-    def _update_edges(self) -> None:
-        binance = self.quotes[self.instruments[0]]
-        okx = self.quotes[self.instruments[1]]
-        self.edge.update(binance, okx)
+    # 启动检查集中在这里，避免策略接管外部仓位或缺少交易前置数据。
+    def _check_startup(self) -> None:
+        for instrument_id in self.instrument_ids:
+            if self.cache.instrument(instrument_id) is None:
+                raise RuntimeError(f"startup_instrument_missing instrument={instrument_id}")
+            positions = self.cache.positions_open(instrument_id=instrument_id)
+            if positions:
+                raise RuntimeError(f"start_position_not_empty instrument={instrument_id} positions={len(positions)}")
+            venue = self._venue(instrument_id)
+            if self._account_for_venue(venue) is None:
+                raise RuntimeError(f"startup_account_missing venue={venue} instrument={instrument_id}")
+            if instrument_id not in self.quotes:
+                raise RuntimeError(f"startup_quote_missing instrument={instrument_id}")
+        if self.edge.long_bps is None or self.edge.short_bps is None:
+            raise RuntimeError("startup_edge_missing")
 
-    def _signal_determination(self) -> str | None:
-        return self.edge.signal(self.trade_state)
+    # 从 NT fill 事件取成交数量。
+    def _event_qty(self, event: OrderFilled) -> Decimal:
+        return Decimal(str(event.last_qty))
 
-    def _signal_allowed(self, signal: str) -> bool:
-        if not self.reduce_mode:
-            return True
-        if self.trade_state == STATE_LONG:
-            return signal == "short"
-        if self.trade_state == STATE_SHORT:
-            return signal == "long"
-        return False
+    # 从 NT fill 事件取成交价。
+    def _event_px(self, event: OrderFilled) -> Decimal:
+        return Decimal(str(event.last_px).split()[0].replace("_", ""))
 
-    # 低频维护任务：更新 rolling mean，并按间隔写 snapshot。
+    # 从 NT fill 事件取手续费。
+    def _event_fee(self, event: OrderFilled) -> Decimal:
+        commission = getattr(event, "commission", None)
+        if commission is None:
+            return Decimal("0")
+        return Decimal(str(commission).split()[0].replace("_", ""))
+
+    # signal 生成后的所有交易前检查集中在这里。
+    def _checked_signal(self, signal: str | None) -> str | None:
+        if self.mode == "stop":
+            if self.trade_state == STATE_FLAT:
+                self.mode = "normal"
+                self.msgbus.publish(NODE_STOP_TOPIC, {"source": "anthropic_arb", "reason": "stop_mode_flat"})
+                return None
+            if self.qty == 0:
+                return None
+            signal = "short" if self.trade_state == STATE_LONG else "long"
+        if signal is None:
+            return None
+        if self.qty == 0:
+            return None
+        if self.mode == "reduce":
+            if self.trade_state == STATE_LONG and signal != "short":
+                return None
+            if self.trade_state == STATE_SHORT and signal != "long":
+                return None
+            if self.trade_state == STATE_FLAT:
+                return None
+        before_inventory = self._inventory()
+        trade_qty = self._trade_qty(signal, before_inventory)
+        if trade_qty == 0:
+            return None
+        after_inventory = before_inventory + trade_qty if signal == "long" else before_inventory - trade_qty
+        if abs(after_inventory) > self.max_position:
+            self.log.warning(
+                f"signal_rejected_max_position signal={signal} before={before_inventory} "
+                f"after={after_inventory} max_position={self.max_position}",
+            )
+            return None
+        opens_inventory = (
+            after_inventory != 0
+            and (
+                before_inventory == 0
+                or (before_inventory > 0) != (after_inventory > 0)
+                or abs(after_inventory) > abs(before_inventory)
+            )
+        )
+        if opens_inventory and not self._balance_allowed(signal):
+            return None
+        return signal
+
+    # stop/reduce 模式只减仓，不允许一次反向 signal 翻仓。
+    def _trade_qty(self, signal: str, before_inventory: Decimal) -> Decimal:
+        if self.mode in {"stop", "reduce"} and before_inventory != 0:
+            if before_inventory > 0 and signal == "short":
+                return min(self.qty, before_inventory)
+            if before_inventory < 0 and signal == "long":
+                return min(self.qty, abs(before_inventory))
+        return self.qty
+
+    # 开仓或加仓前做保证金余额检查。
+    def _balance_allowed(self, signal: str) -> bool:
+        for instrument_id, side, qty in self._signal_legs(signal):
+            account = self._account_for_venue(self._venue(instrument_id))
+            if account is None:
+                self.log.warning(f"signal_rejected_balance signal={signal} venue={self._venue(instrument_id)} reason=no_account")
+                return False
+            quote = self.quotes[instrument_id]
+            price = Decimal(str(quote.ask_price if side == OrderSide.BUY else quote.bid_price))
+            required = price * qty / self.margin_leverage * self.margin_buffer
+            money = account.balance_free(USDT)
+            free = Decimal(str(money.as_decimal())) if hasattr(money, "as_decimal") else Decimal(str(money))
+            if free < required:
+                self.log.warning(
+                    f"signal_rejected_balance signal={signal} venue={self._venue(instrument_id)} "
+                    f"free={free} required={required}",
+                )
+                return False
+        return True
+
+    # 把 long/short signal 转为两条实际订单腿。
+    def _signal_legs(self, signal: str, base_qty: Decimal | None = None) -> list[tuple[InstrumentId, OrderSide, Decimal]]:
+        qty = self.qty if base_qty is None else base_qty
+        if signal == "long":
+            return [
+                (self.okx_id, OrderSide.BUY, qty * self.okx_qty_multiplier),
+                (self.binance_id, OrderSide.SELL, qty),
+            ]
+        return [
+            (self.binance_id, OrderSide.BUY, qty),
+            (self.okx_id, OrderSide.SELL, qty * self.okx_qty_multiplier),
+        ]
+
+    # 注册下一次 housekeeping 定时任务。
     def _schedule_housekeeping(self) -> None:
         self.housekeeping_seq += 1
         self.clock.set_time_alert_ns(
@@ -390,49 +313,102 @@ class AnthropicArbStrategy(Strategy):
             allow_past=True,
         )
 
+    # 低频维护任务：更新分钟窗口、mark 仓位浮盈亏、写 snapshot。
     def _on_housekeeping(self) -> None:
         now_ns = self.clock.timestamp_ns()
-        self._update_mean(now_ns)
-        self._maybe_write_snapshot(now_ns)
+        self.edge.fill_to(now_ns, self.binance_id, self.okx_id)
+        for instrument_id, position in self.positions.items():
+            quote = self.quotes[instrument_id]
+            slippage_bps = BINANCE_EXIT_SLIPPAGE_BPS if instrument_id == self.binance_id else OKX_EXIT_SLIPPAGE_BPS
+            position.mark(Decimal(str(quote.bid_price)), Decimal(str(quote.ask_price)), slippage_bps)
+        self._write_snapshot(now_ns)
         self._schedule_housekeeping()
 
-    def _update_mean(self, now_ns: int) -> None:
-        self.edge.fill_to(now_ns, self.instruments[0], self.instruments[1])
-
-    def _maybe_write_snapshot(self, now_ns: int) -> None:
-        self.snapshot_path.parent.mkdir(parents=True, exist_ok=True)
-        data = {
-            "strategy": "anthropic_arb",
-            "strategy_state": self._strategy_state(),
-            "assets": [ASSET],
-            "rows": [],
-            "market_tables": {ASSET: self._market_rows(now_ns)},
-            "action_rows": list(self.action_rows) + self._pending_rows(now_ns),
-            "summary": {ASSET: self._summary_row()},
-            "risk": self._risk_rows(),
-            "inventories": {ASSET: self._inventory()},
+    # 生成策略私有 snapshot；monitor 会按新 schema 单独适配。
+    def _build_snapshot(self, now_ns: int) -> dict[str, object]:
+        positions = {
+            self._venue(instrument_id): {
+                "instrument": str(instrument_id),
+                "qty": self._fmt(position.signed_qty),
+                "avg_px": self._fmt(position.avg_px),
+                "realized_usdt": self._fmt(position.realized_pnl),
+                "unrealized_usdt": self._fmt(position.unrealized_pnl),
+                "fee_usdt": self._fmt(position.fee),
+            }
+            for instrument_id, position in self.positions.items()
         }
+        pending = None
+        if self.pending is not None:
+            pending = {
+                "signal": self.pending.signal,
+                "edge_side": self.pending.edge_side,
+                "signal_edge_bps": self._fmt(self.pending.signal_edge_bps),
+                "mean_bps": self._fmt(self.pending.mean_bps),
+                "age_sec": self._fmt(max((now_ns - self.pending.created_ns) / 1_000_000_000, 0.0)),
+                "orders": [
+                    {
+                        "order_id": leg.order_id,
+                        "instrument": str(leg.instrument_id),
+                        "side": str(leg.side),
+                        "filled_qty": self._fmt(leg.filled_qty),
+                        "target_qty": self._fmt(leg.target_qty),
+                        "failed": leg.failed,
+                    }
+                    for leg in self.pending.legs.values()
+                ],
+            }
+        return {
+            "strategy": "anthropic_arb",
+            "asset": ASSET,
+            "time_ns": now_ns,
+            "state": self.trade_state,
+            "mode": self.mode,
+            "inventory": self._fmt(self._inventory()),
+            "edge": {
+                "long_bps": self._fmt(self.edge.long_bps),
+                "long_mean_bps": self._fmt(self.edge.long_mean_bps),
+                "long_std_bps": self._fmt(self.edge.long_std_bps),
+                "short_bps": self._fmt(self.edge.short_bps),
+                "short_mean_bps": self._fmt(self.edge.short_mean_bps),
+                "short_std_bps": self._fmt(self.edge.short_std_bps),
+            },
+            "positions": positions,
+            "pnl": {
+                "realized_usdt": self._fmt(sum((position.realized_pnl for position in self.positions.values()), Decimal("0"))),
+                "unrealized_usdt": self._fmt(sum((position.unrealized_pnl for position in self.positions.values()), Decimal("0"))),
+                "fee_usdt": self._fmt(sum((position.fee for position in self.positions.values()), Decimal("0"))),
+            },
+            "pending": pending,
+            "actions": list(self.action_rows),
+        }
+
+    # 原子写 snapshot，避免 monitor 读到半截 JSON。
+    def _write_snapshot(self, now_ns: int) -> None:
+        self.snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+        data = self._build_snapshot(now_ns)
         tmp = self.snapshot_path.with_suffix(f"{self.snapshot_path.suffix}.tmp")
         tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(self.snapshot_path)
 
+    # 提交双腿市价单；submit 前先写 pending，避免同步事件早于状态。
     def _submit_signal(self, signal: str) -> None:
         before_inventory = self._inventory()
+        base_qty = self._trade_qty(signal, before_inventory)
         self.trade_state = STATE_PENDING
         if signal == "long":
-            buy_id, sell_id = self.instruments[1], self.instruments[0]
-            buy_qty, sell_qty = self.qty * self.okx_qty_multiplier, self.qty
+            buy_id, sell_id = self.okx_id, self.binance_id
+            buy_qty, sell_qty = base_qty * self.okx_qty_multiplier, base_qty
             edge_side = LONG_EDGE
             signal_edge = self.edge.long_bps
             mean_bps = self.edge.long_mean_bps
-            after_inventory = before_inventory + self.qty
+            after_inventory = before_inventory + base_qty
         else:
-            buy_id, sell_id = self.instruments[0], self.instruments[1]
-            buy_qty, sell_qty = self.qty, self.qty * self.okx_qty_multiplier
+            buy_id, sell_id = self.binance_id, self.okx_id
+            buy_qty, sell_qty = base_qty, base_qty * self.okx_qty_multiplier
             edge_side = SHORT_EDGE
             signal_edge = self.edge.short_bps
             mean_bps = self.edge.short_mean_bps
-            after_inventory = before_inventory - self.qty
+            after_inventory = before_inventory - base_qty
 
         buy_quantity = self.cache.instrument(buy_id).make_qty(buy_qty)
         sell_quantity = self.cache.instrument(sell_id).make_qty(sell_qty)
@@ -477,14 +453,16 @@ class AnthropicArbStrategy(Strategy):
         self.submit_order(buy_order)
         self.submit_order(sell_order)
 
+    # 按 Binance 腿库存同步 flat/long/short 状态。
     def _sync_state_from_inventory(self) -> None:
-        positions = self.cache.positions_open(instrument_id=self.instruments[0], strategy_id=self.id)
+        positions = self.cache.positions_open(instrument_id=self.binance_id, strategy_id=self.id)
         if not positions:
             self.trade_state = STATE_FLAT
             return
         position = positions[0]
         self.trade_state = STATE_SHORT if bool(position.is_long) else STATE_LONG
 
+    # 记录 pending 订单失败，等两腿都有最终反馈后统一处理。
     def _mark_order_failed(self, order_id: str) -> None:
         if self.pending is not None and self.pending.has_order(order_id):
             leg = self.pending.leg(order_id)
@@ -495,19 +473,22 @@ class AnthropicArbStrategy(Strategy):
             self.pending.record_failed(order_id)
             self._resolve_pending_if_done()
 
+    # pending 生命周期收口：成功、全失败、单腿失败补反向单。
     def _resolve_pending_if_done(self) -> None:
         if self.pending is None:
             return
         pending = self.pending
         if pending.repair is not None:
-            if pending.repair_done() and self._inventory_balanced():
+            bn_qty = self._net_qty(self.binance_id)
+            okx_qty = self._net_qty(self.okx_id)
+            if pending.repair.filled() and bn_qty + okx_qty / self.okx_qty_multiplier == Decimal("0"):
                 self.pending = None
                 self._sync_state_from_inventory()
             return
         if not pending.is_done():
             return
         if pending.is_complete():
-            self._record_action(pending, "filled")
+            self.action_rows.appendleft(self._action_row(pending, "filled"))
             self.pending = None
             self._sync_state_from_inventory()
             return
@@ -517,8 +498,9 @@ class AnthropicArbStrategy(Strategy):
             self._sync_state_from_inventory()
             return
         self.trade_state = STATE_FAIL
-        self._submit_repair_order(pending.filled_legs()[0])
+        self._submit_repair_order(next(leg for leg in pending.legs.values() if leg.filled()))
 
+    # 单腿成交另一腿失败时，用反向单消掉裸露仓位。
     def _submit_repair_order(self, leg: PendingLeg) -> None:
         side = OrderSide.SELL if leg.side == OrderSide.BUY else OrderSide.BUY
         quantity = self.cache.instrument(leg.instrument_id).make_qty(leg.filled_qty)
@@ -536,11 +518,7 @@ class AnthropicArbStrategy(Strategy):
         )
         self.submit_order(order)
 
-    def _inventory_balanced(self) -> bool:
-        bn_qty = self._net_qty(self.instruments[0])
-        okx_qty = self._net_qty(self.instruments[1])
-        return bn_qty + okx_qty / self.okx_qty_multiplier == Decimal("0")
-
+    # 从 NT cache 读取本策略当前 instrument 净持仓。
     def _net_qty(self, instrument_id: InstrumentId) -> Decimal:
         positions = self.cache.positions_open(instrument_id=instrument_id, strategy_id=self.id)
         if not positions:
@@ -549,26 +527,22 @@ class AnthropicArbStrategy(Strategy):
         qty = Decimal(str(position.quantity))
         return qty if bool(position.is_long) else -qty
 
-    def _external_command(self, data) -> ExternalCommand | None:
-        if isinstance(data, ExternalCommand):
-            return data
-        if isinstance(data, CustomData) and isinstance(data.data, ExternalCommand):
-            return data.data
-        return None
-
     # 启动时用 collector 真实 bid/ask 初始化 6h 分钟窗口。
     def _warm_initial_window(self) -> None:
         end_ns = time.time_ns()
-        start_ns = end_ns - self.edge.window_ns
-        paths = self._collector_quote_files(start_ns, end_ns)
-        rows = self._load_collector_quotes(paths, start_ns, end_ns)
-        self.edge.warm_from_rows(rows, end_ns, self.instruments[0], self.instruments[1])
+        end_minute_ns = end_ns // MINUTE_NS * MINUTE_NS
+        start_minute_ns = end_minute_ns - (int(self.config.window_minutes) - 1) * MINUTE_NS
+        read_start_ns = start_minute_ns // (60 * MINUTE_NS) * (60 * MINUTE_NS)
+        paths = self._collector_quote_files(read_start_ns, end_ns)
+        rows = self._load_collector_quotes(paths, read_start_ns, end_ns)
+        self.edge.warm_from_rows(rows, start_minute_ns, end_minute_ns, self.binance_id, self.okx_id)
         self._seed_initial_quotes(rows)
         self.log.info(
             f"initial_window asset={ASSET} rows={len(rows)} long_mean={self.edge.long_mean_bps:.2f} "
             f"short_mean={self.edge.short_mean_bps:.2f}",
         )
 
+    # 找到 collector 在窗口内的 merged/raw quote 文件。
     def _collector_quote_files(self, start_ns: int, end_ns: int) -> list[Path]:
         base_dir = Path(__file__).resolve().parent / "collector" / "bidask1-live"
         merged_dir = base_dir / "quote_merged"
@@ -583,6 +557,7 @@ class AnthropicArbStrategy(Strategy):
                 paths.extend(sorted(hour_dir.glob("*.parquet")))
         return sorted(set(paths), key=lambda path: str(path))
 
+    # collector 文件按北京时间小时分桶。
     def _collector_hour_keys(self, start_ns: int, end_ns: int) -> list[str]:
         start = datetime.fromtimestamp(start_ns / 1_000_000_000, BEIJING_TZ).replace(minute=0, second=0, microsecond=0)
         end = datetime.fromtimestamp(end_ns / 1_000_000_000, BEIJING_TZ).replace(minute=0, second=0, microsecond=0)
@@ -593,6 +568,7 @@ class AnthropicArbStrategy(Strategy):
             current += timedelta(hours=1)
         return keys
 
+    # 读取并裁剪 collector quote 行。
     def _load_collector_quotes(self, paths: list[Path], start_ns: int, end_ns: int) -> list[dict[str, object]]:
         if not paths:
             raise RuntimeError("no bidask1 collector parquet files found for initial window")
@@ -608,12 +584,13 @@ class AnthropicArbStrategy(Strategy):
             raise RuntimeError("no bidask1 collector rows found for initial window")
         return sorted(rows, key=lambda row: int(row["ts_local_ns"]))
 
+    # 用 warmup 最后一条 bid/ask 构造初始 QuoteTick。
     def _seed_initial_quotes(self, rows: list[dict[str, object]]) -> None:
         latest: dict[str, dict[str, object]] = {}
         for row in rows:
             latest[str(row["venue"]).upper()] = row
         ts_init = self.clock.timestamp_ns()
-        for instrument_id in self.instruments:
+        for instrument_id in self.instrument_ids:
             venue = self._venue(instrument_id)
             row = latest[venue]
             instrument = self.cache.instrument(instrument_id)
@@ -629,85 +606,24 @@ class AnthropicArbStrategy(Strategy):
                 ts_event=ts_event,
                 ts_init=ts_init,
             )
-        self._update_edges()
+        self.edge.update(self.quotes[self.binance_id], self.quotes[self.okx_id])
 
-    def _flatten_on_stop(self) -> None:
-        for position in self._strategy_open_positions():
-            side = OrderSide.SELL if bool(position.is_long) else OrderSide.BUY
-            qty = Decimal(str(position.quantity))
-            self.log.warning(f"flatten_on_stop instrument={position.instrument_id} side={side} qty={qty}")
-            self._submit_emergency(position.instrument_id, side, qty)
-
-    def _submit_emergency(self, instrument_id: InstrumentId, side: OrderSide, qty: Decimal) -> None:
-        quantity = self.cache.instrument(instrument_id).make_qty(qty)
-        order = self.order_factory.market(
-            instrument_id=instrument_id,
-            order_side=side,
-            quantity=quantity,
-            time_in_force=TimeInForce.GTC,
-        )
-        self.submit_order(order)
-
-    def _strategy_open_positions(self) -> list[object]:
-        result = []
-        for instrument_id in self.instruments:
-            result.extend(self.cache.positions_open(instrument_id=instrument_id, strategy_id=self.id))
-        return result
-
+    # 统一用 Binance 腿方向表示策略库存：正数 long，负数 short。
     def _inventory(self) -> Decimal:
-        return -self._net_qty(self.instruments[0])
+        return -self._net_qty(self.binance_id)
 
-    def _strategy_state(self) -> str:
-        if self.reduce_mode:
-            return f"{self.trade_state}:reduce"
-        return self.trade_state
-
-    def _market_rows(self, now_ns: int) -> list[dict[str, str]]:
-        venues = [self._venue(instrument_id) for instrument_id in self.instruments]
-        rows = [{"metric": metric, **{venue: "-" for venue in venues}} for metric in (
-            "bid",
-            "ask",
-            "age",
-            "spread_bps",
-            "long_edge",
-            "long_mean",
-            "long_std",
-            "short_edge",
-            "short_mean",
-            "short_std",
-        )]
-        by_metric = {row["metric"]: row for row in rows}
-        for instrument_id in self.instruments:
-            venue = self._venue(instrument_id)
-            quote = self.quotes.get(instrument_id)
-            if quote is None:
-                continue
-            bid = Decimal(str(quote.bid_price))
-            ask = Decimal(str(quote.ask_price))
-            mid = (bid + ask) / Decimal("2")
-            by_metric["bid"][venue] = self._fmt(bid)
-            by_metric["ask"][venue] = self._fmt(ask)
-            by_metric["age"][venue] = self._fmt((now_ns - quote.ts_event) / 1_000_000_000, "s")
-            by_metric["spread_bps"][venue] = self._fmt((ask - bid) / mid * BPS)
-        by_metric["long_edge"]["OKX"] = self._fmt(self.edge.long_bps)
-        by_metric["long_mean"]["OKX"] = self._fmt(self.edge.long_mean_bps)
-        by_metric["short_edge"]["OKX"] = self._fmt(self.edge.short_bps)
-        by_metric["short_mean"]["OKX"] = self._fmt(self.edge.short_mean_bps)
-        return rows
-
-    def _pending_rows(self, now_ns: int) -> list[dict[str, str]]:
-        if self.pending is None:
-            return []
-        row = self._action_row(self.pending, "pending")
-        row["age_min"] = self._fmt(max((now_ns - self.pending.created_ns) / 60_000_000_000, 0.0))
-        return [row]
-
-    def _record_action(self, pending: PendingPair, status: str) -> None:
-        self.action_rows.appendleft(self._action_row(pending, status))
-
+    # 记录一笔 pending 完成后的动作摘要。
     def _action_row(self, pending: PendingPair, status: str) -> dict[str, str]:
         actual_edge = self._actual_edge_bps(pending)
-        latency_rows = self._latency_rows(pending)
+        edge_slippage = None
+        if actual_edge is not None:
+            edge_slippage = actual_edge - pending.signal_edge_bps if pending.edge_side == SHORT_EDGE else pending.signal_edge_bps - actual_edge
+        latencies = {"BINANCE": "-", "OKX": "-"}
+        for leg in pending.legs.values():
+            venue = self._venue(leg.instrument_id)
+            if leg.submit_ns is not None and leg.fill_event_ns is not None:
+                latencies[venue] = self._fmt((leg.fill_event_ns - leg.submit_ns) / 1_000_000)
+        ts_sec = pending.created_ns / 1_000_000_000
         return {
             "created_ns": str(pending.created_ns),
             "asset": ASSET,
@@ -717,86 +633,32 @@ class AnthropicArbStrategy(Strategy):
             "qty": self._fmt(abs(pending.after_inventory)),
             "signal_edge": self._fmt(pending.signal_edge_bps),
             "actual_edge": self._fmt(actual_edge),
-            "edge_slippage": self._fmt(self._edge_slippage(pending.edge_side, pending.signal_edge_bps, actual_edge)),
+            "edge_slippage": self._fmt(edge_slippage),
             "fill_slippage": "-",
             "mean": self._fmt(pending.mean_bps),
             "std": "-",
-            "bn_latency": latency_rows["BINANCE"],
-            "okx_latency": latency_rows["OKX"],
-            "time": self._beijing_time_short(pending.created_ns),
+            "bn_latency": latencies["BINANCE"],
+            "okx_latency": latencies["OKX"],
+            "time": datetime.fromtimestamp(ts_sec, tz=timezone.utc).astimezone(BEIJING_TZ).strftime("%m-%d %H:%M:%S"),
         }
 
+    # 用双腿成交均价计算实际成交 edge。
     def _actual_edge_bps(self, pending: PendingPair) -> Decimal | None:
-        buy_id = self.instruments[1] if pending.signal == "long" else self.instruments[0]
-        sell_id = self.instruments[0] if pending.signal == "long" else self.instruments[1]
+        buy_id = self.okx_id if pending.signal == "long" else self.binance_id
+        sell_id = self.binance_id if pending.signal == "long" else self.okx_id
         buy_avg = pending.avg_px(buy_id)
         sell_avg = pending.avg_px(sell_id)
         if buy_avg is None or sell_avg is None:
             return None
-        if buy_id == self.instruments[1]:
+        if buy_id == self.okx_id:
             buy_avg *= self.edge.okx_price_multiplier
-        if sell_id == self.instruments[1]:
+        if sell_id == self.okx_id:
             sell_avg *= self.edge.okx_price_multiplier
         if pending.edge_side == SHORT_EDGE:
             return (sell_avg - buy_avg) / buy_avg * BPS
         return (buy_avg - sell_avg) / sell_avg * BPS
 
-    def _edge_slippage(self, edge_side: str, signal_edge: Decimal, actual_edge: Decimal | None) -> Decimal | None:
-        if actual_edge is None:
-            return None
-        if edge_side == SHORT_EDGE:
-            return actual_edge - signal_edge
-        return signal_edge - actual_edge
-
-    def _latency_rows(self, pending: PendingPair) -> dict[str, str]:
-        rows = {"BINANCE": "-", "OKX": "-"}
-        for leg in pending.legs.values():
-            venue = self._venue(leg.instrument_id)
-            if leg.submit_ns is not None and leg.fill_event_ns is not None:
-                rows[venue] = self._fmt((leg.fill_event_ns - leg.submit_ns) / 1_000_000)
-        return rows
-
-    def _summary_row(self) -> dict[str, str]:
-        return {
-            "inventory": str(self._inventory()),
-            "realized_usdt": "-",
-            "unrealized_usdt": self._fmt(self._unrealized_pnl_usdt()),
-            "realized_bps": "-",
-            "unrealized_bps": "-",
-            "total_bps": "-",
-        }
-
-    def _risk_rows(self) -> dict[str, dict[str, str]]:
-        rows = {}
-        for venue in sorted({self._venue(instrument_id) for instrument_id in self.instruments}):
-            account = self._account_for_venue(venue)
-            wallet = self._total_usdt(account) if account is not None else Decimal("0")
-            unrealized = sum(
-                (pnl for pnl in (self._position_unrealized_pnl(position) for position in self._strategy_open_positions() if self._venue(position.instrument_id) == venue) if pnl is not None),
-                Decimal("0"),
-            )
-            rate = abs(unrealized) / wallet * Decimal("100") if wallet > 0 and unrealized < 0 else Decimal("0")
-            rows[venue] = {
-                "wallet_usdt": self._fmt(wallet),
-                "unrealized_usdt": self._fmt(unrealized),
-                "risk_rate": self._fmt(rate, "%") if wallet > 0 else "-",
-                "positions": str(len([position for position in self._strategy_open_positions() if self._venue(position.instrument_id) == venue])),
-                "status": "OK",
-            }
-        return rows
-
-    def _unrealized_pnl_usdt(self) -> Decimal:
-        return sum((pnl for pnl in (self._position_unrealized_pnl(position) for position in self._strategy_open_positions()) if pnl is not None), Decimal("0"))
-
-    def _position_unrealized_pnl(self, position: object) -> Decimal | None:
-        quote = self.quotes.get(position.instrument_id)
-        if quote is None:
-            return None
-        exit_px = Decimal(str(quote.bid_price if bool(position.is_long) else quote.ask_price))
-        avg_px = Decimal(str(position.avg_px_open))
-        qty = Decimal(str(position.quantity))
-        return (exit_px - avg_px) * qty if bool(position.is_long) else (avg_px - exit_px) * qty
-
+    # 按 venue 找账户，用于下单前余额检查。
     def _account_for_venue(self, venue: str):
         venue_text = venue.upper()
         for account in self.cache.accounts():
@@ -804,13 +666,11 @@ class AnthropicArbStrategy(Strategy):
                 return account
         return None
 
-    def _total_usdt(self, account) -> Decimal:
-        money = account.balance_total(USDT)
-        return Decimal(str(money.as_decimal())) if hasattr(money, "as_decimal") else Decimal(str(money))
-
+    # InstrumentId 的 venue 标准化为大写字符串。
     def _venue(self, instrument_id: InstrumentId) -> str:
         return str(instrument_id.venue).upper()
 
+    # 根据库存变化显示 open/add/reduce/close。
     def _display_action(self, before: Decimal, after: Decimal) -> str:
         if before == 0 and after != 0:
             return "open"
@@ -822,11 +682,8 @@ class AnthropicArbStrategy(Strategy):
             return "reduce"
         return "-"
 
+    # snapshot 数值格式化；缺失值显示为短横线。
     def _fmt(self, value: object, suffix: str = "") -> str:
         if value is None:
             return "-"
         return f"{Decimal(str(value)):.2f}{suffix}"
-
-    def _beijing_time_short(self, ts_ns: int) -> str:
-        ts_sec = ts_ns / 1_000_000_000
-        return datetime.fromtimestamp(ts_sec, tz=timezone.utc).astimezone(BEIJING_TZ).strftime("%m-%d %H:%M:%S")

@@ -20,6 +20,7 @@ from nautilus_trader.trading.strategy import Strategy
 LONG = "long"
 SHORT = "short"
 MINUTE_NS = 60_000_000_000
+END_BUFFER_NS = 10_000_000_000
 
 
 def decimal_param(value: object) -> Decimal:
@@ -89,6 +90,7 @@ class FeatureStore:
         data = data.sort_values("ts_ns", kind="mergesort")
         self.instrument_ids = data["instrument_id"].astype(str).to_numpy()
         self.ts_ns = data["ts_ns"].to_numpy()
+        self.end_ns = int(data["ts_ns"].max())
         self.short_edge = data["short_edge"].to_numpy(float)
         self.long_edge = data["long_edge"].to_numpy(float)
         self.short_mean = data[column_map["short_mean"]].to_numpy(float)
@@ -195,7 +197,8 @@ class PreIpoQuoteBacktestStrategy(Strategy):
         self.signal_delay_ns = int(float_param(config.signal_delay_ms) * 1_000_000)
         if self.signal_delay_ns < 0:
             raise RuntimeError("signal_delay_ms must be non-negative")
-        self.end_ns = int(config.end_ns)
+        config_end_ns = int(config.end_ns)
+        self.end_ns = max(0, self.features.end_ns - END_BUFFER_NS) if config_end_ns <= 0 else config_end_ns
         self.side = "flat"
         self.position_qty = Decimal("0")
         self.pending: Pending | None = None
@@ -209,10 +212,10 @@ class PreIpoQuoteBacktestStrategy(Strategy):
     def on_start(self) -> None:
         self.subscribe_quote_ticks(self.binance_id)
         self.subscribe_quote_ticks(self.okx_id)
-        # 给最终强平市价单留出 latency 后的 quote 触发成交。
+        # 自动 end_ns 取数据集结束前 10 秒，给最终强平市价单留出后续 quote 触发成交。
         self.clock.set_time_alert_ns(
             "preipo_quote_bt_flatten",
-            max(0, self.end_ns - 1_000_000_000),
+            self.end_ns,
             callback=lambda _event: self._flatten(force=True),
             allow_past=True,
         )

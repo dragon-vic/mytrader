@@ -23,8 +23,8 @@ import websockets
 
 LOCAL_TZ = ZoneInfo("Asia/Shanghai")
 
-BINANCE_SYMBOLS = ("OPENAIUSDT", "ANTHROPICUSDT", "KORUUSDT")
-OKX_SYMBOLS = ("OPENAI-USDT-SWAP", "ANTHROPIC-USDT-SWAP", "KORU-USDT-SWAP")
+BINANCE_SYMBOLS = ("OPENAIUSDT", "ANTHROPICUSDT")
+OKX_SYMBOLS = ("OPENAI-USDT-SWAP", "ANTHROPIC-USDT-SWAP")
 
 QUOTE_FLUSH_SEC = 30
 # Trade tick 量明显小于 quote，单独放慢落盘节奏，减少小 parquet 文件数量。
@@ -85,7 +85,7 @@ class StreamStats:
     backoff_sec: float = BACKOFF_INITIAL_SEC
 
 
-# 长期采集四个 preipo 标的的 bid/ask1 和成交 tick，并按小时合并 parquet。
+# 长期采集 preipo 标的的 bid/ask1 和成交 tick，并按小时合并 parquet。
 async def main(duration_sec: int) -> None:
     BASE_DIR.mkdir(parents=True, exist_ok=True)
     QUOTE_RAW_DIR.mkdir(parents=True, exist_ok=True)

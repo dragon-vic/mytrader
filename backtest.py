@@ -384,28 +384,19 @@ def expand_batch_settings(settings: dict[str, Any]) -> list[dict[str, Any]]:
     strategy = settings["strategy"]
     grid = strategy["grid_params"] or {}
     case_params = strategy["case_params"]
-    if not grid:
-        total = case_count(case_params)
-        return [case_settings(settings, {}, total, index) for index in range(total)]
-
-    names = list(grid)
-    values = []
-    for name in names:
-        raw = grid[name]
-        if not isinstance(raw, list):
-            raise TypeError(f"strategy.grid_params.{name} must be a list")
-        values.append(raw)
-    combos = list(itertools.product(*values))
+    rows = case_param_rows(case_params)
+    combos = grid_param_combos(grid)
     cases = []
-    for index, combo in enumerate(combos):
-        cases.append(case_settings(settings, dict(zip(names, combo)), len(combos), index))
+    for row in rows:
+        for grid_values in combos:
+            cases.append(case_settings(settings, row, grid_values))
     return cases
 
 
-def case_settings(settings: dict[str, Any], grid_values: dict[str, Any], total: int, index: int) -> dict[str, Any]:
+def case_settings(settings: dict[str, Any], base_params: dict[str, Any], grid_values: dict[str, Any]) -> dict[str, Any]:
     case = copy.deepcopy(settings)
     case_params = case["strategy"]["case_params"]
-    params = merged_case_params({}, case_params, total, index)
+    params = dict(base_params)
     params.update(grid_values)
     case["strategy"]["params"] = params
     case["runtime"] = {**case.get("runtime", {}), "backtest_params": selected_param_rows(grid_values, case_params, params)}
@@ -420,32 +411,52 @@ def selected_param_rows(grid_values: dict[str, Any], case_params: dict[str, Any]
     return {name: params[name] for name in case_params if name in keys} | {name: params[name] for name in grid_values}
 
 
-def case_count(case_params: dict[str, Any]) -> int:
+def case_param_count(case_params: dict[str, Any]) -> int:
     lengths = [len(value) for value in case_params.values() if isinstance(value, list) and len(value) > 1]
     if not lengths:
         return 1
     total = lengths[0]
     if any(length != total for length in lengths):
-        raise ValueError(f"strategy.case_params list lengths must match when grid_params is absent: {lengths}")
+        raise ValueError(f"strategy.case_params list lengths must be 1 or the same n: {lengths}")
     return total
 
 
-# case_params 支持单值广播、长度为 1 的列表广播、或和 grid 组合数量等长的一一对应列表。
-def merged_case_params(params: dict[str, Any], case_params: dict[str, Any], total: int, index: int) -> dict[str, Any]:
-    merged = dict(params)
+# case_params 先展开成 n 行；单值和长度 1 列表都会广播到 n 行。
+def case_param_rows(case_params: dict[str, Any]) -> list[dict[str, Any]]:
+    total = case_param_count(case_params)
+    return [case_param_row(case_params, total, index) for index in range(total)]
+
+
+def case_param_row(case_params: dict[str, Any], total: int, index: int) -> dict[str, Any]:
+    row = {}
     for name, value in case_params.items():
         if isinstance(value, list):
             if len(value) == 1:
-                merged[name] = value[0]
+                row[name] = value[0]
             elif len(value) == total:
-                merged[name] = value[index]
+                row[name] = value[index]
             else:
                 raise ValueError(
-                    f"strategy.case_params.{name} length must be 1 or match grid combinations ({total}), got {len(value)}",
+                    f"strategy.case_params.{name} length must be 1 or match case_params n ({total}), got {len(value)}",
                 )
         else:
-            merged[name] = value
-    return merged
+            row[name] = value
+    return row
+
+
+def grid_param_combos(grid: dict[str, Any]) -> list[dict[str, Any]]:
+    if not grid:
+        return [{}]
+    names = list(grid)
+    values = []
+    for name in names:
+        raw = grid[name]
+        if not isinstance(raw, list):
+            raise TypeError(f"strategy.grid_params.{name} must be a list")
+        if not raw:
+            raise ValueError(f"strategy.grid_params.{name} must not be empty")
+        values.append(raw)
+    return [dict(zip(names, combo)) for combo in itertools.product(*values)]
 
 
 # 多进程运行批处理：同一批次放在一个父目录下，每个组合一个子 report 目录。
