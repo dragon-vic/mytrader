@@ -15,6 +15,8 @@ from nautilus_trader.model.data import DataType
 from nautilus_trader.model.identifiers import ClientId
 
 from utils.arguments import EXTERNAL_COMMAND_CLIENT_NAME
+from utils.arguments import EXTERNAL_COMMAND_DEFAULT_HOST
+from utils.arguments import EXTERNAL_COMMAND_DEFAULT_PORT
 
 
 @customdataclass
@@ -31,8 +33,8 @@ def external_command_type() -> DataType:
 
 
 class ExternalCommandDataClientConfig(LiveDataClientConfig, frozen=True):
-    host: str
-    port: int
+    host: str = EXTERNAL_COMMAND_DEFAULT_HOST
+    port: int = EXTERNAL_COMMAND_DEFAULT_PORT
 
 
 class ExternalCommandDataClient(LiveDataClient):
@@ -111,8 +113,8 @@ def build_data_client(settings: dict[str, Any], cfg: dict[str, Any]):
     return (
         cfg["client_id"],
         ExternalCommandDataClientConfig(
-            host=cfg["host"],
-            port=int(cfg["port"]),
+            host=cfg.get("host", EXTERNAL_COMMAND_DEFAULT_HOST),
+            port=int(cfg.get("port", EXTERNAL_COMMAND_DEFAULT_PORT)),
         ),
         ExternalCommandLiveDataClientFactory,
     )

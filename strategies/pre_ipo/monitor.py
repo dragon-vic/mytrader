@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import socket
-import subprocess
 import sys
 import time
 from datetime import datetime
@@ -18,13 +17,15 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+
 from utils.arguments import EXTERNAL_COMMAND_DEFAULT_HOST
 from utils.arguments import EXTERNAL_COMMAND_DEFAULT_PORT
 
 
 BEIJING_TZ = timezone(timedelta(hours=8))
 SNAPSHOT_NAME = "pre_ipo_snapshot.json"
-MONITOR_PAGES = 2
 
 
 def snapshot_path(value: str) -> Path:
@@ -36,192 +37,126 @@ def snapshot_path(value: str) -> Path:
 
 def load_snapshot(path: Path) -> dict:
     if not path.exists():
-        return {
-            "rows": [],
-            "market_tables": {},
-            "action_rows": [],
-            "summary": {},
-            "risk": {},
-            "inventories": {},
-            "strategy_state": "-",
-        }
+        return {}
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def market_table(asset: str, rows: list[dict[str, str]]) -> Table:
-    table = Table(title=f"{asset} Market", expand=True)
-    venues = [key for key in (rows[0].keys() if rows else []) if key != "metric"]
-    table.add_column("metric", justify="left", no_wrap=True)
-    for venue in venues:
-        table.add_column(venue, justify="right", no_wrap=True)
-    if not rows:
-        table.add_row("-")
-        return table
-    for row in rows:
-        table.add_row(str(row.get("metric", "-")), *(str(row.get(venue, "-")) for venue in venues))
+# 向 external_command data client 发送一条控制命令。
+def send_command(command: str) -> str:
+    payload = {
+        "command": command,
+        "reason": "monitor",
+        "source": "pre_ipo_monitor",
+        "sent_ns": time.time_ns(),
+    }
+    data = json.dumps(payload).encode("utf-8") + b"\n"
+    try:
+        with socket.create_connection((EXTERNAL_COMMAND_DEFAULT_HOST, EXTERNAL_COMMAND_DEFAULT_PORT), timeout=2.0) as client:
+            client.sendall(data)
+    except OSError as exc:
+        return f"{command}发送失败: {exc}"
+    return f"已发送{command}"
+
+
+def status_table(payload: dict, snapshot: Path, session_name: str | None, notice: str) -> Table:
+    table = Table(title="状态", expand=True)
+    table.add_column("项目", justify="left", no_wrap=True)
+    table.add_column("值", justify="left")
+    table.add_row("策略", str(payload.get("strategy", "-")))
+    table.add_row("状态", str(payload.get("state", "-")))
+    table.add_row("模式", str(payload.get("mode", "-")))
+    table.add_row("库存", str(payload.get("inventory", "-")))
+    table.add_row("北京时间", datetime.now(tz=BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S"))
+    table.add_row("session", session_name or "-")
+    table.add_row("snapshot", str(snapshot))
+    if notice:
+        table.add_row("消息", notice)
     return table
 
 
-def action_table(rows: list[dict[str, str]]) -> Table:
-    table = Table(title="Actions", expand=True)
-    columns = (
-        ("asset", "标的", "left"),
-        ("action", "动作", "center"),
-        ("status", "状态", "center"),
-        ("qty", "qty", "right"),
-        ("signal_edge", "信号edge", "right"),
-        ("actual_edge", "实际edge", "right"),
-        ("edge_slippage", "edge滑点", "right"),
-        ("fill_slippage", "成交滑点", "right"),
-        ("mean", "均值", "right"),
-        ("std", "波动", "right"),
-        ("bn_latency", "bn_latency", "right"),
-        ("okx_latency", "okx_latency", "right"),
-        ("time", "北京时间", "left"),
+def edge_table(payload: dict) -> Table:
+    table = Table(title="Edge", expand=True)
+    table.add_column("指标", justify="left", no_wrap=True)
+    table.add_column("值", justify="right", no_wrap=True)
+    edge = payload.get("edge") or {}
+    for key in ("long_bps", "long_mean_bps", "long_std_bps", "short_bps", "short_mean_bps", "short_std_bps"):
+        table.add_row(key, str(edge.get(key, "-")))
+    return table
+
+
+def pnl_table(payload: dict) -> Table:
+    table = Table(title="PnL", expand=True)
+    table.add_column("指标", justify="left", no_wrap=True)
+    table.add_column("值", justify="right", no_wrap=True)
+    pnl = payload.get("pnl") or {}
+    for key in ("realized_usdt", "unrealized_usdt", "fee_usdt"):
+        table.add_row(key, str(pnl.get(key, "-")))
+    return table
+
+
+def positions_table(payload: dict) -> Table:
+    table = Table(title="持仓", expand=True)
+    for column in ("venue", "instrument", "qty", "avg_px", "realized_usdt", "unrealized_usdt", "fee_usdt"):
+        table.add_column(column, justify="right" if column not in {"venue", "instrument"} else "left", no_wrap=True)
+    positions = payload.get("positions") or {}
+    if not positions:
+        table.add_row(*("-" for _ in table.columns))
+        return table
+    for venue, row in positions.items():
+        table.add_row(
+            str(venue),
+            str(row.get("instrument", "-")),
+            str(row.get("qty", "-")),
+            str(row.get("avg_px", "-")),
+            str(row.get("realized_usdt", "-")),
+            str(row.get("unrealized_usdt", "-")),
+            str(row.get("fee_usdt", "-")),
+        )
+    return table
+
+
+def pending_table(payload: dict) -> Table:
+    table = Table(title="Pending", expand=True)
+    for column in ("signal", "edge_side", "signal_edge_bps", "mean_bps", "age_sec"):
+        table.add_column(column, justify="right", no_wrap=True)
+    pending = payload.get("pending")
+    if not pending:
+        table.add_row(*("-" for _ in table.columns))
+        return table
+    table.add_row(
+        str(pending.get("signal", "-")),
+        str(pending.get("edge_side", "-")),
+        str(pending.get("signal_edge_bps", "-")),
+        str(pending.get("mean_bps", "-")),
+        str(pending.get("age_sec", "-")),
     )
-    for key, label, justify in columns:
-        table.add_column(label, justify=justify, no_wrap=key != "time")
+    return table
+
+
+def actions_table(payload: dict) -> Table:
+    table = Table(title="Actions", expand=True)
+    columns = ("time", "asset", "action", "edge_side", "status", "qty", "signal_edge", "actual_edge", "edge_slippage")
+    for column in columns:
+        table.add_column(column, justify="right" if column not in {"time", "asset", "action", "edge_side", "status"} else "left", no_wrap=True)
+    rows = payload.get("actions") or []
     if not rows:
         table.add_row(*("-" for _ in columns))
         return table
-    for row in rows:
-        table.add_row(*(action_value(row, key) for key, _, _ in columns))
+    for row in rows[:20]:
+        table.add_row(*(str(row.get(column, "-")) for column in columns))
     return table
 
 
-def action_value(row: dict[str, str], key: str) -> str:
-    if key == "action":
-        return action_label(row)
-    return str(row.get(key, "-"))
-
-
-def action_label(row: dict[str, str]) -> str:
-    arrow = action_arrow(row.get("edge_side"))
-    operation = action_operation(row.get("action"))
-    if arrow == "-":
-        return operation
-    if operation == "-":
-        return arrow
-    return f"{arrow} {operation}"
-
-
-def action_arrow(edge_side: object) -> str:
-    side = str(edge_side or "")
-    if side == "long_edge":
-        return "↑"
-    if side == "short_edge":
-        return "↓"
-    return "-"
-
-
-def action_operation(raw_action: object) -> str:
-    action = str(raw_action or "").strip().lower()
-    return action if action in {"open", "close", "add", "reduce"} else "-"
-
-
-def summary_table(rows: dict[str, dict[str, str]]) -> Table:
-    table = Table(title="Summary", expand=True)
-    metrics = (
-        ("inventory", "库存"),
-        ("realized_usdt", "已实现USDT"),
-        ("unrealized_usdt", "未实现USDT"),
-        ("realized_bps", "已实现bps"),
-        ("unrealized_bps", "未实现bps"),
-        ("total_bps", "总计bps"),
+def build_view(payload: dict, snapshot: Path, session_name: str | None, notice: str) -> Group:
+    keys = "r减仓 | n正常 | s停止 | Esc退出"
+    header = Panel.fit(f"PRE IPO Monitor | {keys}", border_style="cyan")
+    return Group(
+        header,
+        Columns([status_table(payload, snapshot, session_name, notice), edge_table(payload), pnl_table(payload)], equal=True, expand=True),
+        positions_table(payload),
+        pending_table(payload),
+        actions_table(payload),
     )
-    table.add_column("标的", justify="left", no_wrap=True)
-    for _, label in metrics:
-        table.add_column(label, justify="right", no_wrap=True)
-    if not rows:
-        table.add_row("-")
-        return table
-    for asset, values in rows.items():
-        table.add_row(str(asset), *(str(values.get(key, "-")) for key, _ in metrics))
-    table.add_row("TOTAL", *(summary_total_value(rows, key) for key, _ in metrics), style="bold")
-    return table
-
-
-def summary_total_value(rows: dict[str, dict[str, str]], key: str) -> str:
-    values = [parse_number(values.get(key, "-")) for values in rows.values()]
-    values = [value for value in values if value is not None]
-    if not values:
-        return "-"
-    return format_number(sum(values))
-
-
-def risk_table(rows: dict[str, dict[str, str]]) -> Table:
-    table = Table(title="Risk", expand=True)
-    metrics = (
-        ("wallet_usdt", "钱包USDT"),
-        ("unrealized_usdt", "未实现USDT"),
-        ("risk_rate", "风险率"),
-        ("positions", "持仓数"),
-        ("status", "状态"),
-    )
-    table.add_column("交易所", justify="left", no_wrap=True)
-    for _, label in metrics:
-        table.add_column(label, justify="right", no_wrap=True)
-    if not rows:
-        table.add_row("-")
-        return table
-    for venue, values in rows.items():
-        table.add_row(str(venue), *(str(values.get(key, "-")) for key, _ in metrics))
-    table.add_row("TOTAL", *(risk_total_value(rows, key) for key, _ in metrics), style="bold")
-    return table
-
-
-def risk_total_value(rows: dict[str, dict[str, str]], key: str) -> str:
-    if key == "status":
-        return "HIGH" if any(str(values.get(key, "")).upper() == "HIGH" for values in rows.values()) else "OK"
-    values = [parse_number(values.get(key, "-")) for values in rows.values()]
-    values = [value for value in values if value is not None]
-    if not values:
-        return "-"
-    suffix = "%" if key == "risk_rate" else ""
-    return format_number(sum(values), suffix)
-
-
-def parse_number(value: object) -> float | None:
-    text = str(value).strip().replace(",", "")
-    if text in {"", "-", "nan", "None"}:
-        return None
-    text = text.removesuffix("%")
-    try:
-        return float(text)
-    except ValueError:
-        return None
-
-
-def format_number(value: float, suffix: str = "") -> str:
-    if value == int(value):
-        return f"{int(value)}{suffix}"
-    return f"{value:.2f}".rstrip("0").rstrip(".") + suffix
-
-
-def build_view(payload: dict, path: Path, session_name: str | None, page: int = 0, stopping: bool = False, notice: str = "") -> Group:
-    market_tables = payload.get("market_tables") or {}
-    assets = payload.get("assets") or sorted(market_tables)
-    beijing_time = datetime.now(tz=BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
-    if stopping:
-        keys = "正在停止node..."
-    else:
-        keys = "↑/↓翻页 | t日志(q返回) | p减仓模式 | r恢复 | s优雅停止 | Esc退出监控" if session_name else "↑/↓翻页 | t日志(q返回) | Esc退出监控"
-    state = payload.get("strategy_state", "-")
-    header = f"PRE IPO Live | State {state} | Page {page + 1}/{MONITOR_PAGES} | 北京时间 {beijing_time} | {keys} | {path}"
-    if notice:
-        header = f"{header} | {notice}"
-    parts = [Panel.fit(header, border_style="cyan")]
-    if page == 1:
-        parts.append(action_table(payload.get("action_rows") or []))
-        return Group(*parts)
-    tables = [market_table(str(asset), market_tables.get(str(asset), [])) for asset in assets]
-    first_row = tables[:3]
-    if first_row:
-        parts.append(Columns(first_row, equal=True, expand=True))
-    if len(tables) > 3:
-        parts.extend(tables[3:])
-    parts.append(Columns([risk_table(payload.get("risk") or {}), summary_table(payload.get("summary") or {})], equal=True, expand=True))
-    return Group(*parts)
 
 
 def read_key(timeout_sec: float) -> str:
@@ -235,13 +170,6 @@ def read_key(timeout_sec: float) -> str:
         while time.monotonic() < deadline:
             if msvcrt.kbhit():
                 key = msvcrt.getwch()
-                if key in ("\x00", "\xe0"):
-                    direction = msvcrt.getwch()
-                    if direction == "H":
-                        return "up"
-                    if direction == "P":
-                        return "down"
-                    return ""
                 if key == "\x1b":
                     return "escape"
                 return key.lower()
@@ -257,129 +185,33 @@ def read_key(timeout_sec: float) -> str:
     try:
         tty.setcbreak(fd)
         ready, _, _ = select.select([fd], [], [], timeout_sec)
-        if ready:
-            key = os.read(fd, 1).decode(errors="ignore")
-            if key == "\x1b":
-                # 方向键在 Linux/tmux 下是 ESC 开头的多字节序列；SSH 延迟下 0.05s
-                # 容易把 ↑ 的 ESC 误判成退出。
-                ready, _, _ = select.select([fd], [], [], 0.2)
-                if not ready:
-                    return "escape"
-                seq = os.read(fd, 1).decode(errors="ignore")
-                deadline = time.monotonic() + 0.1
-                while time.monotonic() < deadline:
-                    ready, _, _ = select.select([fd], [], [], 0.02)
-                    if not ready:
-                        break
-                    seq += os.read(fd, 1).decode(errors="ignore")
-                if seq.startswith("[A"):
-                    return "up"
-                if seq.startswith("[B"):
-                    return "down"
-                return ""
-            return key.lower()
-        return ""
+        if not ready:
+            return ""
+        key = os.read(fd, 1).decode(errors="ignore")
+        if key == "\x1b":
+            return "escape"
+        return key.lower()
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
-def send_command(command: str, reason: str = "monitor") -> str:
-    payload = {
-        "command": command,
-        "reason": reason,
-        "source": "pre_ipo_monitor",
-        "sent_ns": time.time_ns(),
-    }
-    data = json.dumps(payload).encode("utf-8") + b"\n"
-    try:
-        with socket.create_connection((EXTERNAL_COMMAND_DEFAULT_HOST, EXTERNAL_COMMAND_DEFAULT_PORT), timeout=2.0) as client:
-            client.sendall(data)
-    except OSError as exc:
-        return f"{command}命令发送失败: {exc}"
-    return ""
-
-
-def node_running(session_name: str) -> bool:
-    result = subprocess.run(["tmux", "has-session", "-t", session_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
-    return result.returncode == 0
-
-
-def tail_node_log(snapshot: Path) -> None:
-    log_path = snapshot.parent / "node.log"
-    if not log_path.exists():
-        print(f"node.log不存在：{log_path}")
-        return
-    try:
-        if os.name == "nt":
-            follow_log(log_path)
-            return
-        import signal
-
-        old_handler = signal.getsignal(signal.SIGINT)
-        signal.signal(signal.SIGINT, signal.SIG_IGN)
-        try:
-            subprocess.run(["less", "+F", str(log_path)], check=False)
-        finally:
-            signal.signal(signal.SIGINT, old_handler)
-    except KeyboardInterrupt:
-        return
-
-
-def follow_log(log_path: Path) -> None:
-    print(f"查看日志：{log_path}")
-    print("Ctrl+C退出")
-    with log_path.open("r", encoding="utf-8", errors="replace") as file:
-        file.seek(0, os.SEEK_END)
-        while True:
-            line = file.readline()
-            if line:
-                print(line, end="")
-                continue
-            time.sleep(0.2)
-
-
-def main(path: Path, refresh_sec: float, session_name: str | None = None) -> None:
+def main(path: Path, session_name: str | None = None) -> None:
     console = Console()
-    stopping = False
-    page = 0
     notice = ""
     try:
-        while True:
-            show_log = False
-            payload = load_snapshot(path)
-            with Live(build_view(payload, path, session_name, page, notice=notice), console=console, screen=True, refresh_per_second=1) as live:
-                while True:
-                    payload = load_snapshot(path)
-                    live.update(build_view(payload, path, session_name, page, stopping, notice), refresh=True)
-                    if stopping:
-                        if session_name is None or not node_running(session_name):
-                            return
-                        time.sleep(refresh_sec)
-                        continue
-                    key = read_key(refresh_sec)
-                    if key == "escape":
-                        return
-                    if key == "t":
-                        notice = ""
-                        show_log = True
-                        break
-                    if key == "up":
-                        notice = ""
-                        page = max(page - 1, 0)
-                    if key == "down":
-                        notice = ""
-                        page = min(page + 1, MONITOR_PAGES - 1)
-                    if key == "p" and session_name:
-                        notice = send_command("reduce") or "已发送reduce"
-                    if key == "r" and session_name:
-                        notice = send_command("resume") or "已发送resume"
-                    if key == "s" and session_name:
-                        notice = send_command("stop")
-                        if not notice:
-                            stopping = True
-            if show_log:
-                tail_node_log(path)
-                continue
+        with Live(console=console, screen=True, refresh_per_second=1) as live:
+            while True:
+                payload = load_snapshot(path)
+                live.update(build_view(payload, path, session_name, notice), refresh=True)
+                key = read_key(1.0)
+                if key == "escape":
+                    return
+                if key == "r" and session_name:
+                    notice = send_command("reduce")
+                elif key == "n" and session_name:
+                    notice = send_command("normal")
+                elif key == "s" and session_name:
+                    notice = send_command("stop")
     except KeyboardInterrupt:
         return
 
@@ -387,8 +219,4 @@ def main(path: Path, refresh_sec: float, session_name: str | None = None) -> Non
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         raise SystemExit("Usage: python monitor.py REPORT_DIR_OR_SNAPSHOT [TMUX_SESSION]")
-    main(
-        snapshot_path(sys.argv[1]),
-        1.0,
-        sys.argv[2] if len(sys.argv) > 2 else None,
-    )
+    main(snapshot_path(sys.argv[1]), sys.argv[2] if len(sys.argv) > 2 else None)

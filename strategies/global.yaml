@@ -1,230 +1,7 @@
-# node 本身只保留身份名；运行时会追加 node 序号生成 trader_id。
-node:
-  name: trader
-
 # NT cache 容量。
 cache:
   tick_capacity: 1000
   bar_capacity: 1000
-
-# NT logging 默认值；策略 set 只覆盖有差异的叶子。
-logging:
-  log_level: INFO
-  log_level_file: INFO
-  log_file_name: node
-  log_file_format: null
-  log_file_max_size: null
-  log_file_max_backup_count: 5
-  clear_log_file: true
-  strategy_log_level: INFO 
-  log_colors: true
-  component_levels:
-    Portfolio: INFO
-    DataRecorder: INFO
-    ExecClient-BINANCE: WARNING
-    ExecClient-OKX: WARNING
-    ExecClient-KRAKEN: WARNING
-    ExecClient-HYPERLIQUID: WARNING
-    BinanceSpotInstrumentProvider: WARNING
-    BinanceFuturesInstrumentProvider: WARNING
-    OKXInstrumentProvider: WARNING
-    KrakenInstrumentProvider: WARNING
-    HyperliquidInstrumentProvider: WARNING
-    DataClient-POLYMARKET: ERROR
-
-# NT data engine 和所有可选 data client。
-data:
-  engine:
-    validate_data_sequence: false
-    qsize: 100000
-
-  clients:
-    binance_spot:
-      enabled: false
-      markets: []
-
-    binance_futures:
-      enabled: false
-      markets: []
-
-    okx_spot:
-      enabled: false
-      markets: []
-      instrument_types: [SPOT]
-      contract_types: null
-      instrument_families: null
-
-    okx_swap:
-      enabled: false
-      markets: []
-      instrument_types: [SWAP]
-      contract_types: [LINEAR]
-      instrument_families: null
-
-    kraken_spot:
-      enabled: false
-      markets: []
-      product_types: [SPOT]
-
-    kraken_futures:
-      enabled: false
-      markets: []
-      product_types: [FUTURES]
-
-    hyperliquid_perp:
-      enabled: false
-      markets: []
-      product_types: [PERP, PERP_HIP3]
-
-    polymarket:
-      enabled: false
-      markets: []
-      signature_type: 1
-      instrument_provider:
-        load_all: false
-        use_gamma_markets: true
-        event_slug_builder: null
-
-    ibkr:
-      enabled: false
-      markets: []
-      # 本机 TWS/IB Gateway 地址；默认连接本机。
-      ibg_host: 127.0.0.1
-      # 端口：TWS paper 7497，TWS live 7496，Gateway paper 4002，Gateway live 4001。
-      ibg_port: 7497
-      # IB API client id；同一个 TWS/Gateway 上每个连接要不同。
-      ibg_client_id: 1
-      # true 时 bar 数据只取常规交易时段，股票常用；期货/外汇可按需要覆盖。
-      use_regular_trading_hours: true
-      # REALTIME 需要行情权限；没有权限时可在 set 里改成 DELAYED 或 DELAYED_FROZEN。
-      market_data_type: REALTIME
-      # true 会忽略仅 size 变化的 quote tick，减少 quote 数据量。
-      ignore_quote_tick_size_updates: false
-      # 等待 TWS/Gateway 建连的秒数。
-      connection_timeout: 300
-      # 合约详情、历史数据等请求的超时秒数；期权链/期货链可适当调大。
-      request_timeout_secs: 60
-      instrument_provider:
-        # IB_SIMPLIFIED 使用 AAPL.XNAS、ESM6.XCME 这类简化 InstrumentId。
-        symbology_method: IB_SIMPLIFIED
-        # 只在需要自动展开期权链/期货链时打开；默认只加载 markets 里的合约。
-        build_options_chain: null
-        build_futures_chain: null
-        # 链式加载时按到期天数过滤。
-        min_expiry_days: null
-        max_expiry_days: null
-        # true 会把 IB exchange 转成 MIC venue；默认保留配置里的 venue。
-        convert_exchange_to_mic_venue: false
-        # 按 symbol 前缀强制指定 MIC venue，例如 {ES: XCME}。
-        symbol_to_mic_venue: {}
-        # 合约详情缓存有效天数；null 表示启动时重新请求。
-        cache_validity_days: null
-        # 可选的合约详情 pickle 缓存路径。
-        pickle_path: null
-        # 跳过不想加载的 IB secType，例如 [WAR, IOPT]。
-        filter_sec_types: []
-
-    external_signal:
-      enabled: false
-      host: 127.0.0.1
-      port: 9001
-
-    external_command:
-      enabled: false
-      host: 127.0.0.1
-      port: 9002
-
-
-exec:
-  engine:
-    reconciliation: true
-    reconciliation_scope: null
-    qsize: 100000
-
-  clients:
-    binance_futures:
-      enabled: false
-      markets: []
-      margin_type: CROSS
-      leverage: 1
-
-    okx_spot:
-      enabled: false
-      markets: []
-      instrument_types: [SPOT]
-      contract_types: null
-      instrument_families: null
-      margin_mode: NONE
-
-    okx_swap:
-      enabled: false
-      markets: []
-      instrument_types: [SWAP]
-      contract_types: [LINEAR]
-      instrument_families: null
-      margin_mode: CROSS
-
-    kraken_spot:
-      enabled: false
-      markets: []
-      product_types: [SPOT]
-
-    kraken_futures:
-      enabled: false
-      markets: []
-      product_types: [FUTURES]
-
-    hyperliquid_perp:
-      enabled: false
-      markets: []
-      product_types: [PERP, PERP_HIP3]
-
-    polymarket:
-      enabled: false
-      markets: []
-      signature_type: 1
-      instrument_provider:
-        load_all: false
-        use_gamma_markets: true
-        event_slug_builder: null
-
-    ibkr:
-      enabled: false
-      # 显式列出 NT InstrumentId；应与 data.clients.ibkr.markets 保持一致。
-      markets: []
-      # 本机 TWS/IB Gateway 地址；默认连接本机。
-      ibg_host: 127.0.0.1
-      # 端口：TWS paper 7497，TWS live 7496，Gateway paper 4002，Gateway live 4001。
-      ibg_port: 7497
-      # IB API client id；同一个 TWS/Gateway 上每个连接要不同。
-      ibg_client_id: 1
-      # 等待 TWS/Gateway 建连的秒数。
-      connection_timeout: 300
-      # 合约详情、账户和订单请求的超时秒数。
-      request_timeout_secs: 60
-      # true 会拉取所有 API client/TWS GUI 的 open orders；默认只管当前 client id。
-      fetch_all_open_orders: false
-      # 期权行权跟踪；非期权策略通常保持 false。
-      track_option_exercise_from_position_update: false
-      instrument_provider:
-        # IB_SIMPLIFIED 使用 AAPL.XNAS、ESM6.XCME 这类简化 InstrumentId。
-        symbology_method: IB_SIMPLIFIED
-        # 只在需要自动展开期权链/期货链时打开；默认只加载 markets 里的合约。
-        build_options_chain: null
-        build_futures_chain: null
-        # 链式加载时按到期天数过滤。
-        min_expiry_days: null
-        max_expiry_days: null
-        # true 会把 IB exchange 转成 MIC venue；默认保留配置里的 venue。
-        convert_exchange_to_mic_venue: false
-        # 按 symbol 前缀强制指定 MIC venue，例如 {ES: XCME}。
-        symbol_to_mic_venue: {}
-        # 合约详情缓存有效天数；null 表示启动时重新请求。
-        cache_validity_days: null
-        # 可选的合约详情 pickle 缓存路径。
-        pickle_path: null
-        # 跳过不想加载的 IB secType，例如 [WAR, IOPT]。
-        filter_sec_types: []
 
 # NT actor。
 actors:
@@ -271,3 +48,225 @@ backtest:
     margin_maint: "1"
     maker_fee: "0.0002"
     taker_fee: "0.0005"
+
+node:
+  # node 本身只保留身份名；运行时会追加 node 序号生成 trader_id。
+  name: trader
+
+  # NT logging 默认值；策略 set 只覆盖有差异的叶子。
+  logging:
+    log_level: INFO
+    log_level_file: INFO
+    log_file_name: node
+    log_file_format: null
+    log_file_max_size: null
+    log_file_max_backup_count: 5
+    clear_log_file: true
+    strategy_log_level: INFO 
+    log_colors: true
+    component_levels:
+      Portfolio: INFO
+      DataRecorder: INFO
+      ExecClient-BINANCE: WARNING
+      ExecClient-OKX: WARNING
+      ExecClient-KRAKEN: WARNING
+      ExecClient-HYPERLIQUID: WARNING
+      BinanceSpotInstrumentProvider: WARNING
+      BinanceFuturesInstrumentProvider: WARNING
+      OKXInstrumentProvider: WARNING
+      KrakenInstrumentProvider: WARNING
+      HyperliquidInstrumentProvider: WARNING
+      DataClient-POLYMARKET: ERROR
+
+  # NT data engine 和所有可选 data client。
+  data:
+    engine:
+      validate_data_sequence: false
+      qsize: 100000
+
+    clients:
+      binance_spot:
+        enabled: false
+        markets: []
+
+      binance_futures:
+        enabled: false
+        markets: []
+
+      okx_spot:
+        enabled: false
+        markets: []
+        instrument_types: [SPOT]
+        contract_types: null
+        instrument_families: null
+
+      okx_swap:
+        enabled: false
+        markets: []
+        instrument_types: [SWAP]
+        contract_types: [LINEAR]
+        instrument_families: null
+
+      kraken_spot:
+        enabled: false
+        markets: []
+        product_types: [SPOT]
+
+      kraken_futures:
+        enabled: false
+        markets: []
+        product_types: [FUTURES]
+
+      hyperliquid_perp:
+        enabled: false
+        markets: []
+        product_types: [PERP, PERP_HIP3]
+
+      polymarket:
+        enabled: false
+        markets: []
+        signature_type: 1
+        instrument_provider:
+          load_all: false
+          use_gamma_markets: true
+          event_slug_builder: null
+
+      ibkr:
+        enabled: false
+        markets: []
+        # 本机 TWS/IB Gateway 地址；默认连接本机。
+        ibg_host: 127.0.0.1
+        # 端口：TWS paper 7497，TWS live 7496，Gateway paper 4002，Gateway live 4001。
+        ibg_port: 7497
+        # IB API client id；同一个 TWS/Gateway 上每个连接要不同。
+        ibg_client_id: 1
+        # true 时 bar 数据只取常规交易时段，股票常用；期货/外汇可按需要覆盖。
+        use_regular_trading_hours: true
+        # REALTIME 需要行情权限；没有权限时可在 set 里改成 DELAYED 或 DELAYED_FROZEN。
+        market_data_type: REALTIME
+        # true 会忽略仅 size 变化的 quote tick，减少 quote 数据量。
+        ignore_quote_tick_size_updates: false
+        # 等待 TWS/Gateway 建连的秒数。
+        connection_timeout: 300
+        # 合约详情、历史数据等请求的超时秒数；期权链/期货链可适当调大。
+        request_timeout_secs: 60
+        instrument_provider:
+          # IB_SIMPLIFIED 使用 AAPL.XNAS、ESM6.XCME 这类简化 InstrumentId。
+          symbology_method: IB_SIMPLIFIED
+          # 只在需要自动展开期权链/期货链时打开；默认只加载 markets 里的合约。
+          build_options_chain: null
+          build_futures_chain: null
+          # 链式加载时按到期天数过滤。
+          min_expiry_days: null
+          max_expiry_days: null
+          # true 会把 IB exchange 转成 MIC venue；默认保留配置里的 venue。
+          convert_exchange_to_mic_venue: false
+          # 按 symbol 前缀强制指定 MIC venue，例如 {ES: XCME}。
+          symbol_to_mic_venue: {}
+          # 合约详情缓存有效天数；null 表示启动时重新请求。
+          cache_validity_days: null
+          # 可选的合约详情 pickle 缓存路径。
+          pickle_path: null
+          # 跳过不想加载的 IB secType，例如 [WAR, IOPT]。
+          filter_sec_types: []
+
+      external_signal:
+        enabled: false
+        host: 127.0.0.1
+        port: 9001
+
+      external_command:
+        enabled: false
+        host: 127.0.0.1
+        port: 9002
+  # NT exec engine 和所有可选 exec client。
+  exec:
+    engine:
+      reconciliation: true
+      reconciliation_scope: null
+      qsize: 100000
+
+    clients:
+      binance_futures:
+        enabled: false
+        markets: []
+        margin_type: CROSS
+        leverage: 1
+
+      okx_spot:
+        enabled: false
+        markets: []
+        instrument_types: [SPOT]
+        contract_types: null
+        instrument_families: null
+        margin_mode: NONE
+
+      okx_swap:
+        enabled: false
+        markets: []
+        instrument_types: [SWAP]
+        contract_types: [LINEAR]
+        instrument_families: null
+        margin_mode: CROSS
+
+      kraken_spot:
+        enabled: false
+        markets: []
+        product_types: [SPOT]
+
+      kraken_futures:
+        enabled: false
+        markets: []
+        product_types: [FUTURES]
+
+      hyperliquid_perp:
+        enabled: false
+        markets: []
+        product_types: [PERP, PERP_HIP3]
+
+      polymarket:
+        enabled: false
+        markets: []
+        signature_type: 1
+        instrument_provider:
+          load_all: false
+          use_gamma_markets: true
+          event_slug_builder: null
+
+      ibkr:
+        enabled: false
+        # 显式列出 NT InstrumentId；应与 data.clients.ibkr.markets 保持一致。
+        markets: []
+        # 本机 TWS/IB Gateway 地址；默认连接本机。
+        ibg_host: 127.0.0.1
+        # 端口：TWS paper 7497，TWS live 7496，Gateway paper 4002，Gateway live 4001。
+        ibg_port: 7497
+        # IB API client id；同一个 TWS/Gateway 上每个连接要不同。
+        ibg_client_id: 1
+        # 等待 TWS/Gateway 建连的秒数。
+        connection_timeout: 300
+        # 合约详情、账户和订单请求的超时秒数。
+        request_timeout_secs: 60
+        # true 会拉取所有 API client/TWS GUI 的 open orders；默认只管当前 client id。
+        fetch_all_open_orders: false
+        # 期权行权跟踪；非期权策略通常保持 false。
+        track_option_exercise_from_position_update: false
+        instrument_provider:
+          # IB_SIMPLIFIED 使用 AAPL.XNAS、ESM6.XCME 这类简化 InstrumentId。
+          symbology_method: IB_SIMPLIFIED
+          # 只在需要自动展开期权链/期货链时打开；默认只加载 markets 里的合约。
+          build_options_chain: null
+          build_futures_chain: null
+          # 链式加载时按到期天数过滤。
+          min_expiry_days: null
+          max_expiry_days: null
+          # true 会把 IB exchange 转成 MIC venue；默认保留配置里的 venue。
+          convert_exchange_to_mic_venue: false
+          # 按 symbol 前缀强制指定 MIC venue，例如 {ES: XCME}。
+          symbol_to_mic_venue: {}
+          # 合约详情缓存有效天数；null 表示启动时重新请求。
+          cache_validity_days: null
+          # 可选的合约详情 pickle 缓存路径。
+          pickle_path: null
+          # 跳过不想加载的 IB secType，例如 [WAR, IOPT]。
+          filter_sec_types: []

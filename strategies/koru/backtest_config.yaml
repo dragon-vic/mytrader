@@ -19,18 +19,6 @@ strategy:
     entry_slope_ms: 5000
     end_ns: 1782903599607223896
 
-data:
-  clients:
-    binance_futures:
-      enabled: true
-      markets:
-        - symbol: KORU/USDT
-          timeframe: 1s
-    okx_swap:
-      enabled: true
-      markets:
-        - symbol: KORU/USDT
-          timeframe: 1s
 
 backtest:
   max_workers: 4
@@ -79,3 +67,17 @@ backtest:
     margin_maint: "0.1"
     maker_fee: "0.0005"
     taker_fee: "0.0005"
+
+node:
+  data:
+    clients:
+      binance_futures:
+        enabled: true
+        markets:
+          - symbol: KORU/USDT
+            timeframe: 1s
+      okx_swap:
+        enabled: true
+        markets:
+          - symbol: KORU/USDT
+            timeframe: 1s

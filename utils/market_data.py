@@ -52,7 +52,7 @@ class MarketDataStore:
             value = self.settings["backtest"]["venue_account"]["account_type"]
         else:
             client = self.settings["strategy"]["params"]["instrument_client"]
-            source = self.settings["data"]["clients"][client]
+            source = self.settings["node"]["data"]["clients"][client]
             value = source["account_type"]
         return getattr(BinanceAccountType, value)
 
@@ -114,7 +114,7 @@ class MarketDataStore:
         paths = []
         if "funding_csv_path" in params:
             market = self.markets[0]
-            df = self.fetch_funding_rates(market, int(self.settings.get("data", {}).get("funding_limit", 1000)))
+            df = self.fetch_funding_rates(market, int(self.settings["node"]["data"].get("funding_limit", 1000)))
             path = ROOT / params["funding_csv_path"]
             self.save_funding_rates(df, path)
             paths.append(path)

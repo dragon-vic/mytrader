@@ -65,7 +65,6 @@ class AnthropicArbConfig(StrategyConfig, frozen=True):
     short_min_bps: Decimal
     max_position: Decimal
     qty: Decimal
-    okx_multiplier: Decimal
     margin_leverage: Decimal
     margin_buffer: Decimal
 
@@ -219,6 +218,8 @@ class AnthropicArbStrategy(Strategy):
 
     # signal 生成后的所有交易前检查集中在这里。
     def _checked_signal(self, signal: str | None) -> str | None:
+        if self.mode == "suspend":
+            return None
         if self.mode == "stop":
             if self.trade_state == STATE_FLAT:
                 self.mode = "normal"
@@ -479,6 +480,14 @@ class AnthropicArbStrategy(Strategy):
             return
         pending = self.pending
         if pending.repair is not None:
+            if pending.repair.failed:
+                self.mode = "suspend"
+                self.log.error(
+                    f"repair_order_failed_suspend order={pending.repair.order_id} "
+                    f"instrument={pending.repair.instrument_id} side={pending.repair.side} "
+                    f"filled={pending.repair.filled_qty} target={pending.repair.target_qty}",
+                )
+                return
             bn_qty = self._net_qty(self.binance_id)
             okx_qty = self._net_qty(self.okx_id)
             if pending.repair.filled() and bn_qty + okx_qty / self.okx_qty_multiplier == Decimal("0"):
@@ -497,6 +506,7 @@ class AnthropicArbStrategy(Strategy):
             self.pending = None
             self._sync_state_from_inventory()
             return
+        self.log.error(f"pending_pair_one_leg_failed_enter_fail orders={','.join(pending.legs)}")
         self.trade_state = STATE_FAIL
         self._submit_repair_order(next(leg for leg in pending.legs.values() if leg.filled()))
 

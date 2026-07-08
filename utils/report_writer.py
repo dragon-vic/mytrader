@@ -64,7 +64,7 @@ def report_time(values: pd.Series) -> pd.Series:
 
 # 返回 NT LoggingConfig 需要的文件日志参数。
 def log_file_settings(settings: dict[str, Any], run_type: str) -> dict[str, Any]:
-    logging = settings["logging"]
+    logging = settings["node"]["logging"]
     return {
         "log_level_file": logging["log_level_file"],
         "log_directory": str(run_reports_dir(settings, run_type)),

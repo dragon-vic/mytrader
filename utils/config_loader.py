@@ -11,7 +11,7 @@ from utils.arguments import DEFAULT_CONFIG_NAME
 ROOT = Path(__file__).resolve().parent.parent
 STRATEGIES_DIR = ROOT / "strategies"
 GLOBAL_CONFIG_PATH = STRATEGIES_DIR / "global.yaml"
-BACKTEST_MODE_KEYS = {"engine", "strategy", "exec", "reports", "actors", "runtime"}
+BACKTEST_MODE_KEYS = {"engine", "strategy", "node", "reports", "actors", "runtime"}
 
 CLIENTS = {
     "binance_spot": {
@@ -222,7 +222,8 @@ def client_meta(key: str) -> dict[str, str]:
 
 # 返回某个 client 的规范化配置；data 优先，找不到再用 exec。
 def client_config(settings: dict[str, Any], key: str) -> dict[str, Any]:
-    source = settings["data"]["clients"].get(key) or settings["exec"]["clients"].get(key)
+    node = settings["node"]
+    source = node["data"]["clients"].get(key) or node["exec"]["clients"].get(key)
     if source is None:
         raise ValueError(f"client not found: {key}")
     return source
@@ -538,9 +539,10 @@ def backtest_client_config(settings: dict[str, Any], key: str) -> dict[str, Any]
 def normalize_settings(settings: dict[str, Any], mode: str | None) -> None:
     normalize_strategy(settings)
 
-    for key, cfg in settings["data"]["clients"].items():
+    node = settings["node"]
+    for key, cfg in node["data"]["clients"].items():
         normalize_client_markets(key, cfg, settings)
-    for key, cfg in settings["exec"]["clients"].items():
+    for key, cfg in node["exec"]["clients"].items():
         normalize_client_markets(key, cfg, settings)
 
     if mode == "backtest":
@@ -557,7 +559,7 @@ def normalize_settings(settings: dict[str, Any], mode: str | None) -> None:
         settings["markets_all"] = False
         return
 
-    source = settings["data"]["clients"].get(client) or settings["exec"]["clients"].get(client)
+    source = node["data"]["clients"].get(client) or node["exec"]["clients"].get(client)
     if source is None:
         raise ValueError(f"strategy.params.instrument_client not found: {client}")
     settings["markets"] = source["markets"]

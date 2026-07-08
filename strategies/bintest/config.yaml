@@ -5,23 +5,27 @@ strategy:
   params:
     instrument_client: binance_futures
 
-logging:
-  strategy_log_level: INFO
 
-data:
-  clients:
-    binance_futures:
-      enabled: true
-      markets:
-        - symbol: BTC/USDT
-          timeframe: 1s
+node:
+  logging:
+    strategy_log_level: INFO
 
-exec:
-  engine:
-    reconciliation: false
-    reconciliation_scope: null
 
-  clients:
-    binance_futures:
-      enabled: false
-      markets: []
+  data:
+    clients:
+      binance_futures:
+        enabled: true
+        markets:
+          - symbol: BTC/USDT
+            timeframe: 1s
+
+
+  exec:
+    engine:
+      reconciliation: false
+      reconciliation_scope: null
+
+    clients:
+      binance_futures:
+        enabled: false
+        markets: []

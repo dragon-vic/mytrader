@@ -35,11 +35,12 @@ def adapter_module(name: str):
 
 # 为 exec reconciliation 限定当前策略关心的 instrument。
 def reconciliation_instrument_ids(settings: dict[str, Any]):
-    scope = settings["exec"]["engine"]["reconciliation_scope"]
+    node = settings["node"]
+    scope = node["exec"]["engine"]["reconciliation_scope"]
     if scope != "configured_markets":
         return None
 
-    exec_clients = [cfg for cfg in settings["exec"]["clients"].values() if cfg.get("enabled")]
+    exec_clients = [cfg for cfg in node["exec"]["clients"].values() if cfg.get("enabled")]
     if len(exec_clients) != 1:
         raise ValueError("exec.engine.reconciliation_scope=configured_markets requires exactly one enabled exec client")
 
@@ -60,12 +61,12 @@ def reconciliation_instrument_ids(settings: dict[str, Any]):
 
 # 构建 NT data engine 配置。
 def data_engine_config(settings: dict[str, Any]) -> LiveDataEngineConfig:
-    return LiveDataEngineConfig(**settings["data"]["engine"])
+    return LiveDataEngineConfig(**settings["node"]["data"]["engine"])
 
 
 # 构建 live exec engine 配置。
 def exec_engine_config(settings: dict[str, Any]) -> LiveExecEngineConfig:
-    cfg = dict(settings["exec"]["engine"])
+    cfg = dict(settings["node"]["exec"]["engine"])
     cfg.pop("reconciliation_scope")
     return LiveExecEngineConfig(
         **cfg,
@@ -77,7 +78,7 @@ def exec_engine_config(settings: dict[str, Any]) -> LiveExecEngineConfig:
 def build_data_clients(settings: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     configs = {}
     factories = {}
-    for cfg in settings["data"]["clients"].values():
+    for cfg in settings["node"]["data"]["clients"].values():
         if not cfg["enabled"]:
             continue
         client_id, config, factory = adapter_module(cfg["adapter"]).build_data_client(settings, cfg)
@@ -90,7 +91,7 @@ def build_data_clients(settings: dict[str, Any]) -> tuple[dict[str, Any], dict[s
 def build_exec_clients(settings: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     configs = {}
     factories = {}
-    for cfg in settings["exec"]["clients"].values():
+    for cfg in settings["node"]["exec"]["clients"].values():
         if not cfg["enabled"]:
             continue
         client_id, config, factory = adapter_module(cfg["adapter"]).build_exec_client(settings, cfg)
@@ -119,7 +120,7 @@ def attach_node_stop_handler(node: TradingNode) -> None:
 def build_live_node(settings: dict[str, Any]) -> TradingNode:
     data_clients, data_factories = build_data_clients(settings)
     exec_clients, exec_factories = build_exec_clients(settings)
-    logging = settings["logging"]
+    logging = settings["node"]["logging"]
 
     trade_config = TradingNodeConfig(
         trader_id=settings["runtime"]["trader_id"],

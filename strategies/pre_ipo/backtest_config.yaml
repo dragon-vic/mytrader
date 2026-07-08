@@ -3,18 +3,18 @@ strategy:
   class: PreIpoQuoteBacktestStrategy
   config: PreIpoQuoteBacktestConfig
   grid_params:
-    window_minutes: [360,720]
+    window_minutes: [360]
 
 
   case_params:
     binance_id: ANTHROPICUSDT-PERP.BINANCE
     okx_id: ANTHROPIC-USDT-SWAP.OKX
-    feature_path: strategies/pre_ipo/backtest_data/anth_features_0630.parquet
+    feature_path: strategies/pre_ipo/backtest_data/anth_features_all.parquet
     qty: 0.2
 
     std_mult: 2.6
-    entry_bps: [60]
-    exit_bps: [-20]
+    entry_bps: [50]
+    exit_bps: [-30]
     capture_bps: 999
     max_position: 4
     long_max_bps: 560
@@ -26,18 +26,6 @@ strategy:
     # 0 表示自动用 feature 数据集结束前 10 秒。
     end_ns: 0
 
-data:
-  clients:
-    binance_futures:
-      enabled: true
-      markets:
-        - symbol: ANTHROPIC/USDT
-          timeframe: 1s
-    okx_swap:
-      enabled: true
-      markets:
-        - symbol: ANTHROPIC/USDT
-          timeframe: 1s
 
 backtest:
   max_workers: 4
@@ -74,7 +62,7 @@ backtest:
         cancel_latency_ms: 0
   datasets:
     - type: quote_tick_objects
-      path: strategies/pre_ipo/backtest_data/anth_quote_ticks_0630.pkl
+      path: strategies/pre_ipo/backtest_data/anth_quote_ticks_all.pkl
   logging:
     log_level: ERROR
     bypass: true
@@ -94,3 +82,17 @@ backtest:
     margin_maint: "0.1"
     maker_fee: "0.0002"
     taker_fee: "0.0004"
+
+node:
+  data:
+    clients:
+      binance_futures:
+        enabled: true
+        markets:
+          - symbol: ANTHROPIC/USDT
+            timeframe: 1s
+      okx_swap:
+        enabled: true
+        markets:
+          - symbol: ANTHROPIC/USDT
+            timeframe: 1s

@@ -30,20 +30,6 @@
     api_timeout: 0.8
     stop_close: true
 
-logging:
-  strategy_log_level: INFO
-
-data:
-  clients:
-    binance_futures:
-      enabled: true
-      markets: all
-
-exec:
-  clients:
-    binance_futures:
-      enabled: true
-      markets: all
 
 backtest:
   markets: [1000000BOB, AXS, BARD, CFG, COS,
@@ -80,3 +66,21 @@ backtest:
     margin_maint: "1"
     maker_fee: "0.0002"
     taker_fee: "0.0005"
+
+node:
+  logging:
+    strategy_log_level: INFO
+
+
+  data:
+    clients:
+      binance_futures:
+        enabled: true
+        markets: all
+
+
+  exec:
+    clients:
+      binance_futures:
+        enabled: true
+        markets: all

@@ -31,7 +31,8 @@ def strategy_instruments(settings: dict[str, Any], run_type: str, params: dict[s
     client = params["instrument_client"]
     if run_type == "backtest":
         return InstrumentFactory.from_client(backtest_client_config(settings, client))
-    source = settings["data"]["clients"].get(client) or settings["exec"]["clients"].get(client)
+    node = settings["node"]
+    source = node["data"]["clients"].get(client) or node["exec"]["clients"].get(client)
     if source is None:
         raise ValueError(f"strategy.params.instrument_client not found: {client}")
     return InstrumentFactory.from_client(source)
@@ -40,7 +41,7 @@ def strategy_instruments(settings: dict[str, Any], run_type: str, params: dict[s
 # 从 enabled data clients 自动展开 instrument id。
 def enabled_instruments(settings: dict[str, Any]) -> list[str]:
     values = []
-    for cfg in settings["data"]["clients"].values():
+    for cfg in settings["node"]["data"]["clients"].values():
         if not cfg.get("enabled") or cfg.get("markets_all"):
             continue
         if cfg["adapter"] in {"external_signal", "external_command"}:

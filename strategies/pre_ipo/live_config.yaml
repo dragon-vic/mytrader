@@ -16,97 +16,101 @@ strategy:
     exit_bps: -20
     std_mult: 2.6
     short_min_bps: 250
-    long_max_bps: 550
-    max_position: 4
-    qty: 0
+    long_max_bps: 560
+    max_position: 0.3
+    qty: 0.01
     margin_leverage: 5
     margin_buffer: 1.1
 
     # live 运行时 snapshot 写到当前 report 目录，monitor/start 会读取这个文件显示 rich 表格。
     snapshot_path: auto
 
-logging:
-  component_levels:
-    Portfolio: WARNING
 
-data:
-  clients:
-    external_command:
-      enabled: true
-      host: 127.0.0.1
-      port: 9002
+node:
+  logging:
+    component_levels:
+      Portfolio: WARNING
 
-    binance_futures:
-      enabled: true
-      markets:
-        - ANTHROPIC
 
-    okx_swap:
-      enabled: true
-      markets:
-        - ANTHROPIC
+  data:
+    clients:
+      external_command:
+        enabled: true
+        host: 127.0.0.1
+        port: 9002
 
-    kraken_futures:
-      enabled: false
-      markets:
-        - symbol: OPENAIX/USD
-          raw_symbol: PF_OPENAIXUSD
-          instrument_symbol: PF_OPENAIXUSD
-          base_currency: OPENAI
-        - symbol: ANTHROPICX/USD
-          raw_symbol: PF_ANTHROPICXUSD
-          instrument_symbol: PF_ANTHROPICXUSD
-          base_currency: ANTHROPIC
+      binance_futures:
+        enabled: true
+        markets:
+          - ANTHROPIC
 
-    # 当前 Hyperliquid 返回 VNTL 标的但 active=false；需要纳入时改 enabled。
-    hyperliquid_perp:
-      enabled: false
-      markets:
-        - symbol: VNTL-OPENAI/USD
-          raw_symbol: VNTL-OPENAI
-          instrument_symbol: VNTL-OPENAI
-          base_currency: OPENAI
-        - symbol: VNTL-ANTHROPIC/USD
-          raw_symbol: VNTL-ANTHROPIC
-          instrument_symbol: VNTL-ANTHROPIC
-          base_currency: ANTHROPIC
+      okx_swap:
+        enabled: true
+        markets:
+          - ANTHROPIC
 
-exec:
-  engine:
-    # 启动对账只回看最近 6h，避免 OKX 旧 pre-market 订单/fill 在启动时大量重建。
-    reconciliation_lookback_mins: 360
+      kraken_futures:
+        enabled: false
+        markets:
+          - symbol: OPENAIX/USD
+            raw_symbol: PF_OPENAIXUSD
+            instrument_symbol: PF_OPENAIXUSD
+            base_currency: OPENAI
+          - symbol: ANTHROPICX/USD
+            raw_symbol: PF_ANTHROPICXUSD
+            instrument_symbol: PF_ANTHROPICXUSD
+            base_currency: ANTHROPIC
 
-  clients:
-    binance_futures:
-      enabled: true
-      markets:
-        - ANTHROPIC
+      # 当前 Hyperliquid 返回 VNTL 标的但 active=false；需要纳入时改 enabled。
+      hyperliquid_perp:
+        enabled: false
+        markets:
+          - symbol: VNTL-OPENAI/USD
+            raw_symbol: VNTL-OPENAI
+            instrument_symbol: VNTL-OPENAI
+            base_currency: OPENAI
+          - symbol: VNTL-ANTHROPIC/USD
+            raw_symbol: VNTL-ANTHROPIC
+            instrument_symbol: VNTL-ANTHROPIC
+            base_currency: ANTHROPIC
 
-    okx_swap:
-      enabled: true
-      markets:
-        - ANTHROPIC
 
-    kraken_futures:
-      enabled: false
-      markets:
-        - symbol: OPENAIX/USD
-          raw_symbol: PF_OPENAIXUSD
-          instrument_symbol: PF_OPENAIXUSD
-          base_currency: OPENAI
-        - symbol: ANTHROPICX/USD
-          raw_symbol: PF_ANTHROPICXUSD
-          instrument_symbol: PF_ANTHROPICXUSD
-          base_currency: ANTHROPIC
+  exec:
+    engine:
+      # 启动对账只回看最近 6h，避免 OKX 旧 pre-market 订单/fill 在启动时大量重建。
+      reconciliation_lookback_mins: 360
 
-    hyperliquid_perp:
-      enabled: false
-      markets:
-        - symbol: VNTL-OPENAI/USD
-          raw_symbol: VNTL-OPENAI
-          instrument_symbol: VNTL-OPENAI
-          base_currency: OPENAI
-        - symbol: VNTL-ANTHROPIC/USD
-          raw_symbol: VNTL-ANTHROPIC
-          instrument_symbol: VNTL-ANTHROPIC
-          base_currency: ANTHROPIC
+    clients:
+      binance_futures:
+        enabled: true
+        markets:
+          - ANTHROPIC
+
+      okx_swap:
+        enabled: true
+        markets:
+          - ANTHROPIC
+
+      kraken_futures:
+        enabled: false
+        markets:
+          - symbol: OPENAIX/USD
+            raw_symbol: PF_OPENAIXUSD
+            instrument_symbol: PF_OPENAIXUSD
+            base_currency: OPENAI
+          - symbol: ANTHROPICX/USD
+            raw_symbol: PF_ANTHROPICXUSD
+            instrument_symbol: PF_ANTHROPICXUSD
+            base_currency: ANTHROPIC
+
+      hyperliquid_perp:
+        enabled: false
+        markets:
+          - symbol: VNTL-OPENAI/USD
+            raw_symbol: VNTL-OPENAI
+            instrument_symbol: VNTL-OPENAI
+            base_currency: OPENAI
+          - symbol: VNTL-ANTHROPIC/USD
+            raw_symbol: VNTL-ANTHROPIC
+            instrument_symbol: VNTL-ANTHROPIC
+            base_currency: ANTHROPIC
