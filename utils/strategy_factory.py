@@ -72,6 +72,8 @@ def strategy_params(
 ) -> dict[str, Any]:
     params = dict(strategy.get("params", {}))
     fields = get_type_hints(config_cls)
+    if "use_hyphens_in_client_order_ids" in fields:
+        params["use_hyphens_in_client_order_ids"] = False
     if "instruments" in fields and params.get("instruments") == "enabled":
         params["instruments"] = enabled_instruments(settings)
     if "instrument_ids" in fields or "bar_types" in fields:

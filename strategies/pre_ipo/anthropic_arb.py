@@ -36,11 +36,11 @@ from strategies.pre_ipo.anthropic_core import LONG_EDGE
 from strategies.pre_ipo.anthropic_core import MINUTE_NS
 from strategies.pre_ipo.anthropic_core import OKX_EXIT_SLIPPAGE_BPS
 from strategies.pre_ipo.anthropic_core import SHORT_EDGE
-from strategies.pre_ipo.anthropic_core import STATE_FAIL
 from strategies.pre_ipo.anthropic_core import STATE_FLAT
 from strategies.pre_ipo.anthropic_core import STATE_LONG
 from strategies.pre_ipo.anthropic_core import STATE_PENDING
 from strategies.pre_ipo.anthropic_core import STATE_SHORT
+from strategies.pre_ipo.anthropic_core import STATE_UNBALANCE
 from strategies.pre_ipo.anthropic_core import EdgePair
 from strategies.pre_ipo.anthropic_core import PendingLeg
 from strategies.pre_ipo.anthropic_core import PendingPair
@@ -99,6 +99,7 @@ class AnthropicArbStrategy(Strategy):
         self.margin_buffer = config.margin_buffer
         self.trade_state = STATE_FLAT
         self.mode = "normal"
+        self.unbalance_count = 0
         self.pending: PendingPair | None = None
         self.positions = {
             self.binance_id: PositionState(self.binance_id),
@@ -134,6 +135,9 @@ class AnthropicArbStrategy(Strategy):
         name = command.command.strip().lower()
         if name == "stop":
             self.log.warning(f"external_command_stop source={command.source} reason={command.reason}")
+            if self.trade_state == STATE_FLAT:
+                self.msgbus.publish(NODE_STOP_TOPIC, {"source": "anthropic_arb", "reason": "external_stop_flat"})
+                return
             self.mode = "stop"
             return
         if name == "reduce":
@@ -151,7 +155,7 @@ class AnthropicArbStrategy(Strategy):
         self.quotes[tick.instrument_id] = tick
         self.edge.record_quote(tick, self.binance_id, self.okx_id)
         self.edge.update(self.quotes[self.binance_id], self.quotes[self.okx_id])
-        if self.trade_state not in {STATE_PENDING, STATE_FAIL}:
+        if self.trade_state not in {STATE_PENDING, STATE_UNBALANCE}:
             signal = self.edge.signal(self.trade_state)
             signal = self._checked_signal(signal)
             if signal is not None:
@@ -515,12 +519,12 @@ class AnthropicArbStrategy(Strategy):
                     f"instrument={pending.repair.instrument_id} side={pending.repair.side} "
                     f"filled={pending.repair.filled_qty} target={pending.repair.target_qty}",
                 )
+                self._finish_record("repair_unbalance")
                 return
             bn_qty = self._net_qty(self.binance_id)
             okx_qty = self._net_qty(self.okx_id)
             if pending.repair.filled() and bn_qty + okx_qty / self.okx_qty_multiplier == Decimal("0"):
-                self.pending = None
-                self._sync_state_from_inventory()
+                self._finish_record("repaired")
             return
         if not pending.is_done():
             return
@@ -529,11 +533,11 @@ class AnthropicArbStrategy(Strategy):
             return
         if pending.is_all_failed():
             self.log.warning(f"pending_pair_all_failed orders={','.join(pending.legs)}")
-            self.pending = None
-            self._sync_state_from_inventory()
+            self._finish_record("unbalance")
             return
-        self.log.error(f"pending_pair_one_leg_failed_enter_fail orders={','.join(pending.legs)}")
-        self.trade_state = STATE_FAIL
+        self.log.error(f"pending_pair_one_leg_failed_enter_unbalance orders={','.join(pending.legs)}")
+        self.unbalance_count += 1
+        self.trade_state = STATE_UNBALANCE
         self._submit_repair_order(next(leg for leg in pending.legs.values() if leg.filled()))
 
     # 单腿成交另一腿失败时，用反向单消掉裸露仓位。
@@ -649,12 +653,16 @@ class AnthropicArbStrategy(Strategy):
     def _inventory(self) -> Decimal:
         return -self._net_qty(self.binance_id)
 
-    # pending 生命周期正常结束时统一固化阶段性数据并清理状态。
+    # pending 生命周期结束时统一固化阶段性数据并清理状态。
     def _finish_record(self, status: str) -> None:
         row = self._action_row(self.pending, status)
         self.action_rows.appendleft(row)
         self.pending = None
         self._sync_state_from_inventory()
+        if status == "filled":
+            self.unbalance_count = 0
+        elif self.unbalance_count > 2:
+            self.mode = "suspend"
 
     # 记录一笔 pending 完成后的动作摘要。
     def _action_row(self, pending: PendingPair, status: str) -> dict[str, str]:
@@ -674,7 +682,7 @@ class AnthropicArbStrategy(Strategy):
             "action": self._display_action(pending.before_inventory, pending.after_inventory),
             "edge_side": pending.edge_side,
             "status": status,
-            "qty": self._fmt(abs(pending.after_inventory)),
+            "qty": self._fmt(abs(self._inventory())),
             "signal_edge": self._fmt(pending.signal_edge_bps),
             "actual_edge": self._fmt(actual_edge),
             "edge_slippage": self._fmt(edge_slippage),

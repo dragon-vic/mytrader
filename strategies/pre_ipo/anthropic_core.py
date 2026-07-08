@@ -21,7 +21,7 @@ STATE_FLAT = "flat"
 STATE_PENDING = "pending"
 STATE_LONG = "long"
 STATE_SHORT = "short"
-STATE_FAIL = "fail"
+STATE_UNBALANCE = "unbalance"
 
 
 @dataclass

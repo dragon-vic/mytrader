@@ -60,7 +60,7 @@ def send_command(command: str) -> str:
     return f"已发送{command}"
 
 
-def status_table(payload: dict, snapshot: Path, session_name: str | None, notice: str) -> Table:
+def status_table(payload: dict, session_name: str | None, notice: str) -> Table:
     table = Table(title="状态", expand=True)
     table.add_column("项目", justify="left", no_wrap=True)
     table.add_column("值", justify="left")
@@ -70,7 +70,6 @@ def status_table(payload: dict, snapshot: Path, session_name: str | None, notice
     table.add_row("库存", str(payload.get("inventory", "-")))
     table.add_row("北京时间", datetime.now(tz=BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S"))
     table.add_row("session", session_name or "-")
-    table.add_row("snapshot", str(snapshot))
     if notice:
         table.add_row("消息", notice)
     return table
@@ -88,7 +87,7 @@ def edge_table(payload: dict) -> Table:
 
 def quotes_table(payload: dict) -> Table:
     table = Table(title="Quote", expand=True)
-    for column in ("venue", "bid", "ask", "bid_size", "ask_size", "age_ms"):
+    for column in ("venue", "bid", "ask", "bid_size", "ask_size"):
         table.add_column(column, justify="right" if column != "venue" else "left", no_wrap=True)
     quotes = payload.get("quotes") or {}
     if not quotes:
@@ -101,7 +100,6 @@ def quotes_table(payload: dict) -> Table:
             str(row.get("ask", "-")),
             str(row.get("bid_size", "-")),
             str(row.get("ask_size", "-")),
-            str(row.get("age_ms", "-")),
         )
     return table
 
@@ -137,25 +135,24 @@ def positions_table(payload: dict) -> Table:
     return table
 
 
-def pending_table(payload: dict) -> Table:
-    table = Table(title="Pending", expand=True)
-    columns = ("signal", "edge side", "signal edge", "mean", "edge slip", "fill slip", "age")
-    keys = ("signal", "edge_side", "signal_edge_bps", "mean_bps", "edge_slip", "fill_slip", "age_sec")
-    for column in columns:
-        table.add_column(column, justify="right", no_wrap=True)
-    pending = payload.get("pending")
-    if not pending:
-        table.add_row(*("-" for _ in table.columns))
-        return table
-    table.add_row(*(str(pending.get(key, "-")) for key in keys))
-    return table
-
-
 def actions_table(payload: dict) -> Table:
-    table = Table(title="Actions", expand=True)
-    columns = ("time", "asset", "action", "edge_side", "status", "qty", "signal_edge", "actual_edge", "edge_slippage")
+    table = Table(title="行动历史", expand=True)
+    columns = (
+        "time",
+        "asset",
+        "edge_side",
+        "status",
+        "qty",
+        "signal_edge",
+        "actual_edge",
+        "edge_slippage",
+        "fill_slippage",
+        "bn_latency",
+        "okx_latency",
+    )
+    left_columns = {"time", "asset", "edge_side", "status"}
     for column in columns:
-        table.add_column(column, justify="right" if column not in {"time", "asset", "action", "edge_side", "status"} else "left", no_wrap=True)
+        table.add_column(column, justify="left" if column in left_columns else "right", no_wrap=True)
     rows = payload.get("actions") or []
     if not rows:
         table.add_row(*("-" for _ in columns))
@@ -171,14 +168,13 @@ def build_view(payload: dict, snapshot: Path, session_name: str | None, notice: 
     if page == 1:
         return Group(
             header,
-            Columns([status_table(payload, snapshot, session_name, notice), pending_table(payload)], equal=True, expand=True),
+            actions_table(payload),
         )
     return Group(
         header,
-        Columns([status_table(payload, snapshot, session_name, notice), edge_table(payload)], equal=True, expand=True),
+        Columns([status_table(payload, session_name, notice), edge_table(payload)], equal=True, expand=True),
         Columns([quotes_table(payload), pnl_table(payload)], equal=True, expand=True),
         positions_table(payload),
-        actions_table(payload),
     )
 
 

@@ -5,7 +5,7 @@ strategy:
     config: PreIpoQuoteBacktestConfig
     grid_params:
       window_minutes: [360]
-
+      entry_bps: [50，60，70]
 
     case_params:
       binance_id: ANTHROPICUSDT-PERP.BINANCE
@@ -14,8 +14,8 @@ strategy:
       qty: 0.2
 
       std_mult: 2.6
-      entry_bps: [50]
-      exit_bps: [-30]
+
+      exit_bps: [-20，-30，-15]
       capture_bps: 999
       max_position: 4
       long_max_bps: 560
