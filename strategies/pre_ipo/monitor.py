@@ -87,19 +87,23 @@ def edge_table(payload: dict) -> Table:
 
 def quotes_table(payload: dict) -> Table:
     table = Table(title="Quote", expand=True)
-    for column in ("venue", "bid", "ask", "bid_size", "ask_size"):
+    for column in ("venue", "bid", "ask", "bid_size", "ask_size", "last 10m count"):
         table.add_column(column, justify="right" if column != "venue" else "left", no_wrap=True)
     quotes = payload.get("quotes") or {}
+    counts = payload.get("quote_counts") or []
     if not quotes:
         table.add_row(*("-" for _ in table.columns))
         return table
     for venue, row in quotes.items():
+        instrument = str(row.get("instrument", ""))
+        count_sum = sum(int(item.get(instrument, 0)) for item in counts)
         table.add_row(
             str(venue),
             str(row.get("bid", "-")),
             str(row.get("ask", "-")),
             str(row.get("bid_size", "-")),
             str(row.get("ask_size", "-")),
+            str(count_sum) if counts else "-",
         )
     return table
 

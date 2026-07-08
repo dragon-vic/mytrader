@@ -59,7 +59,10 @@ class PendingPair:
     created_ns: int
     before_inventory: Decimal
     after_inventory: Decimal
-    repair: PendingLeg | None = None
+    repairs: dict[str, PendingLeg] = None
+
+    def __post_init__(self) -> None:
+        self.repairs = {}
 
     # 记录一笔订单的部分或完整成交。
     def record_fill(self, order_id: str, qty: Decimal, px: Decimal, event_ns: int) -> None:
@@ -74,28 +77,32 @@ class PendingPair:
     def record_failed(self, order_id: str) -> None:
         self.leg(order_id).failed = True
 
-    # 两条主订单腿都收到最终反馈后，pending 才能收口。
+    # 主订单和修复订单都收到最终反馈后，pending 才能收口。
     def is_done(self) -> bool:
-        return all(leg.done() for leg in self.legs.values())
+        return all(leg.done() for leg in self.legs.values()) and all(leg.done() for leg in self.repairs.values())
 
-    # 两条主订单腿都完整成交，才算正常完成。
+    # 没有修复单，且两条主订单腿都完整成交，才算正常完成。
     def is_complete(self) -> bool:
-        return all(leg.filled() for leg in self.legs.values())
+        return not self.repairs and all(leg.filled() for leg in self.legs.values())
 
     # 两条主订单腿都失败时，没有裸仓需要修复。
     def is_all_failed(self) -> bool:
         return self.is_done() and sum(1 for leg in self.legs.values() if leg.failed) == len(self.legs)
 
+    # 是否已经提交过修复订单。
+    def has_repairs(self) -> bool:
+        return bool(self.repairs)
+
     # 主订单和修复订单都属于这个 pending 生命周期。
     def has_order(self, order_id: str) -> bool:
-        return order_id in self.legs or (self.repair is not None and self.repair.order_id == order_id)
+        return order_id in self.legs or order_id in self.repairs
 
     # 根据 order id 找 pending leg。
     def leg(self, order_id: str) -> PendingLeg:
         if order_id in self.legs:
             return self.legs[order_id]
-        if self.repair is not None and self.repair.order_id == order_id:
-            return self.repair
+        if order_id in self.repairs:
+            return self.repairs[order_id]
         raise KeyError(order_id)
 
     # 获取某条交易腿的成交均价。
@@ -104,7 +111,6 @@ class PendingPair:
             if leg.instrument_id == instrument_id and leg.filled_qty > 0:
                 return leg.filled_notional / leg.filled_qty
         return None
-
 
 @dataclass
 class PositionState:
@@ -173,14 +179,16 @@ class EdgePair:
     long_values: deque[tuple[int, Decimal]] = None
     short_values: deque[tuple[int, Decimal]] = None
     minute_ns: int | None = None
-    minute_prices: dict[InstrumentId, tuple[Decimal, Decimal, int]] = None
+    minute_quote_sums: dict[InstrumentId, tuple[Decimal, Decimal, int]] = None
     last_price_means: dict[InstrumentId, tuple[Decimal, Decimal]] = None
+    minute_counts: deque[dict[str, int]] = None
 
     def __post_init__(self) -> None:
         self.long_values = deque()
         self.short_values = deque()
-        self.minute_prices = {}
+        self.minute_quote_sums = {}
         self.last_price_means = {}
+        self.minute_counts = deque(maxlen=10)
 
     # 每个 quote 事件后更新当前 long/short edge。
     def update(self, binance: QuoteTick, okx: QuoteTick) -> None:
@@ -198,8 +206,8 @@ class EdgePair:
         while minute_ns > self.minute_ns:
             self.close_minute(self.minute_ns, binance_id, okx_id)
             self.minute_ns += MINUTE_NS
-        bid_sum, ask_sum, count = self.minute_prices.get(tick.instrument_id, (Decimal("0"), Decimal("0"), 0))
-        self.minute_prices[tick.instrument_id] = (
+        bid_sum, ask_sum, count = self.minute_quote_sums.get(tick.instrument_id, (Decimal("0"), Decimal("0"), 0))
+        self.minute_quote_sums[tick.instrument_id] = (
             bid_sum + Decimal(str(tick.bid_price)),
             ask_sum + Decimal(str(tick.ask_price)),
             count + 1,
@@ -214,7 +222,11 @@ class EdgePair:
 
     # 用一分钟内 bid/ask 均值生成一个时间加权 edge 样本。
     def close_minute(self, minute_ns: int, binance_id: InstrumentId, okx_id: InstrumentId) -> None:
-        for instrument_id, (bid_sum, ask_sum, count) in self.minute_prices.items():
+        counts = {
+            str(binance_id): self.minute_quote_sums.get(binance_id, (Decimal("0"), Decimal("0"), 0))[2],
+            str(okx_id): self.minute_quote_sums.get(okx_id, (Decimal("0"), Decimal("0"), 0))[2],
+        }
+        for instrument_id, (bid_sum, ask_sum, count) in self.minute_quote_sums.items():
             self.last_price_means[instrument_id] = bid_sum / Decimal(count), ask_sum / Decimal(count)
         bn_bid, bn_ask = self.last_price_means[binance_id]
         okx_bid, okx_ask = self.last_price_means[okx_id]
@@ -224,7 +236,8 @@ class EdgePair:
         self._add_value(self.long_values, minute_ns, long_bps)
         self._add_value(self.short_values, minute_ns, short_bps)
         self.update_stats()
-        self.minute_prices.clear()
+        self.minute_counts.append({"minute_ns": minute_ns, **counts})
+        self.minute_quote_sums.clear()
 
     def _add_value(self, values: deque[tuple[int, Decimal]], ts_ns: int, value: Decimal) -> None:
         values.append((ts_ns, value))
@@ -250,11 +263,11 @@ class EdgePair:
         binance_id: InstrumentId,
         okx_id: InstrumentId,
     ) -> None:
-        minute_prices: dict[int, dict[str, tuple[Decimal, Decimal, int]]] = {}
+        minute_quote_sums: dict[int, dict[str, tuple[Decimal, Decimal, int]]] = {}
         for row in rows:
             minute_ns = int(row["ts_local_ns"]) // MINUTE_NS * MINUTE_NS
             venue = str(row["venue"]).upper()
-            item = minute_prices.setdefault(minute_ns, {})
+            item = minute_quote_sums.setdefault(minute_ns, {})
             bid = Decimal(str(row["bid"]))
             ask = Decimal(str(row["ask"]))
             old = item.get(venue)
@@ -264,15 +277,16 @@ class EdgePair:
                 item[venue] = old[0] + bid, old[1] + ask, old[2] + 1
         self.long_values.clear()
         self.short_values.clear()
-        self.minute_prices.clear()
+        self.minute_quote_sums.clear()
+        self.minute_counts.clear()
         last: dict[str, tuple[Decimal, Decimal]] = {}
         minute_ns = start_ns // MINUTE_NS * MINUTE_NS
         end_minute_ns = end_ns // MINUTE_NS * MINUTE_NS
-        for seed_minute_ns in sorted(key for key in minute_prices if key < minute_ns):
-            for venue, (bid_sum, ask_sum, count) in minute_prices[seed_minute_ns].items():
+        for seed_minute_ns in sorted(key for key in minute_quote_sums if key < minute_ns):
+            for venue, (bid_sum, ask_sum, count) in minute_quote_sums[seed_minute_ns].items():
                 last[venue] = bid_sum / Decimal(count), ask_sum / Decimal(count)
         while minute_ns <= end_minute_ns:
-            for venue, (bid_sum, ask_sum, count) in minute_prices.get(minute_ns, {}).items():
+            for venue, (bid_sum, ask_sum, count) in minute_quote_sums.get(minute_ns, {}).items():
                 last[venue] = bid_sum / Decimal(count), ask_sum / Decimal(count)
             if "BINANCE" not in last or "OKX" not in last:
                 raise RuntimeError(f"warmup_window_not_full minute_ns={minute_ns} venues={','.join(sorted(last))}")
@@ -286,6 +300,11 @@ class EdgePair:
             )
             self._add_value(self.long_values, minute_ns, long_bps)
             self._add_value(self.short_values, minute_ns, short_bps)
+            self.minute_counts.append({
+                "minute_ns": minute_ns,
+                str(binance_id): minute_quote_sums.get(minute_ns, {}).get("BINANCE", (Decimal("0"), Decimal("0"), 0))[2],
+                str(okx_id): minute_quote_sums.get(minute_ns, {}).get("OKX", (Decimal("0"), Decimal("0"), 0))[2],
+            })
             minute_ns += MINUTE_NS
         self.update_stats()
         self.last_price_means[binance_id] = last["BINANCE"]

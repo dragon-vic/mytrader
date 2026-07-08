@@ -99,7 +99,7 @@ class AnthropicArbStrategy(Strategy):
         self.margin_buffer = config.margin_buffer
         self.trade_state = STATE_FLAT
         self.mode = "normal"
-        self.unbalance_count = 0
+        self.fail_count = 0
         self.pending: PendingPair | None = None
         self.positions = {
             self.binance_id: PositionState(self.binance_id),
@@ -371,6 +371,7 @@ class AnthropicArbStrategy(Strategy):
                 "orders": [
                     {
                         "order_id": leg.order_id,
+                        "kind": "main",
                         "instrument": str(leg.instrument_id),
                         "side": str(leg.side),
                         "filled_qty": self._fmt(leg.filled_qty),
@@ -381,6 +382,20 @@ class AnthropicArbStrategy(Strategy):
                         "failed": leg.failed,
                     }
                     for leg in self.pending.legs.values()
+                ] + [
+                    {
+                        "order_id": leg.order_id,
+                        "kind": "repair",
+                        "instrument": str(leg.instrument_id),
+                        "side": str(leg.side),
+                        "filled_qty": self._fmt(leg.filled_qty),
+                        "target_qty": self._fmt(leg.target_qty),
+                        "submit_ns": str(leg.submit_ns) if leg.submit_ns is not None else "-",
+                        "fill_event_ns": str(leg.fill_event_ns) if leg.fill_event_ns is not None else "-",
+                        "full_fill_event_ns": str(leg.full_fill_event_ns) if leg.full_fill_event_ns is not None else "-",
+                        "failed": leg.failed,
+                    }
+                    for leg in self.pending.repairs.values()
                 ],
             }
         return {
@@ -405,6 +420,7 @@ class AnthropicArbStrategy(Strategy):
                 "unrealized_usdt": self._fmt(sum((position.unrealized_pnl for position in self.positions.values()), Decimal("0"))),
                 "fee_usdt": self._fmt(sum((position.fee for position in self.positions.values()), Decimal("0"))),
             },
+            "quote_counts": list(self.edge.minute_counts),
             "pending": pending,
             "actions": list(self.action_rows),
         }
@@ -508,56 +524,78 @@ class AnthropicArbStrategy(Strategy):
 
     # pending 生命周期收口：成功、全失败、单腿失败补反向单。
     def _resolve_pending_if_done(self) -> None:
-        if self.pending is None:
-            return
         pending = self.pending
-        if pending.repair is not None:
-            if pending.repair.failed:
+        if pending is None or not pending.is_done():
+            return
+        if pending.is_complete():
+            self._finish_record("filled")
+            return
+        if pending.has_repairs():
+            failed_repairs = [leg for leg in pending.repairs.values() if leg.failed]
+            if failed_repairs:
                 self.mode = "suspend"
+                failed_text = ",".join(leg.order_id for leg in failed_repairs)
                 self.log.error(
-                    f"repair_order_failed_suspend order={pending.repair.order_id} "
-                    f"instrument={pending.repair.instrument_id} side={pending.repair.side} "
-                    f"filled={pending.repair.filled_qty} target={pending.repair.target_qty}",
+                    f"repair_order_failed_suspend orders={failed_text}",
                 )
                 self._finish_record("repair_unbalance")
                 return
             bn_qty = self._net_qty(self.binance_id)
             okx_qty = self._net_qty(self.okx_id)
-            if pending.repair.filled() and bn_qty + okx_qty / self.okx_qty_multiplier == Decimal("0"):
+            if bn_qty + okx_qty / self.okx_qty_multiplier == Decimal("0"):
                 self._finish_record("repaired")
-            return
-        if not pending.is_done():
-            return
-        if pending.is_complete():
-            self._finish_record("filled")
+            else:
+                self.mode = "suspend"
+                self.log.error(f"repair_finished_still_unbalanced bn_qty={bn_qty} okx_qty={okx_qty}")
+                self._finish_record("repair_unbalance")
             return
         if pending.is_all_failed():
             self.log.warning(f"pending_pair_all_failed orders={','.join(pending.legs)}")
-            self._finish_record("unbalance")
+            self.fail_count += 1
+            if any(leg.filled_qty > 0 for leg in pending.legs.values()):
+                self.trade_state = STATE_UNBALANCE
+                self._submit_repair_orders()
+            else:
+                self._finish_record("failed")
             return
         self.log.error(f"pending_pair_one_leg_failed_enter_unbalance orders={','.join(pending.legs)}")
-        self.unbalance_count += 1
+        self.fail_count += 1
         self.trade_state = STATE_UNBALANCE
-        self._submit_repair_order(next(leg for leg in pending.legs.values() if leg.filled()))
+        self._submit_repair_orders()
 
-    # 单腿成交另一腿失败时，用反向单消掉裸露仓位。
-    def _submit_repair_order(self, leg: PendingLeg) -> None:
-        side = OrderSide.SELL if leg.side == OrderSide.BUY else OrderSide.BUY
-        quantity = self.cache.instrument(leg.instrument_id).make_qty(leg.filled_qty)
-        order = self.order_factory.market(
-            instrument_id=leg.instrument_id,
-            order_side=side,
-            quantity=quantity,
-            time_in_force=TimeInForce.GTC,
-        )
-        self.pending.repair = PendingLeg(
-            order_id=str(order.client_order_id),
-            instrument_id=leg.instrument_id,
-            side=side,
-            target_qty=Decimal(str(quantity)),
-            quote_px=Decimal(str(self.quotes[leg.instrument_id].ask_price if side == OrderSide.BUY else self.quotes[leg.instrument_id].bid_price)),
-        )
-        self.submit_order(order)
+    # 按主订单已成交数量生成反向修复单，把账户退回下单前状态。
+    def _submit_repair_orders(self) -> None:
+        orders = []
+        repairs = {}
+        for leg in self.pending.legs.values():
+            if leg.filled_qty <= 0:
+                continue
+            side = OrderSide.SELL if leg.side == OrderSide.BUY else OrderSide.BUY
+            quantity = self.cache.instrument(leg.instrument_id).make_qty(leg.filled_qty)
+            order = self.order_factory.market(
+                instrument_id=leg.instrument_id,
+                order_side=side,
+                quantity=quantity,
+                time_in_force=TimeInForce.GTC,
+            )
+            order_id = str(order.client_order_id)
+            repairs[order_id] = PendingLeg(
+                order_id=order_id,
+                instrument_id=leg.instrument_id,
+                side=side,
+                target_qty=Decimal(str(quantity)),
+                quote_px=Decimal(str(self.quotes[leg.instrument_id].ask_price if side == OrderSide.BUY else self.quotes[leg.instrument_id].bid_price)),
+                submit_ns=self.clock.timestamp_ns(),
+            )
+            orders.append(order)
+        if not repairs:
+            self.mode = "suspend"
+            self.log.error(f"repair_no_filled_qty orders={','.join(self.pending.legs)}")
+            self._finish_record("repair_unbalance")
+            return
+        self.pending.repairs = repairs
+        for order in orders:
+            self.submit_order(order)
 
     # 从 NT cache 读取本策略当前 instrument 净持仓。
     def _net_qty(self, instrument_id: InstrumentId) -> Decimal:
@@ -658,10 +696,13 @@ class AnthropicArbStrategy(Strategy):
         row = self._action_row(self.pending, status)
         self.action_rows.appendleft(row)
         self.pending = None
-        self._sync_state_from_inventory()
+        if status == "repair_unbalance":
+            self.trade_state = STATE_UNBALANCE
+        else:
+            self._sync_state_from_inventory()
         if status == "filled":
-            self.unbalance_count = 0
-        elif self.unbalance_count > 2:
+            self.fail_count = 0
+        elif self.fail_count > 2:
             self.mode = "suspend"
 
     # 记录一笔 pending 完成后的动作摘要。
