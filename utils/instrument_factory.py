@@ -41,7 +41,8 @@ class InstrumentFactory:
             self.cfg = dict(settings.get("backtest", {}).get("instrument", {}))
             self.cfg["kind"] = settings["backtest"]["instrument_kind"]
         else:
-            client = settings["strategy"]["params"]["instrument_client"]
+            strategy = next(iter(settings["strategy"].values()))
+            client = strategy["params"]["instrument_client"]
             node = settings["node"]
             source = node["data"]["clients"].get(client)
             if source is None:

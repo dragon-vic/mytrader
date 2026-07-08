@@ -18,13 +18,25 @@ def decimal_param(value: object) -> Decimal:
 
 
 # 根据 set 里的策略类配置动态构建策略实例。
-def build_strategy(settings: dict[str, Any], run_type: str = "backtest"):
-    strategy = settings["strategy"]
+def single_strategy(settings: dict[str, Any]) -> dict[str, Any]:
+    strategies = settings["strategy"]
+    if len(strategies) != 1:
+        raise ValueError(f"backtest requires exactly one strategy, got: {','.join(strategies)}")
+    return next(iter(strategies.values()))
+
+
+# 根据一个策略配置动态构建策略实例。
+def build_strategy(settings: dict[str, Any], name: str, run_type: str = "backtest"):
+    strategy = settings["strategy"][name]
     module = importlib.import_module(strategy["module"])
     config_cls = getattr(module, strategy["config"])
-    params = strategy_params(settings, config_cls, run_type)
+    params = strategy_params(settings, strategy, config_cls, run_type)
     config = config_cls(**params)
     return getattr(module, strategy["class"])(config)
+
+
+def build_strategies(settings: dict[str, Any], run_type: str = "live"):
+    return [build_strategy(settings, name, run_type) for name in settings["strategy"]]
 
 
 def strategy_instruments(settings: dict[str, Any], run_type: str, params: dict[str, Any]) -> InstrumentFactory:
@@ -54,10 +66,11 @@ def enabled_instruments(settings: dict[str, Any]) -> list[str]:
 # 按策略配置字段自动补充运行类型、报告路径和全局代理。
 def strategy_params(
     settings: dict[str, Any],
+    strategy: dict[str, Any],
     config_cls,
     run_type: str,
 ) -> dict[str, Any]:
-    params = dict(settings["strategy"].get("params", {}))
+    params = dict(strategy.get("params", {}))
     fields = get_type_hints(config_cls)
     if "instruments" in fields and params.get("instruments") == "enabled":
         params["instruments"] = enabled_instruments(settings)

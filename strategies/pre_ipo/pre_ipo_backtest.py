@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from dataclasses import field
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import pyarrow.parquet as pq
@@ -21,6 +23,7 @@ LONG = "long"
 SHORT = "short"
 MINUTE_NS = 60_000_000_000
 END_BUFFER_NS = 10_000_000_000
+BEIJING_TZ = ZoneInfo("Asia/Shanghai")
 
 
 def decimal_param(value: object) -> Decimal:
@@ -37,6 +40,16 @@ def float_param(value: object) -> float:
 
 def event_decimal(value: object) -> Decimal:
     return Decimal(str(value).split()[0].replace("_", ""))
+
+
+def start_date_ns(value: int) -> int:
+    if value <= 0:
+        return 0
+    text = str(value)
+    if len(text) != 8:
+        raise RuntimeError("start_date must be 0 or YYYYMMDD")
+    day = datetime.strptime(text, "%Y%m%d").replace(tzinfo=BEIJING_TZ)
+    return int(day.timestamp() * 1_000_000_000)
 
 
 @dataclass
@@ -68,7 +81,7 @@ class Signal:
 
 
 class FeatureStore:
-    def __init__(self, path: str, window: int) -> None:
+    def __init__(self, path: str, window: int, start_ns: int = 0) -> None:
         column_map = {
             "short_mean": f"short_mean_{window}",
             "short_std": f"short_std_{window}",
@@ -79,7 +92,13 @@ class FeatureStore:
         data_path = Path(path)
         requested_columns = ["instrument_id", "ts_ns", "short_edge", "long_edge", *column_map.values()]
         available_columns = set(pq.read_schema(data_path).names)
-        if set(requested_columns).issubset(available_columns):
+        if start_ns > 0:
+            if "minute_ns" not in available_columns:
+                raise RuntimeError("feature file missing minute_ns for start_date warmup reset")
+            data = pd.read_parquet(data_path, columns=["instrument_id", "ts_ns", "minute_ns", "short_edge", "long_edge"])
+            data = data[data["ts_ns"] >= start_ns].copy()
+            data = self._add_dynamic_window(data, window, column_map)
+        elif set(requested_columns).issubset(available_columns):
             data = pd.read_parquet(data_path, columns=requested_columns)
         elif "minute_ns" in available_columns:
             data = pd.read_parquet(data_path, columns=["instrument_id", "ts_ns", "minute_ns", "short_edge", "long_edge"])
@@ -87,6 +106,8 @@ class FeatureStore:
         else:
             missing = sorted(set(requested_columns) - available_columns)
             raise RuntimeError(f"feature file missing columns for window_minutes={window}: {missing}")
+        if data.empty:
+            raise RuntimeError(f"feature file has no rows after start_ns={start_ns}")
         data = data.sort_values("ts_ns", kind="mergesort")
         self.instrument_ids = data["instrument_id"].astype(str).to_numpy()
         self.ts_ns = data["ts_ns"].to_numpy()
@@ -133,6 +154,8 @@ class FeatureStore:
             raise RuntimeError("feature file ended before quote ticks")
         instrument_id = str(tick.instrument_id)
         ts_ns = int(tick.ts_init)
+        if ts_ns < self.ts_ns[self.index]:
+            return None
         if self.ts_ns[self.index] != ts_ns or self.instrument_ids[self.index] != instrument_id:
             raise RuntimeError(
                 f"feature row mismatch: expected {instrument_id}@{ts_ns}, "
@@ -169,6 +192,7 @@ class PreIpoQuoteBacktestConfig(StrategyConfig, frozen=True):
     window_minutes: int
     min_hold_sec: float
     signal_delay_ms: float
+    start_date: int
     end_ns: int
 
 
@@ -178,7 +202,8 @@ class PreIpoQuoteBacktestStrategy(Strategy):
         self.binance_id = InstrumentId.from_str(config.binance_id)
         self.okx_id = InstrumentId.from_str(config.okx_id)
         self.window_minutes = int(config.window_minutes)
-        self.features = FeatureStore(config.feature_path, self.window_minutes)
+        self.start_ns = start_date_ns(int(config.start_date))
+        self.features = FeatureStore(config.feature_path, self.window_minutes, self.start_ns)
         self.qty = decimal_param(config.qty)
         self.max_position = decimal_param(config.max_position)
         if self.max_position <= 0:

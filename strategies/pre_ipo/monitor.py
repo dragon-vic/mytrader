@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import subprocess
 import sys
 import time
 from datetime import datetime
@@ -26,6 +27,7 @@ from utils.arguments import EXTERNAL_COMMAND_DEFAULT_PORT
 
 BEIJING_TZ = timezone(timedelta(hours=8))
 SNAPSHOT_NAME = "pre_ipo_snapshot.json"
+PAGE_COUNT = 2
 
 
 def snapshot_path(value: str) -> Path:
@@ -84,6 +86,26 @@ def edge_table(payload: dict) -> Table:
     return table
 
 
+def quotes_table(payload: dict) -> Table:
+    table = Table(title="Quote", expand=True)
+    for column in ("venue", "bid", "ask", "bid_size", "ask_size", "age_ms"):
+        table.add_column(column, justify="right" if column != "venue" else "left", no_wrap=True)
+    quotes = payload.get("quotes") or {}
+    if not quotes:
+        table.add_row(*("-" for _ in table.columns))
+        return table
+    for venue, row in quotes.items():
+        table.add_row(
+            str(venue),
+            str(row.get("bid", "-")),
+            str(row.get("ask", "-")),
+            str(row.get("bid_size", "-")),
+            str(row.get("ask_size", "-")),
+            str(row.get("age_ms", "-")),
+        )
+    return table
+
+
 def pnl_table(payload: dict) -> Table:
     table = Table(title="PnL", expand=True)
     table.add_column("指标", justify="left", no_wrap=True)
@@ -117,19 +139,15 @@ def positions_table(payload: dict) -> Table:
 
 def pending_table(payload: dict) -> Table:
     table = Table(title="Pending", expand=True)
-    for column in ("signal", "edge_side", "signal_edge_bps", "mean_bps", "age_sec"):
+    columns = ("signal", "edge side", "signal edge", "mean", "edge slip", "fill slip", "age")
+    keys = ("signal", "edge_side", "signal_edge_bps", "mean_bps", "edge_slip", "fill_slip", "age_sec")
+    for column in columns:
         table.add_column(column, justify="right", no_wrap=True)
     pending = payload.get("pending")
     if not pending:
         table.add_row(*("-" for _ in table.columns))
         return table
-    table.add_row(
-        str(pending.get("signal", "-")),
-        str(pending.get("edge_side", "-")),
-        str(pending.get("signal_edge_bps", "-")),
-        str(pending.get("mean_bps", "-")),
-        str(pending.get("age_sec", "-")),
-    )
+    table.add_row(*(str(pending.get(key, "-")) for key in keys))
     return table
 
 
@@ -147,14 +165,19 @@ def actions_table(payload: dict) -> Table:
     return table
 
 
-def build_view(payload: dict, snapshot: Path, session_name: str | None, notice: str) -> Group:
-    keys = "r减仓 | n正常 | s停止 | Esc退出"
-    header = Panel.fit(f"PRE IPO Monitor | {keys}", border_style="cyan")
+def build_view(payload: dict, snapshot: Path, session_name: str | None, notice: str, page: int) -> Group:
+    keys = "↑/↓翻页 | r减仓 | n正常 | s停止 | Esc退出"
+    header = Panel.fit(f"PRE IPO Monitor | Page {page + 1}/{PAGE_COUNT} | {keys}", border_style="cyan")
+    if page == 1:
+        return Group(
+            header,
+            Columns([status_table(payload, snapshot, session_name, notice), pending_table(payload)], equal=True, expand=True),
+        )
     return Group(
         header,
-        Columns([status_table(payload, snapshot, session_name, notice), edge_table(payload), pnl_table(payload)], equal=True, expand=True),
+        Columns([status_table(payload, snapshot, session_name, notice), edge_table(payload)], equal=True, expand=True),
+        Columns([quotes_table(payload), pnl_table(payload)], equal=True, expand=True),
         positions_table(payload),
-        pending_table(payload),
         actions_table(payload),
     )
 
@@ -170,6 +193,13 @@ def read_key(timeout_sec: float) -> str:
         while time.monotonic() < deadline:
             if msvcrt.kbhit():
                 key = msvcrt.getwch()
+                if key in ("\x00", "\xe0"):
+                    direction = msvcrt.getwch()
+                    if direction == "H":
+                        return "up"
+                    if direction == "P":
+                        return "down"
+                    return ""
                 if key == "\x1b":
                     return "escape"
                 return key.lower()
@@ -189,24 +219,54 @@ def read_key(timeout_sec: float) -> str:
             return ""
         key = os.read(fd, 1).decode(errors="ignore")
         if key == "\x1b":
+            ready, _, _ = select.select([fd], [], [], 0.15)
+            if ready:
+                seq = os.read(fd, 1).decode(errors="ignore")
+                ready, _, _ = select.select([fd], [], [], 0.05)
+                if ready:
+                    seq += os.read(fd, 1).decode(errors="ignore")
+                if seq == "[A":
+                    return "up"
+                if seq == "[B":
+                    return "down"
+                return ""
             return "escape"
         return key.lower()
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
+def node_running(session_name: str | None) -> bool:
+    if session_name is None or os.name == "nt":
+        return True
+    result = subprocess.run(
+        ["tmux", "has-session", "-t", session_name],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return result.returncode == 0
+
+
 def main(path: Path, session_name: str | None = None) -> None:
     console = Console()
     notice = ""
+    page = 0
     try:
         with Live(console=console, screen=True, refresh_per_second=1) as live:
             while True:
                 payload = load_snapshot(path)
-                live.update(build_view(payload, path, session_name, notice), refresh=True)
+                live.update(build_view(payload, path, session_name, notice, page), refresh=True)
+                if not node_running(session_name):
+                    return
                 key = read_key(1.0)
                 if key == "escape":
                     return
-                if key == "r" and session_name:
+                if key == "up":
+                    page = (page - 1) % PAGE_COUNT
+                elif key == "down":
+                    page = (page + 1) % PAGE_COUNT
+                elif key == "r" and session_name:
                     notice = send_command("reduce")
                 elif key == "n" and session_name:
                     notice = send_command("normal")

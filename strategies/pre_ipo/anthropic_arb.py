@@ -155,7 +155,7 @@ class AnthropicArbStrategy(Strategy):
             signal = self.edge.signal(self.trade_state)
             signal = self._checked_signal(signal)
             if signal is not None:
-                self._submit_signal(signal)
+                self._submit_signal(signal, tick)
 
     # 成交事件入口：先更新仓位账本，再推进 pending 生命周期。
     def on_order_filled(self, event: OrderFilled) -> None:
@@ -327,6 +327,18 @@ class AnthropicArbStrategy(Strategy):
 
     # 生成策略私有 snapshot；monitor 会按新 schema 单独适配。
     def _build_snapshot(self, now_ns: int) -> dict[str, object]:
+        quotes = {
+            self._venue(instrument_id): {
+                "instrument": str(instrument_id),
+                "bid": self._fmt(Decimal(str(quote.bid_price))),
+                "ask": self._fmt(Decimal(str(quote.ask_price))),
+                "bid_size": self._fmt(Decimal(str(quote.bid_size))),
+                "ask_size": self._fmt(Decimal(str(quote.ask_size))),
+                "ts_event": str(quote.ts_event),
+                "age_ms": self._fmt((now_ns - int(quote.ts_event)) / 1_000_000),
+            }
+            for instrument_id, quote in self.quotes.items()
+        }
         positions = {
             self._venue(instrument_id): {
                 "instrument": str(instrument_id),
@@ -340,11 +352,17 @@ class AnthropicArbStrategy(Strategy):
         }
         pending = None
         if self.pending is not None:
+            actual_edge = self._actual_edge_bps(self.pending)
+            edge_slip = self._edge_slippage_bps(self.pending, actual_edge)
             pending = {
                 "signal": self.pending.signal,
                 "edge_side": self.pending.edge_side,
                 "signal_edge_bps": self._fmt(self.pending.signal_edge_bps),
                 "mean_bps": self._fmt(self.pending.mean_bps),
+                "signal_event_ns": str(self.pending.signal_event_ns),
+                "signal_ts_ns": str(self.pending.signal_ts_ns),
+                "edge_slip": self._fmt(edge_slip),
+                "fill_slip": self._fmt(self._fill_slippage_bps(self.pending)),
                 "age_sec": self._fmt(max((now_ns - self.pending.created_ns) / 1_000_000_000, 0.0)),
                 "orders": [
                     {
@@ -353,6 +371,9 @@ class AnthropicArbStrategy(Strategy):
                         "side": str(leg.side),
                         "filled_qty": self._fmt(leg.filled_qty),
                         "target_qty": self._fmt(leg.target_qty),
+                        "submit_ns": str(leg.submit_ns) if leg.submit_ns is not None else "-",
+                        "fill_event_ns": str(leg.fill_event_ns) if leg.fill_event_ns is not None else "-",
+                        "full_fill_event_ns": str(leg.full_fill_event_ns) if leg.full_fill_event_ns is not None else "-",
                         "failed": leg.failed,
                     }
                     for leg in self.pending.legs.values()
@@ -365,6 +386,7 @@ class AnthropicArbStrategy(Strategy):
             "state": self.trade_state,
             "mode": self.mode,
             "inventory": self._fmt(self._inventory()),
+            "quotes": quotes,
             "edge": {
                 "long_bps": self._fmt(self.edge.long_bps),
                 "long_mean_bps": self._fmt(self.edge.long_mean_bps),
@@ -392,10 +414,12 @@ class AnthropicArbStrategy(Strategy):
         tmp.replace(self.snapshot_path)
 
     # 提交双腿市价单；submit 前先写 pending，避免同步事件早于状态。
-    def _submit_signal(self, signal: str) -> None:
+    def _submit_signal(self, signal: str, tick: QuoteTick) -> None:
         before_inventory = self._inventory()
         base_qty = self._trade_qty(signal, before_inventory)
         self.trade_state = STATE_PENDING
+        signal_event_ns = int(tick.ts_event)
+        signal_ts_ns = int(tick.ts_init)
         if signal == "long":
             buy_id, sell_id = self.okx_id, self.binance_id
             buy_qty, sell_qty = base_qty * self.okx_qty_multiplier, base_qty
@@ -431,6 +455,7 @@ class AnthropicArbStrategy(Strategy):
                 instrument_id=buy_id,
                 side=OrderSide.BUY,
                 target_qty=Decimal(str(buy_quantity)),
+                quote_px=Decimal(str(self.quotes[buy_id].ask_price)),
                 submit_ns=self.clock.timestamp_ns(),
             ),
             str(sell_order.client_order_id): PendingLeg(
@@ -438,6 +463,7 @@ class AnthropicArbStrategy(Strategy):
                 instrument_id=sell_id,
                 side=OrderSide.SELL,
                 target_qty=Decimal(str(sell_quantity)),
+                quote_px=Decimal(str(self.quotes[sell_id].bid_price)),
                 submit_ns=self.clock.timestamp_ns(),
             ),
         }
@@ -447,6 +473,8 @@ class AnthropicArbStrategy(Strategy):
             edge_side=edge_side,
             signal_edge_bps=signal_edge,
             mean_bps=mean_bps,
+            signal_event_ns=signal_event_ns,
+            signal_ts_ns=signal_ts_ns,
             created_ns=self.clock.timestamp_ns(),
             before_inventory=before_inventory,
             after_inventory=after_inventory,
@@ -497,9 +525,7 @@ class AnthropicArbStrategy(Strategy):
         if not pending.is_done():
             return
         if pending.is_complete():
-            self.action_rows.appendleft(self._action_row(pending, "filled"))
-            self.pending = None
-            self._sync_state_from_inventory()
+            self._finish_record("filled")
             return
         if pending.is_all_failed():
             self.log.warning(f"pending_pair_all_failed orders={','.join(pending.legs)}")
@@ -525,6 +551,7 @@ class AnthropicArbStrategy(Strategy):
             instrument_id=leg.instrument_id,
             side=side,
             target_qty=Decimal(str(quantity)),
+            quote_px=Decimal(str(self.quotes[leg.instrument_id].ask_price if side == OrderSide.BUY else self.quotes[leg.instrument_id].bid_price)),
         )
         self.submit_order(order)
 
@@ -622,20 +649,27 @@ class AnthropicArbStrategy(Strategy):
     def _inventory(self) -> Decimal:
         return -self._net_qty(self.binance_id)
 
+    # pending 生命周期正常结束时统一固化阶段性数据并清理状态。
+    def _finish_record(self, status: str) -> None:
+        row = self._action_row(self.pending, status)
+        self.action_rows.appendleft(row)
+        self.pending = None
+        self._sync_state_from_inventory()
+
     # 记录一笔 pending 完成后的动作摘要。
     def _action_row(self, pending: PendingPair, status: str) -> dict[str, str]:
         actual_edge = self._actual_edge_bps(pending)
-        edge_slippage = None
-        if actual_edge is not None:
-            edge_slippage = actual_edge - pending.signal_edge_bps if pending.edge_side == SHORT_EDGE else pending.signal_edge_bps - actual_edge
+        edge_slippage = self._edge_slippage_bps(pending, actual_edge)
         latencies = {"BINANCE": "-", "OKX": "-"}
         for leg in pending.legs.values():
             venue = self._venue(leg.instrument_id)
-            if leg.submit_ns is not None and leg.fill_event_ns is not None:
-                latencies[venue] = self._fmt((leg.fill_event_ns - leg.submit_ns) / 1_000_000)
+            if leg.full_fill_event_ns is not None:
+                latencies[venue] = self._fmt((leg.full_fill_event_ns - pending.signal_event_ns) / 1_000_000)
         ts_sec = pending.created_ns / 1_000_000_000
         return {
             "created_ns": str(pending.created_ns),
+            "signal_event_ns": str(pending.signal_event_ns),
+            "signal_ts_ns": str(pending.signal_ts_ns),
             "asset": ASSET,
             "action": self._display_action(pending.before_inventory, pending.after_inventory),
             "edge_side": pending.edge_side,
@@ -667,6 +701,29 @@ class AnthropicArbStrategy(Strategy):
         if pending.edge_side == SHORT_EDGE:
             return (sell_avg - buy_avg) / buy_avg * BPS
         return (buy_avg - sell_avg) / sell_avg * BPS
+
+    # 计算实际成交 edge 相对 signal edge 的滑点。
+    def _edge_slippage_bps(self, pending: PendingPair, actual_edge: Decimal | None) -> Decimal | None:
+        if actual_edge is None:
+            return None
+        if pending.edge_side == SHORT_EDGE:
+            return actual_edge - pending.signal_edge_bps
+        return pending.signal_edge_bps - actual_edge
+
+    # 计算两条腿成交均价相对触发 bid/ask 的滑点合计。
+    def _fill_slippage_bps(self, pending: PendingPair) -> Decimal | None:
+        total = Decimal("0")
+        seen = False
+        for leg in pending.legs.values():
+            if leg.filled_qty <= 0:
+                continue
+            avg_px = leg.filled_notional / leg.filled_qty
+            if leg.side == OrderSide.BUY:
+                total += (avg_px - leg.quote_px) / leg.quote_px * BPS
+            else:
+                total += (leg.quote_px - avg_px) / leg.quote_px * BPS
+            seen = True
+        return total if seen else None
 
     # 按 venue 找账户，用于下单前余额检查。
     def _account_for_venue(self, venue: str):

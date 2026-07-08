@@ -203,15 +203,16 @@ def is_backtest_mode_layer(section: Any) -> bool:
 
 # 校验并展开策略模块路径；module 写当前策略目录内的 py 文件名。
 def normalize_strategy(settings: dict[str, Any]) -> None:
-    strategy = settings["strategy"]
+    strategies = settings["strategy"]
     folder = Path(settings["project"]["strategy_dir"]).name
-    for key in ("module", "class", "config"):
-        if key not in strategy:
-            raise KeyError(f"strategy.{key} is required in {settings['project']['config_path']}")
-    module = str(strategy["module"])
-    if module.startswith("strategies."):
-        raise ValueError("strategy.module should be relative to its strategy folder, for example: pre_ipo")
-    strategy["module"] = f"strategies.{folder}.{module}"
+    for name, strategy in strategies.items():
+        for key in ("module", "class", "config"):
+            if key not in strategy:
+                raise KeyError(f"strategy.{name}.{key} is required in {settings['project']['config_path']}")
+        module = str(strategy["module"])
+        if module.startswith("strategies."):
+            raise ValueError(f"strategy.{name}.module should be relative to its strategy folder")
+        strategy["module"] = f"strategies.{folder}.{module}"
 
 
 def client_meta(key: str) -> dict[str, str]:
@@ -553,7 +554,8 @@ def normalize_settings(settings: dict[str, Any], mode: str | None) -> None:
     if mode == "backtest":
         return
 
-    client = settings["strategy"].get("params", {}).get("instrument_client")
+    strategy = next(iter(settings["strategy"].values()))
+    client = strategy.get("params", {}).get("instrument_client")
     if client is None:
         settings["markets"] = []
         settings["markets_all"] = False

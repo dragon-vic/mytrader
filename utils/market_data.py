@@ -51,7 +51,8 @@ class MarketDataStore:
         if self.settings["mode"] == "backtest":
             value = self.settings["backtest"]["venue_account"]["account_type"]
         else:
-            client = self.settings["strategy"]["params"]["instrument_client"]
+            strategy = next(iter(self.settings["strategy"].values()))
+            client = strategy["params"]["instrument_client"]
             source = self.settings["node"]["data"]["clients"][client]
             value = source["account_type"]
         return getattr(BinanceAccountType, value)
@@ -110,7 +111,7 @@ class MarketDataStore:
 
     # 拉取 set 里声明的额外行情数据，目前用于 funding rate。
     def fetch_extra_data(self) -> list[Path]:
-        params = self.settings["strategy"].get("params", {})
+        params = next(iter(self.settings["strategy"].values())).get("params", {})
         paths = []
         if "funding_csv_path" in params:
             market = self.markets[0]
@@ -122,7 +123,7 @@ class MarketDataStore:
 
     # 通过 Binance 官方 REST 拉取 U 本位永续资金费历史。
     def fetch_funding_rates(self, market: dict[str, Any], limit: int) -> pd.DataFrame:
-        params = self.settings["strategy"].get("params", {})
+        params = next(iter(self.settings["strategy"].values())).get("params", {})
         proxy = proxy_url(self.settings)
         response = requests.get(
             f"{params.get('funding_api_base_url', 'https://fapi.binance.com')}/fapi/v1/fundingRate",

@@ -26,7 +26,7 @@ from utils.polymarket_btc5m import up_down_instrument_windows
 from utils.report_writer import print_live_summary
 from utils.report_writer import TraderReportWriter
 from utils.runtime_ids import claim_run
-from utils.strategy_factory import build_strategy
+from utils.strategy_factory import build_strategies
 
 
 def adapter_module(name: str):
@@ -130,7 +130,7 @@ def build_live_node(settings: dict[str, Any]) -> TradingNode:
             log_colors=bool(logging["log_colors"]),
             log_component_levels={
                 **logging["component_levels"],
-                settings["strategy"]["class"]: logging["strategy_log_level"],
+                **{strategy["class"]: logging["strategy_log_level"] for strategy in settings["strategy"].values()},
             },
             **log_file_settings(settings, "live"),
         ),
@@ -146,7 +146,8 @@ def build_live_node(settings: dict[str, Any]) -> TradingNode:
     for client_id, factory in exec_factories.items():
         node.add_exec_client_factory(client_id, factory)
 
-    node.trader.add_strategy(build_strategy(settings, "live"))
+    for strategy in build_strategies(settings, "live"):
+        node.trader.add_strategy(strategy)
 
     if settings["actors"]["data_recorder"]["enabled"]:
         node.trader.add_actor(DataRecorder(DataRecorderConfig()))

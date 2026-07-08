@@ -1,23 +1,24 @@
 strategy:
-  module: koru_backtest
-  class: KoruQuoteBacktestStrategy
-  config: KoruQuoteBacktestConfig
-  grid_params:
+  koru_backtest:
+    module: koru_backtest
+    class: KoruQuoteBacktestStrategy
+    config: KoruQuoteBacktestConfig
+    grid_params:
 
-  case_params:
-    binance_id: KORUUSDT-PERP.BINANCE
-    okx_id: KORU-USDT-SWAP.OKX
-    feature_path: strategies/koru/backtest_data/koru_features_collector_compact.parquet
-    qty: "1"
-    capture_bps: 100
-    short_entry_bps: 60
-    long_entry_bps: 60
-    window_minutes: 360
-    warmup_minutes: 360
-    min_hold_sec: 60
-    entry_filter: slow
-    entry_slope_ms: 5000
-    end_ns: 1782903599607223896
+    case_params:
+      binance_id: KORUUSDT-PERP.BINANCE
+      okx_id: KORU-USDT-SWAP.OKX
+      feature_path: strategies/koru/backtest_data/koru_features_collector_compact.parquet
+      qty: "1"
+      capture_bps: 100
+      short_entry_bps: 60
+      long_entry_bps: 60
+      window_minutes: 360
+      warmup_minutes: 360
+      min_hold_sec: 60
+      entry_filter: slow
+      entry_slope_ms: 5000
+      end_ns: 1782903599607223896
 
 
 backtest:

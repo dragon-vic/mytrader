@@ -47,6 +47,7 @@ from utils.report_writer import write_backtest_result
 from utils.report_writer import write_trader_reports
 from utils.runtime_ids import claim_run
 from utils.strategy_factory import build_strategy
+from utils.strategy_factory import single_strategy
 
 
 class BpsSlippageFillModel(FillModel):
@@ -118,7 +119,8 @@ def build_backtest_engine(settings: dict[str, Any]) -> BacktestEngine:
     add_venues(engine, settings)
     add_instruments(engine, factories)
     add_datasets(engine, settings, factories)
-    engine.add_strategy(build_strategy(settings, "backtest"))
+    name = next(iter(settings["strategy"]))
+    engine.add_strategy(build_strategy(settings, name, "backtest"))
     return engine
 
 
@@ -381,7 +383,7 @@ def main(config_name: str) -> dict[str, Any]:
 
 # 回测配置只接受 grid_params/case_params，并在运行前展开成普通 strategy.params。
 def expand_batch_settings(settings: dict[str, Any]) -> list[dict[str, Any]]:
-    strategy = settings["strategy"]
+    strategy = single_strategy(settings)
     grid = strategy["grid_params"] or {}
     case_params = strategy["case_params"]
     rows = case_param_rows(case_params)
@@ -395,13 +397,14 @@ def expand_batch_settings(settings: dict[str, Any]) -> list[dict[str, Any]]:
 
 def case_settings(settings: dict[str, Any], base_params: dict[str, Any], grid_values: dict[str, Any]) -> dict[str, Any]:
     case = copy.deepcopy(settings)
-    case_params = case["strategy"]["case_params"]
+    strategy = single_strategy(case)
+    case_params = strategy["case_params"]
     params = dict(base_params)
     params.update(grid_values)
-    case["strategy"]["params"] = params
+    strategy["params"] = params
     case["runtime"] = {**case.get("runtime", {}), "backtest_params": selected_param_rows(grid_values, case_params, params)}
-    case["strategy"].pop("grid_params", None)
-    case["strategy"].pop("case_params", None)
+    strategy.pop("grid_params", None)
+    strategy.pop("case_params", None)
     return case
 
 

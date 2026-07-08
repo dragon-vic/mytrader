@@ -30,10 +30,12 @@ class PendingLeg:
     instrument_id: InstrumentId
     side: OrderSide
     target_qty: Decimal
+    quote_px: Decimal
     filled_qty: Decimal = Decimal("0")
     filled_notional: Decimal = Decimal("0")
     submit_ns: int | None = None
     fill_event_ns: int | None = None
+    full_fill_event_ns: int | None = None
     failed: bool = False
 
     # 单腿实际成交量达到目标量才算完成。
@@ -52,6 +54,8 @@ class PendingPair:
     edge_side: str
     signal_edge_bps: Decimal
     mean_bps: Decimal
+    signal_event_ns: int
+    signal_ts_ns: int
     created_ns: int
     before_inventory: Decimal
     after_inventory: Decimal
@@ -63,6 +67,8 @@ class PendingPair:
         leg.filled_qty += qty
         leg.filled_notional += qty * px
         leg.fill_event_ns = max(leg.fill_event_ns or 0, event_ns)
+        if leg.full_fill_event_ns is None and leg.filled():
+            leg.full_fill_event_ns = event_ns
 
     # 记录一笔订单的最终失败反馈。
     def record_failed(self, order_id: str) -> None:

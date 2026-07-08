@@ -1,9 +1,10 @@
 strategy:
-  module: bintest
-  class: BintestStrategy
-  config: BintestConfig
-  params:
-    instrument_client: binance_futures
+  bintest:
+    module: bintest
+    class: BintestStrategy
+    config: BintestConfig
+    params:
+      instrument_client: binance_futures
 
 
 node:

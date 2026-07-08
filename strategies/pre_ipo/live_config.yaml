@@ -1,29 +1,29 @@
 strategy:
-  module: anthropic_arb
-  class: AnthropicArbStrategy
-  config: AnthropicArbConfig
-  params:
-    instruments: enabled
-    # OKX 2026-06-30 对 ANTHROPIC 做 rebase：价格 /10，数量 *10。
-    okx_multiplier: 10
-    # window_minutes 同时控制启动时读取 collector 的范围，以及 edge 均值/std 的时间窗口；360 = 6h。
-    window_minutes: 360
+  ANTH:
+    module: anthropic_arb
+    class: AnthropicArbStrategy
+    config: AnthropicArbConfig
+    params:
+      instruments: enabled
+      # OKX 2026-06-30 对 ANTHROPIC 做 rebase：价格 /10，数量 *10。
+      okx_multiplier: 10
+      # window_minutes 同时控制启动时读取 collector 的范围，以及 edge 均值/std 的时间窗口；360 = 6h。
+      window_minutes: 360
 
+      # long_edge 低于均线 entry 开 long；short_edge 高于均线 entry 开 short。
+      # 持仓后反向 edge 偏离 exit 就减仓或翻向；reduce mode 只允许减仓方向。
+      entry_bps: 50
+      exit_bps: -20
+      std_mult: 2.6
+      short_min_bps: 250
+      long_max_bps: 560
+      max_position: 0.3
+      qty: 0.01
+      margin_leverage: 5
+      margin_buffer: 1.1
 
-    # long_edge 低于均线 entry 开 long；short_edge 高于均线 entry 开 short。
-    # 持仓后反向 edge 偏离 exit 就减仓或翻向；reduce mode 只允许减仓方向。
-    entry_bps: 50
-    exit_bps: -20
-    std_mult: 2.6
-    short_min_bps: 250
-    long_max_bps: 560
-    max_position: 0.3
-    qty: 0.01
-    margin_leverage: 5
-    margin_buffer: 1.1
-
-    # live 运行时 snapshot 写到当前 report 目录，monitor/start 会读取这个文件显示 rich 表格。
-    snapshot_path: auto
+      # live 运行时 snapshot 写到当前 report 目录，monitor/start 会读取这个文件显示 rich 表格。
+      snapshot_path: auto
 
 
 node:

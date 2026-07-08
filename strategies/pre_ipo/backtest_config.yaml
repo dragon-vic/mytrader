@@ -1,30 +1,33 @@
 strategy:
-  module: pre_ipo_backtest
-  class: PreIpoQuoteBacktestStrategy
-  config: PreIpoQuoteBacktestConfig
-  grid_params:
-    window_minutes: [360]
+  pre_ipo_backtest:
+    module: pre_ipo_backtest
+    class: PreIpoQuoteBacktestStrategy
+    config: PreIpoQuoteBacktestConfig
+    grid_params:
+      window_minutes: [360]
 
 
-  case_params:
-    binance_id: ANTHROPICUSDT-PERP.BINANCE
-    okx_id: ANTHROPIC-USDT-SWAP.OKX
-    feature_path: strategies/pre_ipo/backtest_data/anth_features_all.parquet
-    qty: 0.2
+    case_params:
+      binance_id: ANTHROPICUSDT-PERP.BINANCE
+      okx_id: ANTHROPIC-USDT-SWAP.OKX
+      feature_path: strategies/pre_ipo/backtest_data/anth_features_all.parquet
+      qty: 0.2
 
-    std_mult: 2.6
-    entry_bps: [50]
-    exit_bps: [-30]
-    capture_bps: 999
-    max_position: 4
-    long_max_bps: 560
-    short_min_bps: 250
-    # window_minutes 同时控制 edge 均线、std/band 和 warmup；360 = 6h。
+      std_mult: 2.6
+      entry_bps: [50]
+      exit_bps: [-30]
+      capture_bps: 999
+      max_position: 4
+      long_max_bps: 560
+      short_min_bps: 200
+      # window_minutes 同时控制 edge 均线、std/band 和 warmup；360 = 6h。
 
-    min_hold_sec: 0
-    signal_delay_ms: 0
-    # 0 表示自动用 feature 数据集结束前 10 秒。
-    end_ns: 0
+      min_hold_sec: 0
+      signal_delay_ms: 0
+      # 0 表示从 feature 数据集第一条开始；也可以写 20260622，按北京时间当天 00:00 开始重新 warmup。
+      start_date: 0
+      # 0 表示自动用 feature 数据集结束前 10 秒。
+      end_ns: 0
 
 
 backtest:
