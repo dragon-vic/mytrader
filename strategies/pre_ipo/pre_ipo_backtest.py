@@ -18,6 +18,8 @@ from nautilus_trader.model.events import OrderFilled
 from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.trading.strategy import Strategy
 
+from utils.arguments import NODE_STOP_TOPIC
+
 
 LONG = "long"
 SHORT = "short"
@@ -467,6 +469,7 @@ class PreIpoQuoteBacktestStrategy(Strategy):
         self.halted = True
         self._cancel_signal()
         self._flatten(force=True)
+        self.msgbus.publish(NODE_STOP_TOPIC, {"reason": "pre_ipo_backtest_end_ns"})
 
     def _flatten(self, force: bool = False) -> None:
         if (self.halted and not force) or self.pending is not None or self.side == "flat" or self.position_qty <= 0:

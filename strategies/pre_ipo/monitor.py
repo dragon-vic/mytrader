@@ -108,34 +108,32 @@ def quotes_table(payload: dict) -> Table:
     return table
 
 
-def pnl_table(payload: dict) -> Table:
-    table = Table(title="PnL", expand=True)
-    table.add_column("指标", justify="left", no_wrap=True)
-    table.add_column("值", justify="right", no_wrap=True)
-    pnl = payload.get("pnl") or {}
-    for key in ("realized_usdt", "unrealized_usdt", "fee_usdt"):
-        table.add_row(key, str(pnl.get(key, "-")))
-    return table
-
-
 def positions_table(payload: dict) -> Table:
     table = Table(title="持仓", expand=True)
     for column in ("venue", "instrument", "qty", "avg_px", "realized_usdt", "unrealized_usdt", "fee_usdt"):
         table.add_column(column, justify="right" if column not in {"venue", "instrument"} else "left", no_wrap=True)
     positions = payload.get("positions") or {}
-    if not positions:
-        table.add_row(*("-" for _ in table.columns))
-        return table
-    for venue, row in positions.items():
-        table.add_row(
-            str(venue),
-            str(row.get("instrument", "-")),
-            str(row.get("qty", "-")),
-            str(row.get("avg_px", "-")),
-            str(row.get("realized_usdt", "-")),
-            str(row.get("unrealized_usdt", "-")),
-            str(row.get("fee_usdt", "-")),
-        )
+    if positions:
+        for venue, row in positions.items():
+            table.add_row(
+                str(venue),
+                str(row.get("instrument", "-")),
+                str(row.get("qty", "-")),
+                str(row.get("avg_px", "-")),
+                str(row.get("realized_usdt", "-")),
+                str(row.get("unrealized_usdt", "-")),
+                str(row.get("fee_usdt", "-")),
+            )
+    pnl = payload.get("pnl") or {}
+    table.add_row(
+        "total",
+        "-",
+        "-",
+        "-",
+        str(pnl.get("realized_usdt", "-")),
+        str(pnl.get("unrealized_usdt", "-")),
+        str(pnl.get("fee_usdt", "-")),
+    )
     return table
 
 
@@ -194,7 +192,7 @@ def build_view(payload: dict, snapshot: Path, session_name: str | None, notice: 
     return Group(
         header,
         Columns([status_table(payload, session_name, notice), edge_table(payload)], equal=True, expand=True),
-        Columns([quotes_table(payload), pnl_table(payload)], equal=True, expand=True),
+        quotes_table(payload),
         positions_table(payload),
     )
 

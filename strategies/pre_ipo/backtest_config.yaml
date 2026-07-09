@@ -3,22 +3,21 @@ strategy:
     module: pre_ipo_backtest
     class: PreIpoQuoteBacktestStrategy
     config: PreIpoQuoteBacktestConfig
-    grid_params: {}
 
     case_params:
-      binance_id: OPENAIUSDT-PERP.BINANCE
-      okx_id: OPENAI-USDT-SWAP.OKX
-      feature_path: strategies/pre_ipo/backtest_data/openai_features_all.parquet
-      qty: 0.1
-      window_minutes: [360,360,360]
-      entry_bps: [60,60,60]
-      exit_bps: [-10,-20,-30]
-      std_mult: [2.4,2.4,2.4]
+      binance_id: ANTHROPICUSDT-PERP.BINANCE
+      okx_id: ANTHROPIC-USDT-SWAP.OKX
+      feature_path: strategies/pre_ipo/backtest_data/anth_features_all.parquet
+      qty: [0.1]
+      window_minutes: [360,300,240]
+      entry_bps: [50,55,55]
+      exit_bps: [-20,-20,-15]
+      std_mult: [2.6,3.0,3.0]
 
       capture_bps: 999
       max_position: 4
-      long_max_bps: 560
       short_min_bps: 200
+      long_max_bps: 520
       # window_minutes 同时控制 edge 均线、std/band 和 warmup；360 = 6h。
 
       min_hold_sec: 0
@@ -30,7 +29,7 @@ strategy:
 
 
 backtest:
-  max_workers: 4
+  max_workers: 3
   venues:
     - client: binance_futures
       starting_balance: "10000 USDT"
@@ -38,7 +37,7 @@ backtest:
       oms_type: NETTING
       default_leverage: "5"
       use_market_order_acks: true
-      # bps_slippage 会把实际成交价按方向滑点；10bps 在当前价格附近约 165-173 ticks。
+      # bps_slippage 会把实际成交价按方向滑点；1bps 在当前价格附近约 17 ticks。
       fill_model:
         type: bps_slippage
         slippage_bps: 1
@@ -64,7 +63,7 @@ backtest:
         cancel_latency_ms: 0
   datasets:
     - type: quote_tick_objects
-      path: strategies/pre_ipo/backtest_data/openai_quote_ticks_all.pkl
+      path: strategies/pre_ipo/backtest_data/anth_quote_ticks_all.pkl
   logging:
     log_level: ERROR
     bypass: true
