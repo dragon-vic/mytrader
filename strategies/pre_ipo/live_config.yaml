@@ -17,8 +17,8 @@ strategy:
       std_mult: 3.0
       short_min_bps: 200
       long_max_bps: 520
-      max_position: 4
-      qty: 0.1
+      max_position: 2
+      qty: 0.05
       margin_leverage: 5
       margin_buffer: 1.1
 
