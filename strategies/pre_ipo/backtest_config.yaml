@@ -3,19 +3,18 @@ strategy:
     module: pre_ipo_backtest
     class: PreIpoQuoteBacktestStrategy
     config: PreIpoQuoteBacktestConfig
-    grid_params:
-      window_minutes: [360]
-      entry_bps: [50，60，70]
+    grid_params: {}
 
     case_params:
-      binance_id: ANTHROPICUSDT-PERP.BINANCE
-      okx_id: ANTHROPIC-USDT-SWAP.OKX
-      feature_path: strategies/pre_ipo/backtest_data/anth_features_all.parquet
-      qty: 0.2
+      binance_id: OPENAIUSDT-PERP.BINANCE
+      okx_id: OPENAI-USDT-SWAP.OKX
+      feature_path: strategies/pre_ipo/backtest_data/openai_features_all.parquet
+      qty: 0.1
+      window_minutes: [360,360,360]
+      entry_bps: [60,60,60]
+      exit_bps: [-10,-20,-30]
+      std_mult: [2.4,2.4,2.4]
 
-      std_mult: 2.6
-
-      exit_bps: [-20，-30，-15]
       capture_bps: 999
       max_position: 4
       long_max_bps: 560
@@ -44,8 +43,8 @@ backtest:
         type: bps_slippage
         slippage_bps: 1
       latency:
-        base_latency_ms: 15
-        insert_latency_ms: 15
+        base_latency_ms: 3
+        insert_latency_ms: 3
         update_latency_ms: 0
         cancel_latency_ms: 0
     - client: okx_swap
@@ -59,13 +58,13 @@ backtest:
         type: bps_slippage
         slippage_bps: 10
       latency:
-        base_latency_ms: 15
-        insert_latency_ms: 30
+        base_latency_ms: 30
+        insert_latency_ms: 5
         update_latency_ms: 0
         cancel_latency_ms: 0
   datasets:
     - type: quote_tick_objects
-      path: strategies/pre_ipo/backtest_data/anth_quote_ticks_all.pkl
+      path: strategies/pre_ipo/backtest_data/openai_quote_ticks_all.pkl
   logging:
     log_level: ERROR
     bypass: true
@@ -93,9 +92,11 @@ node:
         enabled: true
         markets:
           - symbol: ANTHROPIC/USDT
+          - symbol: OPENAI/USDT
             timeframe: 1s
       okx_swap:
         enabled: true
         markets:
           - symbol: ANTHROPIC/USDT
+          - symbol: OPENAI/USDT
             timeframe: 1s

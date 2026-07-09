@@ -241,7 +241,7 @@ class PreIpoQuoteBacktestStrategy(Strategy):
         self.clock.set_time_alert_ns(
             "preipo_quote_bt_flatten",
             self.end_ns,
-            callback=lambda _event: self._flatten(force=True),
+            callback=lambda _event: self._on_end_alert(),
             allow_past=True,
         )
 
@@ -463,8 +463,13 @@ class PreIpoQuoteBacktestStrategy(Strategy):
     def _long_reduce(self, edge: float, mean: float) -> bool:
         return (edge <= mean + self.long_exit_bps) or (edge <= self.entry_edge - self.capture_bps)
 
+    def _on_end_alert(self) -> None:
+        self.halted = True
+        self._cancel_signal()
+        self._flatten(force=True)
+
     def _flatten(self, force: bool = False) -> None:
-        if self.halted or self.pending is not None or self.side == "flat" or self.position_qty <= 0:
+        if (self.halted and not force) or self.pending is not None or self.side == "flat" or self.position_qty <= 0:
             return
         qty = self.position_qty if force else min(self.qty, self.position_qty)
         pending = Pending(target="flat", qty=qty, force=force)
