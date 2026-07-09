@@ -139,6 +139,15 @@ def positions_table(payload: dict) -> Table:
     return table
 
 
+def event_latency_ms(row: dict, venue: str) -> str:
+    metadata = row.get("metadata") or {}
+    start = metadata.get("signal_event_ns")
+    end = metadata.get(f"{venue.lower()}_full_fill_event_ns")
+    if start in (None, "-") or end in (None, "-"):
+        return "-"
+    return f"{(int(end) - int(start)) / 1_000_000:.2f}"
+
+
 def actions_table(payload: dict) -> Table:
     table = Table(title="行动历史", expand=True)
     columns = (
@@ -162,7 +171,15 @@ def actions_table(payload: dict) -> Table:
         table.add_row(*("-" for _ in columns))
         return table
     for row in rows[:20]:
-        table.add_row(*(str(row.get(column, "-")) for column in columns))
+        values = []
+        for column in columns:
+            if column == "bn_latency":
+                values.append(event_latency_ms(row, "bn"))
+            elif column == "okx_latency":
+                values.append(event_latency_ms(row, "okx"))
+            else:
+                values.append(str(row.get(column, "-")))
+        table.add_row(*values)
     return table
 
 

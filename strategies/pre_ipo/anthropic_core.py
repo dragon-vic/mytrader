@@ -33,7 +33,8 @@ class PendingLeg:
     quote_px: Decimal
     filled_qty: Decimal = Decimal("0")
     filled_notional: Decimal = Decimal("0")
-    submit_ns: int | None = None
+    submit_event_ns: int | None = None
+    accept_event_ns: int | None = None
     fill_event_ns: int | None = None
     full_fill_event_ns: int | None = None
     failed: bool = False
@@ -56,7 +57,8 @@ class PendingPair:
     mean_bps: Decimal
     signal_event_ns: int
     signal_ts_ns: int
-    created_ns: int
+    signal_venue: str
+    on_quote_ns: int
     before_inventory: Decimal
     after_inventory: Decimal
     repairs: dict[str, PendingLeg] = None
@@ -72,6 +74,14 @@ class PendingPair:
         leg.fill_event_ns = max(leg.fill_event_ns or 0, event_ns)
         if leg.full_fill_event_ns is None and leg.filled():
             leg.full_fill_event_ns = event_ns
+
+    # 记录 NT 框架发出的 submitted 事件时间。
+    def record_submit(self, order_id: str, event_ns: int) -> None:
+        self.leg(order_id).submit_event_ns = event_ns
+
+    # 记录 NT 框架发出的 accepted 事件时间。
+    def record_accept(self, order_id: str, event_ns: int) -> None:
+        self.leg(order_id).accept_event_ns = event_ns
 
     # 记录一笔订单的最终失败反馈。
     def record_failed(self, order_id: str) -> None:
@@ -178,8 +188,8 @@ class EdgePair:
     short_bps: Decimal | None = None
     long_values: deque[tuple[int, Decimal]] = None
     short_values: deque[tuple[int, Decimal]] = None
-    minute_ns: int | None = None
-    minute_quote_sums: dict[InstrumentId, tuple[Decimal, Decimal, int]] = None
+    next_close_ns: int | None = None
+    minute_quote_sums: dict[int, dict[InstrumentId, tuple[Decimal, Decimal, int]]] = None
     last_price_means: dict[InstrumentId, tuple[Decimal, Decimal]] = None
     minute_counts: deque[dict[str, int]] = None
 
@@ -198,35 +208,36 @@ class EdgePair:
         okx_ask = Decimal(str(okx.ask_price)) * self.okx_price_multiplier
         self.long_bps, self.short_bps = self.from_prices(bn_bid, bn_ask, okx_bid, okx_ask)
 
-    # 将 quote 放入当前分钟桶；跨分钟时先结算旧桶。
+    # 将 quote 放入事件时间对应的分钟桶；分钟结算统一由 housekeeping 推进。
     def record_quote(self, tick: QuoteTick, binance_id: InstrumentId, okx_id: InstrumentId) -> None:
         minute_ns = int(tick.ts_event) // MINUTE_NS * MINUTE_NS
-        if self.minute_ns is None:
-            self.minute_ns = minute_ns
-        while minute_ns > self.minute_ns:
-            self.close_minute(self.minute_ns, binance_id, okx_id)
-            self.minute_ns += MINUTE_NS
-        bid_sum, ask_sum, count = self.minute_quote_sums.get(tick.instrument_id, (Decimal("0"), Decimal("0"), 0))
-        self.minute_quote_sums[tick.instrument_id] = (
+        if self.next_close_ns is None:
+            self.next_close_ns = minute_ns
+        if minute_ns < self.next_close_ns:
+            return
+        bucket = self.minute_quote_sums.setdefault(minute_ns, {})
+        bid_sum, ask_sum, count = bucket.get(tick.instrument_id, (Decimal("0"), Decimal("0"), 0))
+        bucket[tick.instrument_id] = (
             bid_sum + Decimal(str(tick.bid_price)),
             ask_sum + Decimal(str(tick.ask_price)),
             count + 1,
         )
 
-    # housekeeping 补齐已经结束但没有新 quote 触发的分钟。
+    # housekeeping 统一结算已经结束的分钟。
     def fill_to(self, now_ns: int, binance_id: InstrumentId, okx_id: InstrumentId) -> None:
         current_minute_ns = now_ns // MINUTE_NS * MINUTE_NS
-        while self.minute_ns is not None and self.minute_ns < current_minute_ns:
-            self.close_minute(self.minute_ns, binance_id, okx_id)
-            self.minute_ns += MINUTE_NS
+        while self.next_close_ns is not None and self.next_close_ns < current_minute_ns:
+            self.close_minute(self.next_close_ns, binance_id, okx_id)
+            self.next_close_ns += MINUTE_NS
 
     # 用一分钟内 bid/ask 均值生成一个时间加权 edge 样本。
     def close_minute(self, minute_ns: int, binance_id: InstrumentId, okx_id: InstrumentId) -> None:
+        bucket = dict(self.minute_quote_sums.pop(minute_ns, {}))
         counts = {
-            str(binance_id): self.minute_quote_sums.get(binance_id, (Decimal("0"), Decimal("0"), 0))[2],
-            str(okx_id): self.minute_quote_sums.get(okx_id, (Decimal("0"), Decimal("0"), 0))[2],
+            str(binance_id): bucket.get(binance_id, (Decimal("0"), Decimal("0"), 0))[2],
+            str(okx_id): bucket.get(okx_id, (Decimal("0"), Decimal("0"), 0))[2],
         }
-        for instrument_id, (bid_sum, ask_sum, count) in self.minute_quote_sums.items():
+        for instrument_id, (bid_sum, ask_sum, count) in bucket.items():
             self.last_price_means[instrument_id] = bid_sum / Decimal(count), ask_sum / Decimal(count)
         bn_bid, bn_ask = self.last_price_means[binance_id]
         okx_bid, okx_ask = self.last_price_means[okx_id]
@@ -237,7 +248,6 @@ class EdgePair:
         self._add_value(self.short_values, minute_ns, short_bps)
         self.update_stats()
         self.minute_counts.append({"minute_ns": minute_ns, **counts})
-        self.minute_quote_sums.clear()
 
     def _add_value(self, values: deque[tuple[int, Decimal]], ts_ns: int, value: Decimal) -> None:
         values.append((ts_ns, value))
@@ -245,10 +255,10 @@ class EdgePair:
         while values and values[0][0] < cutoff:
             values.popleft()
 
-    def _mean(self, values: deque[tuple[int, Decimal]]) -> Decimal:
+    def _mean(self, values: list[tuple[int, Decimal]]) -> Decimal:
         return sum((value for _, value in values), Decimal("0")) / Decimal(len(values))
 
-    def _std(self, values: deque[tuple[int, Decimal]], mean: Decimal) -> Decimal:
+    def _std(self, values: list[tuple[int, Decimal]], mean: Decimal) -> Decimal:
         if len(values) < 2:
             return Decimal("0")
         variance = sum(((value - mean) ** 2 for _, value in values), Decimal("0")) / Decimal(len(values))
@@ -265,7 +275,8 @@ class EdgePair:
     ) -> None:
         minute_quote_sums: dict[int, dict[str, tuple[Decimal, Decimal, int]]] = {}
         for row in rows:
-            minute_ns = int(row["ts_local_ns"]) // MINUTE_NS * MINUTE_NS
+            event_ns = int(row["ts_exchange_ms"]) * 1_000_000 if int(row["ts_exchange_ms"]) > 0 else int(row["ts_local_ns"])
+            minute_ns = event_ns // MINUTE_NS * MINUTE_NS
             venue = str(row["venue"]).upper()
             item = minute_quote_sums.setdefault(minute_ns, {})
             bid = Decimal(str(row["bid"]))
@@ -309,7 +320,7 @@ class EdgePair:
         self.update_stats()
         self.last_price_means[binance_id] = last["BINANCE"]
         self.last_price_means[okx_id] = last["OKX"]
-        self.minute_ns = end_minute_ns
+        self.next_close_ns = end_minute_ns + MINUTE_NS
 
     # 用 Binance/OKX 的 bid/ask 计算 long/short 两条 edge。
     def from_prices(
@@ -325,12 +336,14 @@ class EdgePair:
 
     # 更新 rolling window 的均值和标准差。
     def update_stats(self) -> None:
-        long_mean = self._mean(self.long_values)
-        short_mean = self._mean(self.short_values)
+        long_values = list(self.long_values)
+        short_values = list(self.short_values)
+        long_mean = self._mean(long_values)
+        short_mean = self._mean(short_values)
         self.long_mean_bps = long_mean
         self.short_mean_bps = short_mean
-        self.long_std_bps = self._std(self.long_values, long_mean)
-        self.short_std_bps = self._std(self.short_values, short_mean)
+        self.long_std_bps = self._std(long_values, long_mean)
+        self.short_std_bps = self._std(short_values, short_mean)
 
     # 根据当前状态和 edge 偏离返回 long/short signal。
     def signal(self, state: str) -> str | None:
@@ -341,3 +354,7 @@ class EdgePair:
         if self.short_bps - self.short_mean_bps > short_threshold and self.short_bps >= self.short_min_bps:
             return "short"
         return None
+
+    # 给 snapshot 提供不可变副本，避免 housekeeping 和 monitor 数据竞争。
+    def quote_counts(self) -> list[dict[str, int]]:
+        return [dict(item) for item in self.minute_counts.copy()]

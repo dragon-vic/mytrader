@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import time
 from collections import deque
 from datetime import datetime
 from datetime import timedelta
@@ -21,11 +20,13 @@ from nautilus_trader.model.data import CustomData
 from nautilus_trader.model.data import QuoteTick
 from nautilus_trader.model.enums import OrderSide
 from nautilus_trader.model.enums import TimeInForce
+from nautilus_trader.model.events import OrderAccepted
 from nautilus_trader.model.events import OrderCanceled
 from nautilus_trader.model.events import OrderDenied
 from nautilus_trader.model.events import OrderExpired
 from nautilus_trader.model.events import OrderFilled
 from nautilus_trader.model.events import OrderRejected
+from nautilus_trader.model.events import OrderSubmitted
 from nautilus_trader.model.identifiers import ClientId
 from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.trading.strategy import Strategy
@@ -77,7 +78,7 @@ class AnthropicArbStrategy(Strategy):
         self.okx_id = instruments[1]
         self.instrument_ids = [self.binance_id, self.okx_id]
         self.quotes: dict[InstrumentId, QuoteTick] = {}
-        self.housekeeping_interval_ns = 1_000_000_000
+        self.housekeeping_interval_ns = 10_000_000_000
         self.snapshot_path = Path(config.snapshot_path)
         self.edge = EdgePair(
             window_ns=int(config.window_minutes * Decimal(MINUTE_NS)),
@@ -152,6 +153,7 @@ class AnthropicArbStrategy(Strategy):
 
     # quote 主入口：更新 edge，生成 signal，检查通过后提交双腿订单。
     def on_quote_tick(self, tick: QuoteTick) -> None:
+        on_quote_ns = self.clock.timestamp_ns()
         self.quotes[tick.instrument_id] = tick
         self.edge.record_quote(tick, self.binance_id, self.okx_id)
         self.edge.update(self.quotes[self.binance_id], self.quotes[self.okx_id])
@@ -159,7 +161,17 @@ class AnthropicArbStrategy(Strategy):
             signal = self.edge.signal(self.trade_state)
             signal = self._checked_signal(signal)
             if signal is not None:
-                self._submit_signal(signal, tick)
+                self._submit_signal(signal, tick, on_quote_ns)
+
+    def on_order_submitted(self, event: OrderSubmitted) -> None:
+        order_id = str(event.client_order_id)
+        if self.pending is not None and self.pending.has_order(order_id):
+            self.pending.record_submit(order_id, int(event.ts_event))
+
+    def on_order_accepted(self, event: OrderAccepted) -> None:
+        order_id = str(event.client_order_id)
+        if self.pending is not None and self.pending.has_order(order_id):
+            self.pending.record_accept(order_id, int(event.ts_event))
 
     # 成交事件入口：先更新仓位账本，再推进 pending 生命周期。
     def on_order_filled(self, event: OrderFilled) -> None:
@@ -321,12 +333,14 @@ class AnthropicArbStrategy(Strategy):
     # 低频维护任务：更新分钟窗口、mark 仓位浮盈亏、写 snapshot。
     def _on_housekeeping(self) -> None:
         now_ns = self.clock.timestamp_ns()
-        self.edge.fill_to(now_ns, self.binance_id, self.okx_id)
+        event_ns = max(int(quote.ts_event) for quote in self.quotes.values())
+        self.edge.fill_to(event_ns, self.binance_id, self.okx_id)
         for instrument_id, position in self.positions.items():
             quote = self.quotes[instrument_id]
             slippage_bps = BINANCE_EXIT_SLIPPAGE_BPS if instrument_id == self.binance_id else OKX_EXIT_SLIPPAGE_BPS
             position.mark(Decimal(str(quote.bid_price)), Decimal(str(quote.ask_price)), slippage_bps)
-        self._write_snapshot(now_ns)
+        data = self._build_snapshot(now_ns)
+        self._write_snapshot_data(data)
         self._schedule_housekeeping()
 
     # 生成策略私有 snapshot；monitor 会按新 schema 单独适配。
@@ -341,7 +355,7 @@ class AnthropicArbStrategy(Strategy):
                 "ts_event": str(quote.ts_event),
                 "age_ms": self._fmt((now_ns - int(quote.ts_event)) / 1_000_000),
             }
-            for instrument_id, quote in self.quotes.items()
+            for instrument_id, quote in self.quotes.copy().items()
         }
         positions = {
             self._venue(instrument_id): {
@@ -352,22 +366,27 @@ class AnthropicArbStrategy(Strategy):
                 "unrealized_usdt": self._fmt(position.unrealized_pnl),
                 "fee_usdt": self._fmt(position.fee),
             }
-            for instrument_id, position in self.positions.items()
+            for instrument_id, position in self.positions.copy().items()
         }
         pending = None
         if self.pending is not None:
-            actual_edge = self._actual_edge_bps(self.pending)
-            edge_slip = self._edge_slippage_bps(self.pending, actual_edge)
+            pending_pair = self.pending
+            main_legs = pending_pair.legs.copy()
+            repair_legs = pending_pair.repairs.copy()
+            actual_edge = self._actual_edge_bps(pending_pair)
+            edge_slip = self._edge_slippage_bps(pending_pair, actual_edge)
             pending = {
-                "signal": self.pending.signal,
-                "edge_side": self.pending.edge_side,
-                "signal_edge_bps": self._fmt(self.pending.signal_edge_bps),
-                "mean_bps": self._fmt(self.pending.mean_bps),
-                "signal_event_ns": str(self.pending.signal_event_ns),
-                "signal_ts_ns": str(self.pending.signal_ts_ns),
+                "signal": pending_pair.signal,
+                "edge_side": pending_pair.edge_side,
+                "signal_venue": pending_pair.signal_venue,
+                "signal_edge_bps": self._fmt(pending_pair.signal_edge_bps),
+                "mean_bps": self._fmt(pending_pair.mean_bps),
+                "signal_event_ns": str(pending_pair.signal_event_ns),
+                "signal_ts_ns": str(pending_pair.signal_ts_ns),
+                "on_quote_ns": str(pending_pair.on_quote_ns),
                 "edge_slip": self._fmt(edge_slip),
-                "fill_slip": self._fmt(self._fill_slippage_bps(self.pending)),
-                "age_sec": self._fmt(max((now_ns - self.pending.created_ns) / 1_000_000_000, 0.0)),
+                "fill_slip": self._fmt(self._fill_slippage_bps(pending_pair)),
+                "age_sec": self._fmt(max((now_ns - pending_pair.on_quote_ns) / 1_000_000_000, 0.0)),
                 "orders": [
                     {
                         "order_id": leg.order_id,
@@ -376,12 +395,13 @@ class AnthropicArbStrategy(Strategy):
                         "side": str(leg.side),
                         "filled_qty": self._fmt(leg.filled_qty),
                         "target_qty": self._fmt(leg.target_qty),
-                        "submit_ns": str(leg.submit_ns) if leg.submit_ns is not None else "-",
+                        "submit_event_ns": str(leg.submit_event_ns) if leg.submit_event_ns is not None else "-",
+                        "accept_event_ns": str(leg.accept_event_ns) if leg.accept_event_ns is not None else "-",
                         "fill_event_ns": str(leg.fill_event_ns) if leg.fill_event_ns is not None else "-",
                         "full_fill_event_ns": str(leg.full_fill_event_ns) if leg.full_fill_event_ns is not None else "-",
                         "failed": leg.failed,
                     }
-                    for leg in self.pending.legs.values()
+                    for leg in main_legs.values()
                 ] + [
                     {
                         "order_id": leg.order_id,
@@ -390,12 +410,13 @@ class AnthropicArbStrategy(Strategy):
                         "side": str(leg.side),
                         "filled_qty": self._fmt(leg.filled_qty),
                         "target_qty": self._fmt(leg.target_qty),
-                        "submit_ns": str(leg.submit_ns) if leg.submit_ns is not None else "-",
+                        "submit_event_ns": str(leg.submit_event_ns) if leg.submit_event_ns is not None else "-",
+                        "accept_event_ns": str(leg.accept_event_ns) if leg.accept_event_ns is not None else "-",
                         "fill_event_ns": str(leg.fill_event_ns) if leg.fill_event_ns is not None else "-",
                         "full_fill_event_ns": str(leg.full_fill_event_ns) if leg.full_fill_event_ns is not None else "-",
                         "failed": leg.failed,
                     }
-                    for leg in self.pending.repairs.values()
+                    for leg in repair_legs.values()
                 ],
             }
         return {
@@ -416,25 +437,32 @@ class AnthropicArbStrategy(Strategy):
             },
             "positions": positions,
             "pnl": {
-                "realized_usdt": self._fmt(sum((position.realized_pnl for position in self.positions.values()), Decimal("0"))),
-                "unrealized_usdt": self._fmt(sum((position.unrealized_pnl for position in self.positions.values()), Decimal("0"))),
-                "fee_usdt": self._fmt(sum((position.fee for position in self.positions.values()), Decimal("0"))),
+                "realized_usdt": self._fmt(sum((position.realized_pnl for position in self.positions.copy().values()), Decimal("0"))),
+                "unrealized_usdt": self._fmt(sum((position.unrealized_pnl for position in self.positions.copy().values()), Decimal("0"))),
+                "fee_usdt": self._fmt(sum((position.fee for position in self.positions.copy().values()), Decimal("0"))),
             },
-            "quote_counts": list(self.edge.minute_counts),
+            "quote_counts": self.edge.quote_counts(),
             "pending": pending,
-            "actions": list(self.action_rows),
+            "actions": [dict(row) for row in self.action_rows.copy()],
         }
 
     # 原子写 snapshot，避免 monitor 读到半截 JSON。
     def _write_snapshot(self, now_ns: int) -> None:
-        self.snapshot_path.parent.mkdir(parents=True, exist_ok=True)
         data = self._build_snapshot(now_ns)
+        self._write_snapshot_data(data)
+
+    # snapshot 落盘不占用策略状态锁。
+    def _write_snapshot_data(self, data: dict[str, object]) -> None:
+        self.snapshot_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.snapshot_path.with_suffix(f"{self.snapshot_path.suffix}.tmp")
         tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(self.snapshot_path)
 
     # 提交双腿市价单；submit 前先写 pending，避免同步事件早于状态。
-    def _submit_signal(self, signal: str, tick: QuoteTick) -> None:
+    def _submit_signal(self, signal: str, tick: QuoteTick, on_quote_ns: int) -> None:
+        if self.pending is not None:
+            self.log.warning(f"pending_create_skipped_existing signal={signal} existing_signal={self.pending.signal}")
+            return
         before_inventory = self._inventory()
         base_qty = self._trade_qty(signal, before_inventory)
         self.trade_state = STATE_PENDING
@@ -476,7 +504,6 @@ class AnthropicArbStrategy(Strategy):
                 side=OrderSide.BUY,
                 target_qty=Decimal(str(buy_quantity)),
                 quote_px=Decimal(str(self.quotes[buy_id].ask_price)),
-                submit_ns=self.clock.timestamp_ns(),
             ),
             str(sell_order.client_order_id): PendingLeg(
                 order_id=str(sell_order.client_order_id),
@@ -484,7 +511,6 @@ class AnthropicArbStrategy(Strategy):
                 side=OrderSide.SELL,
                 target_qty=Decimal(str(sell_quantity)),
                 quote_px=Decimal(str(self.quotes[sell_id].bid_price)),
-                submit_ns=self.clock.timestamp_ns(),
             ),
         }
         self.pending = PendingPair(
@@ -495,7 +521,8 @@ class AnthropicArbStrategy(Strategy):
             mean_bps=mean_bps,
             signal_event_ns=signal_event_ns,
             signal_ts_ns=signal_ts_ns,
-            created_ns=self.clock.timestamp_ns(),
+            signal_venue=self._venue(tick.instrument_id),
+            on_quote_ns=on_quote_ns,
             before_inventory=before_inventory,
             after_inventory=after_inventory,
         )
@@ -585,7 +612,6 @@ class AnthropicArbStrategy(Strategy):
                 side=side,
                 target_qty=Decimal(str(quantity)),
                 quote_px=Decimal(str(self.quotes[leg.instrument_id].ask_price if side == OrderSide.BUY else self.quotes[leg.instrument_id].bid_price)),
-                submit_ns=self.clock.timestamp_ns(),
             )
             orders.append(order)
         if not repairs:
@@ -608,12 +634,14 @@ class AnthropicArbStrategy(Strategy):
 
     # 启动时用 collector 真实 bid/ask 初始化 6h 分钟窗口。
     def _warm_initial_window(self) -> None:
-        end_ns = time.time_ns()
-        end_minute_ns = end_ns // MINUTE_NS * MINUTE_NS
+        scan_end_ns = self.clock.timestamp_ns()
+        scan_start_ns = scan_end_ns - (int(self.config.window_minutes) + 60) * MINUTE_NS
+        read_start_ns = scan_start_ns // (60 * MINUTE_NS) * (60 * MINUTE_NS)
+        paths = self._collector_quote_files(read_start_ns, scan_end_ns)
+        rows = self._load_collector_quotes(paths, scan_start_ns, scan_end_ns)
+        latest_event_ns = max(self._quote_event_ns(row) for row in rows)
+        end_minute_ns = latest_event_ns // MINUTE_NS * MINUTE_NS - MINUTE_NS
         start_minute_ns = end_minute_ns - (int(self.config.window_minutes) - 1) * MINUTE_NS
-        read_start_ns = start_minute_ns // (60 * MINUTE_NS) * (60 * MINUTE_NS)
-        paths = self._collector_quote_files(read_start_ns, end_ns)
-        rows = self._load_collector_quotes(paths, read_start_ns, end_ns)
         self.edge.warm_from_rows(rows, start_minute_ns, end_minute_ns, self.binance_id, self.okx_id)
         self._seed_initial_quotes(rows)
         self.log.info(
@@ -661,13 +689,21 @@ class AnthropicArbStrategy(Strategy):
         rows = table.to_pylist()
         if not rows:
             raise RuntimeError("no bidask1 collector rows found for initial window")
-        return sorted(rows, key=lambda row: int(row["ts_local_ns"]))
+        return sorted(rows, key=self._quote_event_ns)
+
+    # collector 行优先使用交易所事件时间，缺失时才用采集时间。
+    def _quote_event_ns(self, row: dict[str, object]) -> int:
+        exchange_ms = int(row["ts_exchange_ms"])
+        return exchange_ms * 1_000_000 if exchange_ms > 0 else int(row["ts_local_ns"])
 
     # 用 warmup 最后一条 bid/ask 构造初始 QuoteTick。
     def _seed_initial_quotes(self, rows: list[dict[str, object]]) -> None:
         latest: dict[str, dict[str, object]] = {}
         for row in rows:
-            latest[str(row["venue"]).upper()] = row
+            venue = str(row["venue"]).upper()
+            old = latest.get(venue)
+            if old is None or self._quote_event_ns(row) >= self._quote_event_ns(old):
+                latest[venue] = row
         ts_init = self.clock.timestamp_ns()
         for instrument_id in self.instrument_ids:
             venue = self._venue(instrument_id)
@@ -675,7 +711,7 @@ class AnthropicArbStrategy(Strategy):
             instrument = self.cache.instrument(instrument_id)
             bid_size = Decimal(str(row["bid_size"]))
             ask_size = Decimal(str(row["ask_size"]))
-            ts_event = int(row["ts_exchange_ms"]) * 1_000_000 if int(row["ts_exchange_ms"]) > 0 else int(row["ts_local_ns"])
+            ts_event = self._quote_event_ns(row)
             self.quotes[instrument_id] = QuoteTick(
                 instrument_id=instrument_id,
                 bid_price=instrument.make_price(Decimal(str(row["bid"]))),
@@ -709,16 +745,34 @@ class AnthropicArbStrategy(Strategy):
     def _action_row(self, pending: PendingPair, status: str) -> dict[str, str]:
         actual_edge = self._actual_edge_bps(pending)
         edge_slippage = self._edge_slippage_bps(pending, actual_edge)
-        latencies = {"BINANCE": "-", "OKX": "-"}
+        submit_events = {"BINANCE": "-", "OKX": "-"}
+        accept_events = {"BINANCE": "-", "OKX": "-"}
+        fill_events = {"BINANCE": "-", "OKX": "-"}
         for leg in pending.legs.values():
             venue = self._venue(leg.instrument_id)
+            if leg.submit_event_ns is not None:
+                submit_events[venue] = str(leg.submit_event_ns)
+            if leg.accept_event_ns is not None:
+                accept_events[venue] = str(leg.accept_event_ns)
             if leg.full_fill_event_ns is not None:
-                latencies[venue] = self._fmt((leg.full_fill_event_ns - pending.signal_event_ns) / 1_000_000)
-        ts_sec = pending.created_ns / 1_000_000_000
+                fill_events[venue] = str(leg.full_fill_event_ns)
+        submit_event_values = [leg.submit_event_ns for leg in pending.legs.values() if leg.submit_event_ns is not None]
+        time_text = "-"
+        if submit_event_values:
+            time_text = datetime.fromtimestamp(min(submit_event_values) / 1_000_000_000, tz=timezone.utc).astimezone(BEIJING_TZ).strftime("%m-%d %H:%M:%S")
         return {
-            "created_ns": str(pending.created_ns),
-            "signal_event_ns": str(pending.signal_event_ns),
-            "signal_ts_ns": str(pending.signal_ts_ns),
+            "metadata": {
+                "signal_event_ns": str(pending.signal_event_ns),
+                "signal_ts_ns": str(pending.signal_ts_ns),
+                "on_quote_ns": str(pending.on_quote_ns),
+                "signal_venue": pending.signal_venue,
+                "bn_submit_event_ns": submit_events["BINANCE"],
+                "okx_submit_event_ns": submit_events["OKX"],
+                "bn_accept_event_ns": accept_events["BINANCE"],
+                "okx_accept_event_ns": accept_events["OKX"],
+                "bn_full_fill_event_ns": fill_events["BINANCE"],
+                "okx_full_fill_event_ns": fill_events["OKX"],
+            },
             "asset": ASSET,
             "action": self._display_action(pending.before_inventory, pending.after_inventory),
             "edge_side": pending.edge_side,
@@ -730,9 +784,7 @@ class AnthropicArbStrategy(Strategy):
             "fill_slippage": "-",
             "mean": self._fmt(pending.mean_bps),
             "std": "-",
-            "bn_latency": latencies["BINANCE"],
-            "okx_latency": latencies["OKX"],
-            "time": datetime.fromtimestamp(ts_sec, tz=timezone.utc).astimezone(BEIJING_TZ).strftime("%m-%d %H:%M:%S"),
+            "time": time_text,
         }
 
     # 用双腿成交均价计算实际成交 edge。
