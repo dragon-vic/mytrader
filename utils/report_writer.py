@@ -34,21 +34,13 @@ def reports_root(settings: dict[str, Any]) -> Path:
 
 
 # 返回当前运行的报告目录。
-def run_reports_dir(settings: dict[str, Any], run_type: str) -> Path:
-    report_dir_name = settings.get("runtime", {}).get("report_dir_name")
-    if report_dir_name:
-        return reports_root(settings) / report_dir_name
-    run_name = settings.get("runtime", {}).get("run_name")
-    if run_name:
-        return reports_root(settings) / run_name
-    return reports_root(settings) / f"{run_type}-{settings['project']['config_name']}"
+def run_reports_dir(settings: dict[str, Any]) -> Path:
+    return reports_root(settings) / settings["runtime"]["report_dir_name"]
 
 
 # 返回本次运行开始时间的 UTC ns，用于剔除 reconciliation 带入的旧订单。
-def runtime_start_ns(settings: dict[str, Any]) -> int | None:
-    started_at = settings.get("runtime", {}).get("started_at")
-    if not started_at:
-        return None
+def runtime_start_ns(settings: dict[str, Any]) -> int:
+    started_at = settings["runtime"]["started_at"]
     dt = datetime.strptime(str(started_at), "%Y%m%d%H%M%S").replace(tzinfo=LOCAL_TZ)
     return pd.Timestamp(dt).value
 
@@ -63,11 +55,11 @@ def report_time(values: pd.Series) -> pd.Series:
 
 
 # 返回 NT LoggingConfig 需要的文件日志参数。
-def log_file_settings(settings: dict[str, Any], run_type: str) -> dict[str, Any]:
+def log_file_settings(settings: dict[str, Any]) -> dict[str, Any]:
     logging = settings["node"]["logging"]
     return {
         "log_level_file": logging["log_level_file"],
-        "log_directory": str(run_reports_dir(settings, run_type)),
+        "log_directory": str(run_reports_dir(settings)),
         "log_file_name": logging["log_file_name"],
         "log_file_format": logging["log_file_format"],
         "log_file_max_size": logging["log_file_max_size"],
@@ -76,9 +68,9 @@ def log_file_settings(settings: dict[str, Any], run_type: str) -> dict[str, Any]
     }
 
 # 创建当前运行的报告目录；每次运行使用新目录，不再清理旧文件。
-def prepare_report_dir(settings: dict[str, Any], run_type: str) -> Path:
+def prepare_report_dir(settings: dict[str, Any]) -> Path:
     root = reports_root(settings).resolve()
-    output_dir = run_reports_dir(settings, run_type).resolve()
+    output_dir = run_reports_dir(settings).resolve()
     # Windows 多进程下 resolve() 可能混用 \\?\ 扩展路径，先统一再校验目录边界。
     checked_root = Path(str(root).removeprefix("\\\\?\\"))
     checked_output = Path(str(output_dir).removeprefix("\\\\?\\"))
@@ -111,7 +103,7 @@ class TraderReportWriter:
     @classmethod
     def from_settings(cls, settings: dict[str, Any], run_type: str):
         return cls(
-            run_reports_dir(settings, run_type),
+            run_reports_dir(settings),
             bool(settings["reports"]["enabled"]),
             runtime_start_ns(settings) if run_type in {"live", "testnet"} else None,
             settings,
@@ -331,14 +323,14 @@ def write_trader_reports(trader, settings: dict[str, Any], run_type: str) -> Non
 
 
 # 生成回测结果数据，报告只落人读的表格文件。
-def write_backtest_result(result, settings: dict[str, Any]) -> dict[str, Any]:
+def write_backtest_result(result) -> dict[str, Any]:
     return asdict(result)
 
 
 # 打印回测核心摘要。
 def print_backtest_summary(payload: dict[str, Any], settings: dict[str, Any]) -> float:
     started = time.perf_counter()
-    output_dir = run_reports_dir(settings, "backtest")
+    output_dir = run_reports_dir(settings)
     elapsed_days = float(payload.get("elapsed_time") or 0) / 86400
     sections = [
         ("回测总览", ("指标", "数值"), backtest_overview_rows(payload, settings)),
@@ -362,7 +354,7 @@ def print_backtest_summary(payload: dict[str, Any], settings: dict[str, Any]) ->
 def print_live_summary(settings: dict[str, Any]) -> None:
     if not settings["reports"]["enabled"]:
         return
-    output_dir = run_reports_dir(settings, "live")
+    output_dir = run_reports_dir(settings)
     elapsed_days = report_elapsed_days(output_dir)
     sections = [
         ("运行总览", ("指标", "数值"), live_overview_rows(settings, output_dir)),
@@ -427,10 +419,9 @@ def summary_table(title: str, headers: tuple[str, ...], rows: list[tuple[Any, ..
 
 # 回测总览的收益使用订单重建口径；NT multi-venue stats_pnls 只保留最后一个 venue。
 def backtest_overview_rows(payload: dict[str, Any], settings: dict[str, Any]) -> list[tuple[str, str]]:
-    output_dir = run_reports_dir(settings, "backtest")
+    output_dir = run_reports_dir(settings)
     data_interval = backtest_data_interval(settings)
     starting_balance = starting_balance_value(settings)
-    pnl = net_pnl(output_dir)
     return_stats = report_return_stats(output_dir, starting_balance)
 
     return [
@@ -479,13 +470,6 @@ def live_overview_rows(settings: dict[str, Any], output_dir: Path) -> list[tuple
         ("净收益", format_number(net_pnl(output_dir))),
         ("生成时间", datetime.now(LOCAL_TZ).strftime("%Y-%m-%d %H:%M:%S")),
     ]
-
-
-# 总览里按 yaml 写法显示标的；markets: all 不展开成长列表。
-def market_symbols(settings: dict[str, Any], run_type: str) -> str:
-    if settings.get(run_type, {}).get("markets_all") or settings.get("markets_all"):
-        return "all"
-    return ", ".join(market["instrument_symbol"] for market in settings["markets"])
 
 
 # 从报告里提取真正有成交的交易对。
@@ -625,11 +609,9 @@ def starting_balance_text(settings: dict[str, Any]) -> str:
 
 def starting_balance_values(settings: dict[str, Any]) -> list[Any]:
     values = []
-    for venue in settings["backtest"].get("venues", []):
+    for venue in settings["backtest"]["venues"]:
         values.extend(venue.get("starting_balances") or [venue["starting_balance"]])
-    if values:
-        return values
-    return [settings["backtest"]["venue_account"]["starting_balance"]]
+    return values
 
 
 def money_currency(value: Any) -> str:
@@ -659,7 +641,7 @@ def report_return_stats(output_dir: Path, starting_balance: float) -> dict[str, 
     return {"profit_factor": profit_factor, "sharpe": sharpe, "sortino": sortino}
 
 
-# positions.csv 可能来自旧报告；没有资金费列时按 0 处理。
+# 回测 positions.csv 没有资金费列，按 0 处理。
 def report_funding_income(positions: pd.DataFrame) -> pd.Series:
     if "资金费收入" not in positions.columns:
         return pd.Series(0.0, index=positions.index)

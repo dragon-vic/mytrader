@@ -33,6 +33,7 @@ from nautilus_trader.trading.strategy import Strategy
 from strategies.pre_ipo.anthropic_core import ASSET
 from strategies.pre_ipo.anthropic_core import BPS
 from strategies.pre_ipo.anthropic_core import BINANCE_EXIT_SLIPPAGE_BPS
+from strategies.pre_ipo.anthropic_core import EXIT_FEE_BPS
 from strategies.pre_ipo.anthropic_core import LONG_EDGE
 from strategies.pre_ipo.anthropic_core import MINUTE_NS
 from strategies.pre_ipo.anthropic_core import OKX_EXIT_SLIPPAGE_BPS
@@ -45,7 +46,7 @@ from strategies.pre_ipo.anthropic_core import STATE_UNBALANCE
 from strategies.pre_ipo.anthropic_core import EdgePair
 from strategies.pre_ipo.anthropic_core import PendingLeg
 from strategies.pre_ipo.anthropic_core import PendingPair
-from strategies.pre_ipo.anthropic_core import PositionState
+from strategies.pre_ipo.anthropic_core import PnlLedger
 from utils.arguments import EXTERNAL_COMMAND_CLIENT_NAME
 from utils.arguments import NODE_STOP_TOPIC
 
@@ -74,11 +75,14 @@ class AnthropicArbStrategy(Strategy):
     def __init__(self, config: AnthropicArbConfig) -> None:
         super().__init__(config)
         instruments = [InstrumentId.from_str(value) for value in config.instruments]
-        self.binance_id = instruments[0]
-        self.okx_id = instruments[1]
+        by_venue = {self._venue(instrument_id): instrument_id for instrument_id in instruments}
+        if len(instruments) != 2 or set(by_venue) != {"BINANCE", "OKX"}:
+            raise ValueError("anthropic_arb requires exactly one BINANCE and one OKX instrument")
+        self.binance_id = by_venue["BINANCE"]
+        self.okx_id = by_venue["OKX"]
         self.instrument_ids = [self.binance_id, self.okx_id]
         self.quotes: dict[InstrumentId, QuoteTick] = {}
-        self.housekeeping_interval_ns = 10_000_000_000
+        self.housekeeping_interval_ns = MINUTE_NS
         self.snapshot_path = Path(config.snapshot_path)
         self.edge = EdgePair(
             window_ns=int(config.window_minutes * Decimal(MINUTE_NS)),
@@ -102,12 +106,9 @@ class AnthropicArbStrategy(Strategy):
         self.mode = "normal"
         self.fail_count = 0
         self.pending: PendingPair | None = None
-        self.positions = {
-            self.binance_id: PositionState(self.binance_id),
-            self.okx_id: PositionState(self.okx_id),
-        }
+        self.pnl_ledgers = {instrument_id: PnlLedger() for instrument_id in self.instrument_ids}
         self.housekeeping_seq = 0
-        self.action_rows: deque[dict[str, str]] = deque(maxlen=200)
+        self.action_rows: deque[dict[str, object]] = deque(maxlen=200)
 
     # 策略启动入口：检查空仓、初始化窗口、订阅 quote 和外部命令。
     def on_start(self) -> None:
@@ -146,7 +147,13 @@ class AnthropicArbStrategy(Strategy):
             self.log.warning(f"mode_reduce source={command.source}")
             return
         if name == "normal":
+            if self.trade_state == STATE_UNBALANCE:
+                if not self._inventory_balanced():
+                    self.log.warning("mode_normal_rejected reason=inventory_unbalanced")
+                    return
+                self._sync_state_from_inventory()
             self.mode = "normal"
+            self.fail_count = 0
             self.log.warning(f"mode_normal source={command.source}")
             return
         self.log.warning(f"external_command_ignored command={command.command} source={command.source}")
@@ -155,7 +162,7 @@ class AnthropicArbStrategy(Strategy):
     def on_quote_tick(self, tick: QuoteTick) -> None:
         on_quote_ns = self.clock.timestamp_ns()
         self.quotes[tick.instrument_id] = tick
-        self.edge.record_quote(tick, self.binance_id, self.okx_id)
+        self.edge.record_quote(tick)
         self.edge.update(self.quotes[self.binance_id], self.quotes[self.okx_id])
         if self.trade_state not in {STATE_PENDING, STATE_UNBALANCE}:
             signal = self.edge.signal(self.trade_state)
@@ -173,18 +180,21 @@ class AnthropicArbStrategy(Strategy):
         if self.pending is not None and self.pending.has_order(order_id):
             self.pending.record_accept(order_id, int(event.ts_event))
 
-    # 成交事件入口：先更新仓位账本，再推进 pending 生命周期。
+    # 成交事件入口：记录双腿成交并推进 pending 生命周期。
     def on_order_filled(self, event: OrderFilled) -> None:
         order_id = str(event.client_order_id)
-        event_qty = self._event_qty(event)
-        event_px = self._event_px(event)
-        self.positions[event.instrument_id].apply_fill(event.order_side, event_qty, event_px, self._event_fee(event))
         if self.pending is None or not self.pending.has_order(order_id):
             return
+        self.pnl_ledgers[event.instrument_id].record_fill(
+            event.order_side,
+            event.last_qty.as_decimal(),
+            event.last_px.as_decimal(),
+            event.commission.as_decimal(),
+        )
         self.pending.record_fill(
             order_id,
-            event_qty,
-            event_px,
+            event.last_qty.as_decimal(),
+            event.last_px.as_decimal(),
             int(event.ts_event),
         )
         self._resolve_pending_if_done()
@@ -216,21 +226,6 @@ class AnthropicArbStrategy(Strategy):
                 raise RuntimeError(f"startup_quote_missing instrument={instrument_id}")
         if self.edge.long_bps is None or self.edge.short_bps is None:
             raise RuntimeError("startup_edge_missing")
-
-    # 从 NT fill 事件取成交数量。
-    def _event_qty(self, event: OrderFilled) -> Decimal:
-        return Decimal(str(event.last_qty))
-
-    # 从 NT fill 事件取成交价。
-    def _event_px(self, event: OrderFilled) -> Decimal:
-        return Decimal(str(event.last_px).split()[0].replace("_", ""))
-
-    # 从 NT fill 事件取手续费。
-    def _event_fee(self, event: OrderFilled) -> Decimal:
-        commission = getattr(event, "commission", None)
-        if commission is None:
-            return Decimal("0")
-        return Decimal(str(commission).split()[0].replace("_", ""))
 
     # signal 生成后的所有交易前检查集中在这里。
     def _checked_signal(self, signal: str | None) -> str | None:
@@ -295,10 +290,12 @@ class AnthropicArbStrategy(Strategy):
                 self.log.warning(f"signal_rejected_balance signal={signal} venue={self._venue(instrument_id)} reason=no_account")
                 return False
             quote = self.quotes[instrument_id]
-            price = Decimal(str(quote.ask_price if side == OrderSide.BUY else quote.bid_price))
+            price = (quote.ask_price if side == OrderSide.BUY else quote.bid_price).as_decimal()
             required = price * qty / self.margin_leverage * self.margin_buffer
-            money = account.balance_free(USDT)
-            free = Decimal(str(money.as_decimal())) if hasattr(money, "as_decimal") else Decimal(str(money))
+            free = self._money_decimal(account.balance_free(USDT))
+            if free is None:
+                self.log.warning(f"signal_rejected_balance signal={signal} venue={self._venue(instrument_id)} reason=free_missing")
+                return False
             if free < required:
                 self.log.warning(
                     f"signal_rejected_balance signal={signal} venue={self._venue(instrument_id)} "
@@ -330,62 +327,176 @@ class AnthropicArbStrategy(Strategy):
             allow_past=True,
         )
 
-    # 低频维护任务：更新分钟窗口、mark 仓位浮盈亏、写 snapshot。
+    # 低频维护任务：更新分钟窗口并写 snapshot。
     def _on_housekeeping(self) -> None:
         now_ns = self.clock.timestamp_ns()
-        event_ns = max(int(quote.ts_event) for quote in self.quotes.values())
-        self.edge.fill_to(event_ns, self.binance_id, self.okx_id)
-        for instrument_id, position in self.positions.items():
-            quote = self.quotes[instrument_id]
-            slippage_bps = BINANCE_EXIT_SLIPPAGE_BPS if instrument_id == self.binance_id else OKX_EXIT_SLIPPAGE_BPS
-            position.mark(Decimal(str(quote.bid_price)), Decimal(str(quote.ask_price)), slippage_bps)
-        data = self._build_snapshot(now_ns)
-        self._write_snapshot_data(data)
+        self.edge.close_bucket(now_ns, self.binance_id, self.okx_id)
+        self._write_snapshot(now_ns)
         self._schedule_housekeeping()
 
+    # 从 NT Position 汇总本策略仓位，并按模拟平仓价估算未实现盈亏。
+    def _position_snapshot(
+        self,
+    ) -> tuple[dict[str, dict[str, str]], dict[str, str], dict[str, dict[str, Decimal | None]]]:
+        rows = {}
+        risk_inputs = {}
+        totals = {"realized": Decimal("0"), "unrealized": Decimal("0"), "fee": Decimal("0")}
+        for instrument_id in self.instrument_ids:
+            instrument = self.cache.instrument(instrument_id)
+            open_positions = self.cache.positions_open(instrument_id=instrument_id, strategy_id=self.id)
+            signed = [(position, position.signed_decimal_qty()) for position in open_positions]
+            qty = sum((value for _, value in signed), Decimal("0"))
+            abs_qty = sum((abs(value) for _, value in signed), Decimal("0"))
+            avg_px = None
+            if abs_qty > 0:
+                avg_px = sum(
+                    (Decimal(str(position.avg_px_open)) * abs(value) for position, value in signed),
+                    Decimal("0"),
+                ) / abs_qty
+
+            locked_values = []
+            for position in open_positions:
+                avg_price = instrument.make_price(Decimal(str(position.avg_px_open)))
+                notional = self._money_decimal(instrument.notional_value(position.quantity, avg_price))
+                locked_values.append(None if notional is None else notional / self.margin_leverage)
+            locked = None if any(value is None for value in locked_values) else sum(locked_values, Decimal("0"))
+
+            ledger = self.pnl_ledgers[instrument_id]
+            realized = ledger.realized
+            fees = ledger.fee
+
+            quote = self.quotes[instrument_id]
+            slippage_bps = BINANCE_EXIT_SLIPPAGE_BPS if instrument_id == self.binance_id else OKX_EXIT_SLIPPAGE_BPS
+            unrealized_values = []
+            for position in open_positions:
+                if bool(position.is_long):
+                    exit_px = quote.bid_price.as_decimal() * (Decimal("1") - slippage_bps / BPS)
+                else:
+                    exit_px = quote.ask_price.as_decimal() * (Decimal("1") + slippage_bps / BPS)
+                exit_price = instrument.make_price(exit_px)
+                unrealized = self._money_decimal(position.unrealized_pnl(exit_price))
+                notional = self._money_decimal(instrument.notional_value(position.quantity, exit_price))
+                if unrealized is None or notional is None:
+                    unrealized_values.append(None)
+                else:
+                    unrealized_values.append(unrealized - notional * EXIT_FEE_BPS / BPS)
+            unrealized = None if any(value is None for value in unrealized_values) else sum(unrealized_values, Decimal("0"))
+
+            venue = self._venue(instrument_id)
+            risk_inputs[venue] = {"locked_usdt": locked, "unrealized_usdt": unrealized}
+            rows[venue] = {
+                "instrument": str(instrument_id),
+                "qty": self._fmt(qty),
+                "avg_px": self._fmt(avg_px),
+                "realized_usdt": self._fmt(realized),
+                "unrealized_usdt": self._fmt(unrealized),
+                "fee_usdt": self._fmt(fees),
+            }
+            totals["realized"] = None if totals["realized"] is None or realized is None else totals["realized"] + realized
+            totals["unrealized"] = None if totals["unrealized"] is None or unrealized is None else totals["unrealized"] + unrealized
+            totals["fee"] += fees
+        return (
+            rows,
+            {
+                "realized_usdt": self._fmt(totals["realized"]),
+                "unrealized_usdt": self._fmt(totals["unrealized"]),
+                "fee_usdt": self._fmt(totals["fee"]),
+            },
+            risk_inputs,
+        )
+
+    # 根据本策略 lock、未实现盈亏和账户 free 更新风险模式。
+    def _check_risk(self, inputs: dict[str, dict[str, Decimal | None]]) -> dict[str, dict[str, str]]:
+        rows = {}
+        max_rate = Decimal("0")
+        for venue, values in inputs.items():
+            account = self._account_for_venue(venue)
+            free = self._money_decimal(account.balance_free(USDT))
+            locked = values["locked_usdt"]
+            unrealized = values["unrealized_usdt"]
+            available = None if free is None or locked is None else free + locked
+            risk_rate = None
+            if available is not None and unrealized is not None:
+                loss = max(-unrealized, Decimal("0"))
+                if available > 0:
+                    risk_rate = loss / available
+                elif loss > 0:
+                    risk_rate = Decimal("1")
+                else:
+                    risk_rate = Decimal("0")
+            if risk_rate is not None:
+                max_rate = max(max_rate, risk_rate)
+            rows[venue] = {
+                "locked_usdt": self._fmt(locked),
+                "free_usdt": self._fmt(free),
+                "available_usdt": self._fmt(available),
+                "unrealized_usdt": self._fmt(unrealized),
+                "risk_rate": self._fmt(risk_rate * Decimal("100"), "%") if risk_rate is not None else "-",
+            }
+
+        if max_rate >= Decimal("0.85") and self.mode != "stop":
+            self.mode = "stop"
+            self.log.error(f"risk_mode_stop risk_rate={max_rate * Decimal('100'):.2f}%")
+        elif max_rate >= Decimal("0.70") and self.mode == "normal":
+            self.mode = "reduce"
+            self.log.warning(f"risk_mode_reduce risk_rate={max_rate * Decimal('100'):.2f}%")
+        if self.mode == "reduce" and self.trade_state == STATE_FLAT:
+            self.mode = "normal"
+            self.log.info("mode_normal reason=reduce_flat")
+        return rows
+
     # 生成策略私有 snapshot；monitor 会按新 schema 单独适配。
-    def _build_snapshot(self, now_ns: int) -> dict[str, object]:
+    def _build_snapshot(
+        self,
+        now_ns: int,
+        positions: dict[str, dict[str, str]],
+        pnl: dict[str, str],
+        risk: dict[str, dict[str, str]],
+    ) -> dict[str, object]:
         quotes = {
             self._venue(instrument_id): {
                 "instrument": str(instrument_id),
-                "bid": self._fmt(Decimal(str(quote.bid_price))),
-                "ask": self._fmt(Decimal(str(quote.ask_price))),
-                "bid_size": self._fmt(Decimal(str(quote.bid_size))),
-                "ask_size": self._fmt(Decimal(str(quote.ask_size))),
+                "bid": self._fmt(quote.bid_price.as_decimal()),
+                "ask": self._fmt(quote.ask_price.as_decimal()),
+                "bid_size": self._fmt(quote.bid_size.as_decimal()),
+                "ask_size": self._fmt(quote.ask_size.as_decimal()),
                 "ts_event": str(quote.ts_event),
                 "age_ms": self._fmt((now_ns - int(quote.ts_event)) / 1_000_000),
             }
             for instrument_id, quote in self.quotes.copy().items()
         }
-        positions = {
-            self._venue(instrument_id): {
-                "instrument": str(instrument_id),
-                "qty": self._fmt(position.signed_qty),
-                "avg_px": self._fmt(position.avg_px),
-                "realized_usdt": self._fmt(position.realized_pnl),
-                "unrealized_usdt": self._fmt(position.unrealized_pnl),
-                "fee_usdt": self._fmt(position.fee),
+        accounts = {}
+        for instrument_id in self.instrument_ids:
+            venue = self._venue(instrument_id)
+            account = self._account_for_venue(venue)
+            accounts[venue] = {
+                "account_id": str(account.id),
+                "total_usdt": self._fmt(self._money_decimal(account.balance_total(USDT))),
+                "free_usdt": self._fmt(self._money_decimal(account.balance_free(USDT))),
+                "locked_usdt": self._fmt(self._money_decimal(account.balance_locked(USDT))),
             }
-            for instrument_id, position in self.positions.copy().items()
-        }
         pending = None
         if self.pending is not None:
             pending_pair = self.pending
             main_legs = pending_pair.legs.copy()
             repair_legs = pending_pair.repairs.copy()
+            best_edge = self._best_edge_bps(pending_pair)
             actual_edge = self._actual_edge_bps(pending_pair)
-            edge_slip = self._edge_slippage_bps(pending_pair, actual_edge)
+            edge_slip = self._edge_slippage_bps(pending_pair, best_edge)
             pending = {
                 "signal": pending_pair.signal,
                 "edge_side": pending_pair.edge_side,
                 "signal_venue": pending_pair.signal_venue,
                 "signal_edge_bps": self._fmt(pending_pair.signal_edge_bps),
                 "mean_bps": self._fmt(pending_pair.mean_bps),
+                "std_bps": self._fmt(pending_pair.std_bps),
+                "best_edge_bps": self._fmt(best_edge),
+                "actual_edge_bps": self._fmt(actual_edge),
                 "signal_event_ns": str(pending_pair.signal_event_ns),
                 "signal_ts_ns": str(pending_pair.signal_ts_ns),
                 "on_quote_ns": str(pending_pair.on_quote_ns),
                 "edge_slip": self._fmt(edge_slip),
-                "fill_slip": self._fmt(self._fill_slippage_bps(pending_pair)),
+                "fill_slip": self._fmt(self._fill_slippage_bps(pending_pair, best_edge, actual_edge)),
                 "age_sec": self._fmt(max((now_ns - pending_pair.on_quote_ns) / 1_000_000_000, 0.0)),
                 "orders": [
                     {
@@ -395,6 +506,7 @@ class AnthropicArbStrategy(Strategy):
                         "side": str(leg.side),
                         "filled_qty": self._fmt(leg.filled_qty),
                         "target_qty": self._fmt(leg.target_qty),
+                        "best_px": self._fmt(leg.best_px),
                         "submit_event_ns": str(leg.submit_event_ns) if leg.submit_event_ns is not None else "-",
                         "accept_event_ns": str(leg.accept_event_ns) if leg.accept_event_ns is not None else "-",
                         "fill_event_ns": str(leg.fill_event_ns) if leg.fill_event_ns is not None else "-",
@@ -410,6 +522,7 @@ class AnthropicArbStrategy(Strategy):
                         "side": str(leg.side),
                         "filled_qty": self._fmt(leg.filled_qty),
                         "target_qty": self._fmt(leg.target_qty),
+                        "best_px": self._fmt(leg.best_px),
                         "submit_event_ns": str(leg.submit_event_ns) if leg.submit_event_ns is not None else "-",
                         "accept_event_ns": str(leg.accept_event_ns) if leg.accept_event_ns is not None else "-",
                         "fill_event_ns": str(leg.fill_event_ns) if leg.fill_event_ns is not None else "-",
@@ -435,12 +548,10 @@ class AnthropicArbStrategy(Strategy):
                 "short_mean_bps": self._fmt(self.edge.short_mean_bps),
                 "short_std_bps": self._fmt(self.edge.short_std_bps),
             },
+            "accounts": accounts,
+            "risk": risk,
             "positions": positions,
-            "pnl": {
-                "realized_usdt": self._fmt(sum((position.realized_pnl for position in self.positions.copy().values()), Decimal("0"))),
-                "unrealized_usdt": self._fmt(sum((position.unrealized_pnl for position in self.positions.copy().values()), Decimal("0"))),
-                "fee_usdt": self._fmt(sum((position.fee for position in self.positions.copy().values()), Decimal("0"))),
-            },
+            "pnl": pnl,
             "quote_counts": self.edge.quote_counts(),
             "pending": pending,
             "actions": [dict(row) for row in self.action_rows.copy()],
@@ -448,7 +559,9 @@ class AnthropicArbStrategy(Strategy):
 
     # 原子写 snapshot，避免 monitor 读到半截 JSON。
     def _write_snapshot(self, now_ns: int) -> None:
-        data = self._build_snapshot(now_ns)
+        positions, pnl, risk_inputs = self._position_snapshot()
+        risk = self._check_risk(risk_inputs)
+        data = self._build_snapshot(now_ns, positions, pnl, risk)
         self._write_snapshot_data(data)
 
     # snapshot 落盘不占用策略状态锁。
@@ -474,6 +587,7 @@ class AnthropicArbStrategy(Strategy):
             edge_side = LONG_EDGE
             signal_edge = self.edge.long_bps
             mean_bps = self.edge.long_mean_bps
+            std_bps = self.edge.long_std_bps
             after_inventory = before_inventory + base_qty
         else:
             buy_id, sell_id = self.binance_id, self.okx_id
@@ -481,6 +595,7 @@ class AnthropicArbStrategy(Strategy):
             edge_side = SHORT_EDGE
             signal_edge = self.edge.short_bps
             mean_bps = self.edge.short_mean_bps
+            std_bps = self.edge.short_std_bps
             after_inventory = before_inventory - base_qty
 
         buy_quantity = self.cache.instrument(buy_id).make_qty(buy_qty)
@@ -502,15 +617,13 @@ class AnthropicArbStrategy(Strategy):
                 order_id=str(buy_order.client_order_id),
                 instrument_id=buy_id,
                 side=OrderSide.BUY,
-                target_qty=Decimal(str(buy_quantity)),
-                quote_px=Decimal(str(self.quotes[buy_id].ask_price)),
+                target_qty=buy_quantity.as_decimal(),
             ),
             str(sell_order.client_order_id): PendingLeg(
                 order_id=str(sell_order.client_order_id),
                 instrument_id=sell_id,
                 side=OrderSide.SELL,
-                target_qty=Decimal(str(sell_quantity)),
-                quote_px=Decimal(str(self.quotes[sell_id].bid_price)),
+                target_qty=sell_quantity.as_decimal(),
             ),
         }
         self.pending = PendingPair(
@@ -519,6 +632,7 @@ class AnthropicArbStrategy(Strategy):
             edge_side=edge_side,
             signal_edge_bps=signal_edge,
             mean_bps=mean_bps,
+            std_bps=std_bps,
             signal_event_ns=signal_event_ns,
             signal_ts_ns=signal_ts_ns,
             signal_venue=self._venue(tick.instrument_id),
@@ -531,12 +645,11 @@ class AnthropicArbStrategy(Strategy):
 
     # 按 Binance 腿库存同步 flat/long/short 状态。
     def _sync_state_from_inventory(self) -> None:
-        positions = self.cache.positions_open(instrument_id=self.binance_id, strategy_id=self.id)
-        if not positions:
+        qty = self._net_qty(self.binance_id)
+        if qty == 0:
             self.trade_state = STATE_FLAT
             return
-        position = positions[0]
-        self.trade_state = STATE_SHORT if bool(position.is_long) else STATE_LONG
+        self.trade_state = STATE_SHORT if qty > 0 else STATE_LONG
 
     # 记录 pending 订单失败，等两腿都有最终反馈后统一处理。
     def _mark_order_failed(self, order_id: str) -> None:
@@ -567,12 +680,12 @@ class AnthropicArbStrategy(Strategy):
                 )
                 self._finish_record("repair_unbalance")
                 return
-            bn_qty = self._net_qty(self.binance_id)
-            okx_qty = self._net_qty(self.okx_id)
-            if bn_qty + okx_qty / self.okx_qty_multiplier == Decimal("0"):
+            if self._inventory_balanced():
                 self._finish_record("repaired")
             else:
                 self.mode = "suspend"
+                bn_qty = self._net_qty(self.binance_id)
+                okx_qty = self._net_qty(self.okx_id)
                 self.log.error(f"repair_finished_still_unbalanced bn_qty={bn_qty} okx_qty={okx_qty}")
                 self._finish_record("repair_unbalance")
             return
@@ -610,8 +723,7 @@ class AnthropicArbStrategy(Strategy):
                 order_id=order_id,
                 instrument_id=leg.instrument_id,
                 side=side,
-                target_qty=Decimal(str(quantity)),
-                quote_px=Decimal(str(self.quotes[leg.instrument_id].ask_price if side == OrderSide.BUY else self.quotes[leg.instrument_id].bid_price)),
+                target_qty=quantity.as_decimal(),
             )
             orders.append(order)
         if not repairs:
@@ -626,11 +738,12 @@ class AnthropicArbStrategy(Strategy):
     # 从 NT cache 读取本策略当前 instrument 净持仓。
     def _net_qty(self, instrument_id: InstrumentId) -> Decimal:
         positions = self.cache.positions_open(instrument_id=instrument_id, strategy_id=self.id)
-        if not positions:
-            return Decimal("0")
-        position = positions[0]
-        qty = Decimal(str(position.quantity))
-        return qty if bool(position.is_long) else -qty
+        return sum((position.signed_decimal_qty() for position in positions), Decimal("0"))
+
+    def _inventory_balanced(self) -> bool:
+        bn_qty = self._net_qty(self.binance_id)
+        okx_qty = self._net_qty(self.okx_id)
+        return bn_qty + okx_qty / self.okx_qty_multiplier == 0
 
     # 启动时用 collector 真实 bid/ask 初始化 6h 分钟窗口。
     def _warm_initial_window(self) -> None:
@@ -683,6 +796,7 @@ class AnthropicArbStrategy(Strategy):
         filt = (
             (pc.field("ts_local_ns") >= pa.scalar(start_ns, pa.int64()))
             & (pc.field("ts_local_ns") <= pa.scalar(end_ns, pa.int64()))
+            & (pc.field("ts_exchange_ms") > pa.scalar(0, pa.int64()))
             & pc.field("symbol").isin([ASSET])
         )
         table = dataset.to_table(columns=list(COLLECTOR_COLUMNS), filter=filt)
@@ -691,10 +805,9 @@ class AnthropicArbStrategy(Strategy):
             raise RuntimeError("no bidask1 collector rows found for initial window")
         return sorted(rows, key=self._quote_event_ns)
 
-    # collector 行优先使用交易所事件时间，缺失时才用采集时间。
+    # collector warmup 统一使用交易所事件时间。
     def _quote_event_ns(self, row: dict[str, object]) -> int:
-        exchange_ms = int(row["ts_exchange_ms"])
-        return exchange_ms * 1_000_000 if exchange_ms > 0 else int(row["ts_local_ns"])
+        return int(row["ts_exchange_ms"]) * 1_000_000
 
     # 用 warmup 最后一条 bid/ask 构造初始 QuoteTick。
     def _seed_initial_quotes(self, rows: list[dict[str, object]]) -> None:
@@ -742,9 +855,11 @@ class AnthropicArbStrategy(Strategy):
             self.mode = "suspend"
 
     # 记录一笔 pending 完成后的动作摘要。
-    def _action_row(self, pending: PendingPair, status: str) -> dict[str, str]:
+    def _action_row(self, pending: PendingPair, status: str) -> dict[str, object]:
+        best_edge = self._best_edge_bps(pending)
         actual_edge = self._actual_edge_bps(pending)
-        edge_slippage = self._edge_slippage_bps(pending, actual_edge)
+        edge_slippage = self._edge_slippage_bps(pending, best_edge)
+        fill_slippage = self._fill_slippage_bps(pending, best_edge, actual_edge)
         submit_events = {"BINANCE": "-", "OKX": "-"}
         accept_events = {"BINANCE": "-", "OKX": "-"}
         fill_events = {"BINANCE": "-", "OKX": "-"}
@@ -779,15 +894,28 @@ class AnthropicArbStrategy(Strategy):
             "status": status,
             "qty": self._fmt(abs(self._inventory())),
             "signal_edge": self._fmt(pending.signal_edge_bps),
+            "best_edge": self._fmt(best_edge),
             "actual_edge": self._fmt(actual_edge),
             "edge_slippage": self._fmt(edge_slippage),
-            "fill_slippage": "-",
+            "fill_slippage": self._fmt(fill_slippage),
             "mean": self._fmt(pending.mean_bps),
-            "std": "-",
+            "std": self._fmt(pending.std_bps),
             "time": time_text,
         }
 
-    # 用双腿成交均价计算实际成交 edge。
+    # 用指定的双腿价格计算实际操作方向的 edge。
+    def _pair_edge_bps(self, pending: PendingPair, buy_px: Decimal, sell_px: Decimal) -> Decimal:
+        buy_id = self.okx_id if pending.signal == "long" else self.binance_id
+        sell_id = self.binance_id if pending.signal == "long" else self.okx_id
+        if buy_id == self.okx_id:
+            buy_px *= self.edge.okx_price_multiplier
+        if sell_id == self.okx_id:
+            sell_px *= self.edge.okx_price_multiplier
+        if pending.edge_side == SHORT_EDGE:
+            return (sell_px - buy_px) / buy_px * BPS
+        return (buy_px - sell_px) / sell_px * BPS
+
+    # 用双腿成交均价计算完整成交 edge。
     def _actual_edge_bps(self, pending: PendingPair) -> Decimal | None:
         buy_id = self.okx_id if pending.signal == "long" else self.binance_id
         sell_id = self.binance_id if pending.signal == "long" else self.okx_id
@@ -795,36 +923,38 @@ class AnthropicArbStrategy(Strategy):
         sell_avg = pending.avg_px(sell_id)
         if buy_avg is None or sell_avg is None:
             return None
-        if buy_id == self.okx_id:
-            buy_avg *= self.edge.okx_price_multiplier
-        if sell_id == self.okx_id:
-            sell_avg *= self.edge.okx_price_multiplier
-        if pending.edge_side == SHORT_EDGE:
-            return (sell_avg - buy_avg) / buy_avg * BPS
-        return (buy_avg - sell_avg) / sell_avg * BPS
+        return self._pair_edge_bps(pending, buy_avg, sell_avg)
 
-    # 计算实际成交 edge 相对 signal edge 的滑点。
-    def _edge_slippage_bps(self, pending: PendingPair, actual_edge: Decimal | None) -> Decimal | None:
-        if actual_edge is None:
+    # 用两条腿实际撮合中的最优 fill 价格计算理论最优成交 edge。
+    def _best_edge_bps(self, pending: PendingPair) -> Decimal | None:
+        buy_id = self.okx_id if pending.signal == "long" else self.binance_id
+        sell_id = self.binance_id if pending.signal == "long" else self.okx_id
+        buy_leg = next((leg for leg in pending.legs.values() if leg.instrument_id == buy_id), None)
+        sell_leg = next((leg for leg in pending.legs.values() if leg.instrument_id == sell_id), None)
+        if buy_leg is None or sell_leg is None or buy_leg.best_px is None or sell_leg.best_px is None:
+            return None
+        return self._pair_edge_bps(pending, buy_leg.best_px, sell_leg.best_px)
+
+    # signal edge 到最优 fill edge 的变化，表示订单延迟期间的 edge 偏移。
+    def _edge_slippage_bps(self, pending: PendingPair, best_edge: Decimal | None) -> Decimal | None:
+        if best_edge is None:
             return None
         if pending.edge_side == SHORT_EDGE:
-            return actual_edge - pending.signal_edge_bps
-        return pending.signal_edge_bps - actual_edge
+            return best_edge - pending.signal_edge_bps
+        return pending.signal_edge_bps - best_edge
 
-    # 计算两条腿成交均价相对触发 bid/ask 的滑点合计。
-    def _fill_slippage_bps(self, pending: PendingPair) -> Decimal | None:
-        total = Decimal("0")
-        seen = False
-        for leg in pending.legs.values():
-            if leg.filled_qty <= 0:
-                continue
-            avg_px = leg.filled_notional / leg.filled_qty
-            if leg.side == OrderSide.BUY:
-                total += (avg_px - leg.quote_px) / leg.quote_px * BPS
-            else:
-                total += (leg.quote_px - avg_px) / leg.quote_px * BPS
-            seen = True
-        return total if seen else None
+    # 最优 fill edge 到完整成交 edge 的变化，表示深度成交带来的偏移。
+    def _fill_slippage_bps(
+        self,
+        pending: PendingPair,
+        best_edge: Decimal | None,
+        actual_edge: Decimal | None,
+    ) -> Decimal | None:
+        if best_edge is None or actual_edge is None:
+            return None
+        if pending.edge_side == SHORT_EDGE:
+            return actual_edge - best_edge
+        return best_edge - actual_edge
 
     # 按 venue 找账户，用于下单前余额检查。
     def _account_for_venue(self, venue: str):
@@ -833,6 +963,12 @@ class AnthropicArbStrategy(Strategy):
             if str(account.id).upper().startswith(venue_text):
                 return account
         return None
+
+    # 把 NT Money 转为 snapshot 使用的 Decimal。
+    def _money_decimal(self, money) -> Decimal | None:
+        if money is None:
+            return None
+        return money.as_decimal()
 
     # InstrumentId 的 venue 标准化为大写字符串。
     def _venue(self, instrument_id: InstrumentId) -> str:

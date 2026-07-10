@@ -6,11 +6,9 @@ strategy:
     params:
       instrument_client: binance_futures
 
-
 node:
   logging:
     strategy_log_level: INFO
-
 
   data:
     clients:
@@ -19,7 +17,6 @@ node:
         markets:
           - symbol: BTC/USDT
             timeframe: 1s
-
 
   exec:
     engine:

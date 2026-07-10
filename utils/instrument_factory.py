@@ -34,21 +34,14 @@ def optional_money(value: Any, currency: Currency) -> Money | None:
 
 # 根据 set 构建 NT instrument 和 bar type。
 class InstrumentFactory:
-    def __init__(self, settings: dict[str, Any], run_type: str = "live") -> None:
+    def __init__(self, settings: dict[str, Any]) -> None:
         self.settings = settings
         self.markets = settings["markets"]
-        if run_type == "backtest":
-            self.cfg = dict(settings.get("backtest", {}).get("instrument", {}))
-            self.cfg["kind"] = settings["backtest"]["instrument_kind"]
-        else:
-            strategy = next(iter(settings["strategy"].values()))
-            client = strategy["params"]["instrument_client"]
-            node = settings["node"]
-            source = node["data"]["clients"].get(client)
-            if source is None:
-                source = node["exec"]["clients"][client]
-            self.cfg = dict(source.get("instrument", {}))
-            self.cfg["kind"] = source["instrument_kind"]
+        strategy = next(iter(settings["strategy"].values()))
+        client = strategy["params"]["instrument_client"]
+        source = settings["node"]["data"]["clients"][client]
+        self.cfg = dict(source.get("instrument", {}))
+        self.cfg["kind"] = source["instrument_kind"]
 
     @classmethod
     def from_client(cls, cfg: dict[str, Any]) -> "InstrumentFactory":

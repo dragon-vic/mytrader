@@ -14,8 +14,6 @@ from nautilus_trader.live.config import LiveExecEngineConfig
 from nautilus_trader.live.node import TradingNode
 from nautilus_trader.model.identifiers import InstrumentId
 
-from actors.data_recorder import DataRecorder
-from actors.data_recorder import DataRecorderConfig
 from adapters.common import cache_config
 from utils.arguments import NODE_STOP_TOPIC
 from utils.config_loader import load_settings
@@ -132,7 +130,7 @@ def build_live_node(settings: dict[str, Any]) -> TradingNode:
                 **logging["component_levels"],
                 **{strategy["class"]: logging["strategy_log_level"] for strategy in settings["strategy"].values()},
             },
-            **log_file_settings(settings, "live"),
+            **log_file_settings(settings),
         ),
         data_engine=data_engine_config(settings),
         data_clients=data_clients,
@@ -149,8 +147,6 @@ def build_live_node(settings: dict[str, Any]) -> TradingNode:
     for strategy in build_strategies(settings, "live"):
         node.trader.add_strategy(strategy)
 
-    if settings["actors"]["data_recorder"]["enabled"]:
-        node.trader.add_actor(DataRecorder(DataRecorderConfig()))
     attach_node_stop_handler(node)
 
     node.build()
@@ -174,7 +170,7 @@ def run_live_node(node: TradingNode) -> None:
 
 
 # 运行 live/testnet，由 run.py 负责传入配置名和模式。
-def main(config_name: str, mode: str | None = None) -> None:
+def main(config_name: str, mode: str = "live") -> None:
     settings = load_settings(config_name, mode=mode)
     settings = claim_run(settings)
     report_writer = TraderReportWriter.from_settings(settings, "live")
@@ -183,6 +179,8 @@ def main(config_name: str, mode: str | None = None) -> None:
     try:
         run_live_node(node)
     finally:
-        report_writer.write_final_reports(node.trader)
-        node.dispose()
+        try:
+            report_writer.write_final_reports(node.trader)
+        finally:
+            node.dispose()
         print_live_summary(settings)

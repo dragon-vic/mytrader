@@ -36,10 +36,10 @@ def kline_interval(timeframe: str) -> BinanceKlineInterval:
 
 # 管理当前 set 的行情拉取、CSV 路径和 NT bar 转换。
 class MarketDataStore:
-    def __init__(self, settings: dict[str, Any], run_type: str = "backtest") -> None:
+    def __init__(self, settings: dict[str, Any], factory: InstrumentFactory) -> None:
         self.settings = settings
-        self.factory = InstrumentFactory(settings, run_type)
-        self.markets = self.factory.markets
+        self.factory = factory
+        self.markets = factory.markets
 
     # 生成指定市场的原始 OHLCV 文件路径。
     def raw_ohlcv_path(self, market: dict[str, Any]) -> Path:
@@ -48,14 +48,7 @@ class MarketDataStore:
         return ROOT / self.settings["project"]["data_dir"] / "raw" / filename
 
     def account_type(self) -> BinanceAccountType:
-        if self.settings["mode"] == "backtest":
-            value = self.settings["backtest"]["venue_account"]["account_type"]
-        else:
-            strategy = next(iter(self.settings["strategy"].values()))
-            client = strategy["params"]["instrument_client"]
-            source = self.settings["node"]["data"]["clients"][client]
-            value = source["account_type"]
-        return getattr(BinanceAccountType, value)
+        return getattr(BinanceAccountType, self.factory.cfg["account_type"])
 
     # 通过 NT 的 Binance adapter 异步拉取某个市场的 kline。
     async def fetch_ohlcv_async(self, market: dict[str, Any]) -> pd.DataFrame:

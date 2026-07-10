@@ -38,6 +38,11 @@ class ExternalCommandDataClientConfig(LiveDataClientConfig, frozen=True):
 
 
 class ExternalCommandDataClient(LiveDataClient):
+    """Receives one JSON command per TCP connection.
+
+    Required fields: command, reason, source and sent_ns.
+    """
+
     def __init__(self, loop, msgbus, cache, clock, config, name=None):
         super().__init__(
             loop=loop,
@@ -78,9 +83,8 @@ class ExternalCommandDataClient(LiveDataClient):
         self._log.error("ExternalCommandDataClient does not support request_data")
 
     async def _handle_client(self, reader, writer) -> None:
-        line = await reader.readline()
-        payload = json.loads(line)
-        if self._subscribed:
+        try:
+            payload = json.loads(await reader.readline())
             sent_ns = int(payload["sent_ns"])
             command = ExternalCommand(
                 sent_ns,
@@ -90,9 +94,13 @@ class ExternalCommandDataClient(LiveDataClient):
                 source=str(payload["source"]),
                 sent_ns=sent_ns,
             )
-            self._handle_data(CustomData(data_type=external_command_type(), data=command))
-        writer.close()
-        await writer.wait_closed()
+            if self._subscribed:
+                self._handle_data(CustomData(data_type=external_command_type(), data=command))
+        except (UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+            self._log.warning(f"Dropped invalid external command: {exc}")
+        finally:
+            writer.close()
+            await writer.wait_closed()
 
 
 class ExternalCommandLiveDataClientFactory(LiveDataClientFactory):
@@ -113,8 +121,8 @@ def build_data_client(settings: dict[str, Any], cfg: dict[str, Any]):
     return (
         cfg["client_id"],
         ExternalCommandDataClientConfig(
-            host=cfg.get("host", EXTERNAL_COMMAND_DEFAULT_HOST),
-            port=int(cfg.get("port", EXTERNAL_COMMAND_DEFAULT_PORT)),
+            host=cfg["host"],
+            port=int(cfg["port"]),
         ),
         ExternalCommandLiveDataClientFactory,
     )

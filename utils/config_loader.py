@@ -11,7 +11,11 @@ from utils.arguments import DEFAULT_CONFIG_NAME
 ROOT = Path(__file__).resolve().parent.parent
 STRATEGIES_DIR = ROOT / "strategies"
 GLOBAL_CONFIG_PATH = STRATEGIES_DIR / "global.yaml"
-BACKTEST_MODE_KEYS = {"engine", "strategy", "node", "reports", "actors", "runtime"}
+CONFIG_FILES = {
+    "backtest": "backtest_config.yaml",
+    "live": "live_config.yaml",
+    "testnet": "live_config.yaml",
+}
 
 CLIENTS = {
     "binance_spot": {
@@ -90,55 +94,43 @@ CLIENTS = {
 }
 
 
-# 返回所有带可运行配置的策略目录配置。
-def config_paths() -> list[Path]:
+# 返回交互入口可选择的策略目录名；指定模式时只返回支持该模式的策略。
+def config_names(mode: str | None = None) -> list[str]:
     return sorted(
-        config_path(path.name)
+        path.name
         for path in STRATEGIES_DIR.iterdir()
-        if path.is_dir() and has_config(path)
+        if path.is_dir() and has_config(path, mode)
     )
 
 
-# 返回交互入口可选择的策略目录名。
-def config_names() -> list[str]:
-    return sorted(path.parent.name for path in config_paths())
+def has_config(path: Path, mode: str | None = None) -> bool:
+    if mode is not None:
+        return (path / config_filename(mode)).exists()
+    return any((path / filename).exists() for filename in set(CONFIG_FILES.values()))
 
 
-# 策略目录只要有传统 config 或拆分后的 live/backtest config 就可出现在菜单里。
-def has_config(path: Path) -> bool:
-    return any((path / name).exists() for name in ("config.yaml", "live_config.yaml", "backtest_config.yaml"))
+def config_filename(mode: str) -> str:
+    if mode not in CONFIG_FILES:
+        raise ValueError(f"Unsupported mode: {mode}")
+    return CONFIG_FILES[mode]
 
 
-# 查找策略目录内的配置文件；拆分配置按运行模式选择。
-def config_path(config_name: str, mode: str | None = None) -> Path:
-    folder = STRATEGIES_DIR / config_name
-    names = config_names_for_mode(mode)
-    for name in names:
-        path = folder / name
-        if path.exists():
-            return path
-    raise FileNotFoundError(f"Config not found: strategies/{config_name}/{'|'.join(names)}")
-
-
-def config_names_for_mode(mode: str | None) -> tuple[str, ...]:
-    if mode in {"live", "testnet"}:
-        return ("live_config.yaml", "config.yaml")
-    if mode == "backtest":
-        return ("backtest_config.yaml", "config.yaml")
-    return ("config.yaml", "live_config.yaml", "backtest_config.yaml")
+# 每种运行模式只读取自己的配置文件。
+def config_path(config_name: str, mode: str) -> Path:
+    path = STRATEGIES_DIR / config_name / config_filename(mode)
+    if not path.exists():
+        raise FileNotFoundError(f"Config not found: {path.relative_to(ROOT)}")
+    return path
 
 
 # 加载一个具名 set，让每个策略保留自己的市场和参数。
-def load_settings(config_name: str | None = None, mode: str | None = None) -> dict[str, Any]:
+def load_settings(config_name: str | None = None, mode: str = "live") -> dict[str, Any]:
     name = config_name or DEFAULT_CONFIG_NAME
     path = config_path(name, mode)
     with GLOBAL_CONFIG_PATH.open("r", encoding="utf-8") as f:
         global_settings = yaml.safe_load(f)
     with path.open("r", encoding="utf-8") as f:
         strategy_settings = yaml.safe_load(f)
-    global_settings = apply_mode_layer(global_settings, mode)
-    if not is_split_config(path):
-        strategy_settings = apply_mode_layer(strategy_settings, mode)
     settings = deep_merge(global_settings, strategy_settings)
     settings["mode"] = mode
     settings["project"]["config_name"] = name
@@ -146,10 +138,6 @@ def load_settings(config_name: str | None = None, mode: str | None = None) -> di
     settings["project"]["strategy_dir"] = str(path.parent)
     normalize_settings(settings, mode)
     return settings
-
-
-def is_split_config(path: Path) -> bool:
-    return path.name in {"live_config.yaml", "backtest_config.yaml"}
 
 
 # 递归合并配置，右侧 set 配置覆盖左侧 global 配置。
@@ -161,44 +149,6 @@ def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]
         else:
             merged[key] = value
     return merged
-
-
-# 选择 yaml 里的 live/backtest 模式层；backtest.engine 是 NT 回测引擎参数。
-def apply_mode_layer(settings: dict[str, Any], mode: str | None) -> dict[str, Any]:
-    if mode is None:
-        return settings
-    backtest_is_mode = is_backtest_mode_layer(settings.get("backtest"))
-    base = {
-        key: value
-        for key, value in settings.items()
-        if key != "live" and not (key == "backtest" and backtest_is_mode)
-    }
-    section = settings.get(mode)
-    if mode == "testnet" and section is None:
-        section = settings.get("live")
-    if section is None:
-        return base
-    if mode == "backtest" and backtest_is_mode:
-        overlay = dict(section)
-        engine = overlay.pop("engine", None)
-        selected = merge_mode_overlay(base, overlay)
-        if engine is not None:
-            selected["backtest"] = deep_merge(base.get("backtest", {}), engine)
-        return selected
-    return merge_mode_overlay(base, section)
-
-
-# 模式层里的 strategy 是完整替换，避免 live/backtest 策略参数互相污染。
-def merge_mode_overlay(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
-    left = dict(base)
-    if "strategy" in overlay:
-        left.pop("strategy", None)
-    return deep_merge(left, overlay)
-
-
-# 旧 backtest 是引擎配置；新 backtest 同时含 strategy/exec/engine 等模式层字段。
-def is_backtest_mode_layer(section: Any) -> bool:
-    return isinstance(section, dict) and bool(BACKTEST_MODE_KEYS.intersection(section))
 
 
 # 校验并展开策略模块路径；module 写当前策略目录内的 py 文件名。
@@ -219,15 +169,6 @@ def client_meta(key: str) -> dict[str, str]:
     if key not in CLIENTS:
         raise ValueError(f"Unsupported client key: {key}")
     return CLIENTS[key]
-
-
-# 返回某个 client 的规范化配置；data 优先，找不到再用 exec。
-def client_config(settings: dict[str, Any], key: str) -> dict[str, Any]:
-    node = settings["node"]
-    source = node["data"]["clients"].get(key) or node["exec"]["clients"].get(key)
-    if source is None:
-        raise ValueError(f"client not found: {key}")
-    return source
 
 
 # 把 BTC 或 BTC/USDT 这种短写转成市场 dict。
@@ -469,7 +410,10 @@ def normalize_backtest_venue(settings: dict[str, Any], venue: dict[str, Any]) ->
     key = venue["client"]
     if key == "ibkr":
         raise ValueError("IBKR backtest is not supported; use IBKR only for live/testnet")
-    cfg = dict(client_config(settings, key))
+    source = settings["node"]["data"]["clients"][key]
+    if not source["enabled"]:
+        raise ValueError(f"backtest venue requires an enabled data client: {key}")
+    cfg = dict(source)
     for name in ("markets", "instrument", "instrument_kind"):
         if name in venue:
             cfg[name] = venue[name]
@@ -480,44 +424,8 @@ def normalize_backtest_venue(settings: dict[str, Any], venue: dict[str, Any]) ->
     return cfg
 
 
-# 没有显式 backtest.venues 的旧配置，在加载期转换成统一的新结构。
-def normalize_legacy_backtest(settings: dict[str, Any]) -> None:
-    backtest = settings["backtest"]
-    if backtest.get("venues"):
-        return
-    key = backtest["client"]
-    backtest.update({
-        "key": key,
-        "adapter": client_meta(key)["adapter"],
-        "venue": client_meta(key)["venue"],
-        "account_type": client_meta(key).get("account_type"),
-        "instrument_kind": client_meta(key)["instrument_kind"],
-    })
-    normalize_client_markets(key, backtest, settings)
-    account = backtest["venue_account"]
-    backtest["venues"] = [
-        {
-            "client": key,
-            "markets": backtest["markets"],
-            "instrument": backtest["instrument"],
-            "starting_balance": account["starting_balance"],
-            "account_type": account["account_type"],
-            "oms_type": account["oms_type"],
-        },
-    ]
-    if not backtest.get("datasets"):
-        data = backtest.get("data", {})
-        if "tick_data_path" in data:
-            backtest["datasets"] = [{"type": "trade_ticks", "client": key, "path": data["tick_data_path"]}]
-        elif "tick_catalog" in data:
-            backtest["datasets"] = [{"type": "trade_tick_catalog", "client": key, "path": data["tick_catalog"]}]
-        else:
-            backtest["datasets"] = [{"type": "bars", "client": key}]
-
-
 # 回测按 venues 聚合市场，入口只读取这一种规范化结果。
 def normalize_backtest(settings: dict[str, Any]) -> None:
-    normalize_legacy_backtest(settings)
     markets = []
     markets_all = False
     for venue in settings["backtest"]["venues"]:
@@ -537,7 +445,7 @@ def backtest_client_config(settings: dict[str, Any], key: str) -> dict[str, Any]
 
 
 # 补齐从短写可推导的字段。
-def normalize_settings(settings: dict[str, Any], mode: str | None) -> None:
+def normalize_settings(settings: dict[str, Any], mode: str) -> None:
     normalize_strategy(settings)
 
     node = settings["node"]
@@ -561,9 +469,9 @@ def normalize_settings(settings: dict[str, Any], mode: str | None) -> None:
         settings["markets_all"] = False
         return
 
-    source = node["data"]["clients"].get(client) or node["exec"]["clients"].get(client)
-    if source is None:
-        raise ValueError(f"strategy.params.instrument_client not found: {client}")
+    source = node["data"]["clients"].get(client)
+    if source is None or not source["enabled"]:
+        raise ValueError(f"strategy.params.instrument_client is not an enabled data client: {client}")
     settings["markets"] = source["markets"]
     settings["markets_all"] = bool(source.get("markets_all"))
 

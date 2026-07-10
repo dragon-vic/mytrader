@@ -15,9 +15,6 @@ def claim_run(settings: dict[str, Any]) -> dict[str, Any]:
     strategy_name = settings["project"]["config_name"]
 
     runtime = dict(settings.get("runtime", {}))
-    runtime["node_id"] = strategy_name
-    runtime["node_num"] = 1
-    runtime["run_name"] = strategy_name
     runtime["report_dir_name"] = f"{run_kind}-{start_time}"
     runtime["started_at"] = start_time
     runtime["trader_id"] = f"TRADER-{strategy_name.upper().replace('_', '-')}"

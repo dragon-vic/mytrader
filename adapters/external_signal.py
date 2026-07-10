@@ -40,6 +40,11 @@ class ExternalSignalDataClientConfig(LiveDataClientConfig, frozen=True):
 
 
 class ExternalSignalDataClient(LiveDataClient):
+    """Receives one JSON signal per TCP connection.
+
+    Required fields: instrument_id, side and sent_ns.
+    """
+
     def __init__(self, loop, msgbus, cache, clock, config, name=None):
         super().__init__(
             loop=loop,
@@ -70,7 +75,6 @@ class ExternalSignalDataClient(LiveDataClient):
             self._server = None
 
     async def _subscribe(self, command: SubscribeData) -> None:
-
         self._subscribed = True
         self._log.info(f"Subscribed: {command.data_type}")
 
@@ -82,22 +86,26 @@ class ExternalSignalDataClient(LiveDataClient):
         self._log.error("ExternalSignalDataClient does not support request_data")
 
     async def _handle_client(self, reader, writer) -> None:
-        line = await reader.readline()
-        payload = json.loads(line)
-
-        if self._subscribed:
+        try:
+            payload = json.loads(await reader.readline())
             sent_ns = int(payload["sent_ns"])
+            side = str(payload["side"]).upper()
+            if side not in {"BUY", "SELL"}:
+                raise ValueError(f"side must be BUY or SELL, got {side}")
             signal = ExternalSignal(
                 sent_ns,
                 sent_ns,
                 instrument_id=InstrumentId.from_str(payload["instrument_id"]),
-                side=payload["side"],
+                side=side,
                 sent_ns=sent_ns,
             )
-            self._handle_data(CustomData(data_type=external_signal_type(), data=signal))
-
-        writer.close()
-        await writer.wait_closed()
+            if self._subscribed:
+                self._handle_data(CustomData(data_type=external_signal_type(), data=signal))
+        except (UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+            self._log.warning(f"Dropped invalid external signal: {exc}")
+        finally:
+            writer.close()
+            await writer.wait_closed()
 
 
 class ExternalSignalLiveDataClientFactory(LiveDataClientFactory):

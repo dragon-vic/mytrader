@@ -44,14 +44,14 @@ def event_decimal(value: object) -> Decimal:
     return Decimal(str(value).split()[0].replace("_", ""))
 
 
-def start_date_ns(value: int) -> int:
+def start_time_ns(value: int) -> int:
     if value <= 0:
         return 0
     text = str(value)
-    if len(text) != 8:
-        raise RuntimeError("start_date must be 0 or YYYYMMDD")
-    day = datetime.strptime(text, "%Y%m%d").replace(tzinfo=BEIJING_TZ)
-    return int(day.timestamp() * 1_000_000_000)
+    if len(text) != 14:
+        raise RuntimeError("start_time must be 0 or YYYYMMDDHHMMSS")
+    time = datetime.strptime(text, "%Y%m%d%H%M%S").replace(tzinfo=BEIJING_TZ)
+    return int(time.timestamp() * 1_000_000_000)
 
 
 @dataclass
@@ -94,22 +94,20 @@ class FeatureStore:
         data_path = Path(path)
         requested_columns = ["instrument_id", "ts_ns", "short_edge", "long_edge", *column_map.values()]
         available_columns = set(pq.read_schema(data_path).names)
-        if start_ns > 0:
-            if "minute_ns" not in available_columns:
-                raise RuntimeError("feature file missing minute_ns for start_date warmup reset")
-            data = pd.read_parquet(data_path, columns=["instrument_id", "ts_ns", "minute_ns", "short_edge", "long_edge"])
-            data = data[data["ts_ns"] >= start_ns].copy()
-            data = self._add_dynamic_window(data, window, column_map)
-        elif set(requested_columns).issubset(available_columns):
+        if set(requested_columns).issubset(available_columns):
             data = pd.read_parquet(data_path, columns=requested_columns)
+            if start_ns > 0:
+                data = data[data["ts_ns"] >= start_ns].copy()
         elif "minute_ns" in available_columns:
             data = pd.read_parquet(data_path, columns=["instrument_id", "ts_ns", "minute_ns", "short_edge", "long_edge"])
             data = self._add_dynamic_window(data, window, column_map)
+            if start_ns > 0:
+                data = data[data["ts_ns"] >= start_ns].copy()
         else:
             missing = sorted(set(requested_columns) - available_columns)
             raise RuntimeError(f"feature file missing columns for window_minutes={window}: {missing}")
         if data.empty:
-            raise RuntimeError(f"feature file has no rows after start_ns={start_ns}")
+            raise RuntimeError(f"feature file has no rows after start_time={start_ns}")
         data = data.sort_values("ts_ns", kind="mergesort")
         self.instrument_ids = data["instrument_id"].astype(str).to_numpy()
         self.ts_ns = data["ts_ns"].to_numpy()
@@ -188,13 +186,11 @@ class PreIpoQuoteBacktestConfig(StrategyConfig, frozen=True):
     entry_bps: float
     short_min_bps: float
     long_max_bps: float
-    # long_entry_bps: float
     exit_bps: float
-    # long_exit_bps: float
     window_minutes: int
     min_hold_sec: float
     signal_delay_ms: float
-    start_date: int
+    start_time: int
     end_ns: int
 
 
@@ -204,7 +200,7 @@ class PreIpoQuoteBacktestStrategy(Strategy):
         self.binance_id = InstrumentId.from_str(config.binance_id)
         self.okx_id = InstrumentId.from_str(config.okx_id)
         self.window_minutes = int(config.window_minutes)
-        self.start_ns = start_date_ns(int(config.start_date))
+        self.start_ns = start_time_ns(int(config.start_time))
         self.features = FeatureStore(config.feature_path, self.window_minutes, self.start_ns)
         self.qty = decimal_param(config.qty)
         self.max_position = decimal_param(config.max_position)

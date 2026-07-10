@@ -16,8 +16,9 @@ from utils.arguments import MODE_OPTIONS
 from utils.arguments import RUN_MODES
 from utils.arguments import SUMMARY_FILE
 from utils.config_loader import ROOT
+from utils.config_loader import STRATEGIES_DIR
 from utils.config_loader import config_names
-from utils.config_loader import config_path
+from utils.config_loader import has_config
 from utils.config_loader import load_settings
 
 
@@ -38,6 +39,8 @@ def read_key() -> str:
         key = msvcrt.getch()
         if key == b"\r":
             return "enter"
+        if key == b"\x1b":
+            return "back"
         if key in (b"\x00", b"\xe0"):
             direction = msvcrt.getch()
             if direction == b"H":
@@ -48,8 +51,6 @@ def read_key() -> str:
                 return "left"
             if direction == b"M":
                 return "right"
-        if key in (b"q", b"Q"):
-            return "back"
         return ""
 
     import select
@@ -63,12 +64,10 @@ def read_key() -> str:
         key = os.read(fd, 1)
         if key in (b"\r", b"\n"):
             return "enter"
-        if key in (b"q", b"Q"):
-            return "back"
         if key == b"\x1b":
             ready, _, _ = select.select([fd], [], [], 0.2)
             if not ready:
-                return ""
+                return "back"
             seq = os.read(fd, 1)
             ready, _, _ = select.select([fd], [], [], 0.05)
             if ready:
@@ -96,7 +95,7 @@ def render_menu(title: str, options: list[str], selected: int) -> None:
         prefix = "> " if index == selected else "  "
         print(f"{prefix}{option}")
     print()
-    print("↑/↓/←/→ 选择，Enter 确认，q 返回")
+    print("↑/↓/←/→ 选择，Enter 确认，Esc 返回")
 
 
 def choose(title: str, options: list[str]) -> str | None:
@@ -127,7 +126,7 @@ def render_main_menu(columns: list[tuple[str, list[str]]], col: int, row: int) -
     for index in range(count):
         print("".join(f"{menu_cell(options, cell_col, index, col, row):<{width}}" for cell_col, (_name, options) in enumerate(columns)))
     print()
-    print("↑/↓ 选择，←/→ 切换列，Enter 确认，q 返回")
+    print("↑/↓ 选择，←/→ 切换列，Enter 确认，Esc 返回")
 
 
 def menu_cell(options: list[str], cell_col: int, index: int, col: int, row: int) -> str:
@@ -249,24 +248,20 @@ def session_strategy(session_name: str) -> str:
 
 
 def strategy_dir(strategy: str) -> Path:
-    for config in config_names():
-        if strategy_name(config) == strategy:
-            return config_path(config).parent
-    raise RuntimeError(f"找不到策略目录：{strategy}")
+    folder = STRATEGIES_DIR / strategy
+    if not folder.is_dir() or not has_config(folder):
+        raise RuntimeError(f"找不到策略目录：{strategy}")
+    return folder
 
 
 def live_report_dir(folder: Path, session_name: str) -> Path:
-    report_root = folder / "report"
-    reports = sorted(report_root.glob("live-*"), key=lambda path: path.stat().st_mtime, reverse=True)
-    if not reports:
-        raise RuntimeError(f"没有找到运行报告目录：{report_root}")
     session_time = session_name.rsplit("-", 1)[-1]
     if not session_time.isdigit() or len(session_time) != 14:
         raise RuntimeError(f"运行 session 名格式不正确：{session_name}")
-    after_start = [path for path in reports if path.name.removeprefix("live-") >= session_time]
-    if not after_start:
+    report_dir = folder / "report" / f"live-{session_time}"
+    if not report_dir.is_dir():
         raise RuntimeError(f"没有找到 session 对应的 report：{session_name}")
-    return sorted(after_start, key=lambda path: path.name)[0]
+    return report_dir
 
 
 def run_monitor(session_name: str) -> None:
@@ -359,21 +354,20 @@ def shlex_quote(value: str) -> str:
 
 
 def report_dirs() -> list[Path]:
-    dirs = []
+    dirs: list[Path] = []
     for root in (ROOT / "strategies").glob("*/report"):
-        dirs.extend(path for path in root.iterdir() if path.is_dir())
+        dirs.extend(summary.parent for summary in root.glob(f"**/{SUMMARY_FILE}"))
     return sorted(dirs, key=lambda path: path.stat().st_mtime, reverse=True)
 
 
 def report_label(report_dir: Path) -> str:
-    return f"{report_dir.parent.parent.name}-{report_dir.name.removeprefix('live-').removeprefix('backtest-')}"
+    strategy = report_dir.relative_to(STRATEGIES_DIR).parts[0]
+    return f"{strategy}-{report_dir.name}"
 
 
 def report_options(limit: int = 10) -> list[str]:
     options = []
     for path in report_dirs():
-        if not (path / SUMMARY_FILE).exists():
-            continue
         options.append(report_label(path))
         if len(options) >= limit:
             break
@@ -381,28 +375,33 @@ def report_options(limit: int = 10) -> list[str]:
 
 
 def report_by_label(label: str) -> Path:
-    timestamp = label[-14:]
-    strategy = label[:-15]
-    if len(label) < 16 or label[-15] != "-" or not strategy or not timestamp.isdigit():
-        raise RuntimeError(f"report 名格式不正确：{label}")
-    return ROOT / "strategies" / strategy / "report" / f"live-{timestamp}"
+    for report_dir in report_dirs():
+        if report_label(report_dir) == label:
+            return report_dir
+    raise RuntimeError(f"找不到报告：{label}")
 
 
 def latest_report_strategy_dir() -> Path | None:
     dirs = report_dirs()
     if not dirs:
         return None
-    return dirs[0].parent.parent
+    strategy = dirs[0].relative_to(STRATEGIES_DIR).parts[0]
+    return STRATEGIES_DIR / strategy
 
 
 # 主菜单只把最新 report 所属策略提前，其余配置保持字母顺序，避免旧报告导致全量重排。
-def menu_config_names() -> list[str]:
-    names = config_names()
+def menu_config_names(mode: str | None = None) -> list[str]:
+    names = config_names(mode)
     latest_dir = latest_report_strategy_dir()
     if latest_dir is None:
         return names
-    top = [name for name in names if config_path(name).parent == latest_dir]
+    top = [name for name in names if STRATEGIES_DIR / name == latest_dir]
     return top + [name for name in names if name not in top]
+
+
+def mode_options(config_name: str) -> list[tuple[str, str]]:
+    folder = STRATEGIES_DIR / config_name
+    return [(label, mode) for label, mode in MODE_OPTIONS if has_config(folder, mode)]
 
 
 def latest_summary() -> Path | None:
@@ -487,7 +486,8 @@ def run_interactive() -> None:
     selected_config = None
     while True:
         if selected_config is None:
-            selected = choose_main(menu_config_names(), running_options(), report_options())
+            launch_mode = None if os.name == "nt" else "live"
+            selected = choose_main(menu_config_names(launch_mode), running_options(), report_options())
             if selected is None:
                 return
             menu, value = selected
@@ -500,14 +500,15 @@ def run_interactive() -> None:
             selected_config = value
 
         if os.name == "nt":
+            options = mode_options(selected_config)
             selected_label = choose(
                 f"配置：{selected_config}\n请选择模式：",
-                [label for label, _mode in MODE_OPTIONS],
+                [label for label, _mode in options],
             )
             if selected_label is None:
                 selected_config = None
                 continue
-            mode = dict(MODE_OPTIONS)[selected_label]
+            mode = dict(options)[selected_label]
         else:
             mode = "live"
 

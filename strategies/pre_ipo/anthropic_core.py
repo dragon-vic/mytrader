@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
+from dataclasses import field
 from decimal import Decimal
 
 from nautilus_trader.model.data import QuoteTick
@@ -30,9 +31,9 @@ class PendingLeg:
     instrument_id: InstrumentId
     side: OrderSide
     target_qty: Decimal
-    quote_px: Decimal
     filled_qty: Decimal = Decimal("0")
     filled_notional: Decimal = Decimal("0")
+    best_px: Decimal | None = None
     submit_event_ns: int | None = None
     accept_event_ns: int | None = None
     fill_event_ns: int | None = None
@@ -55,22 +56,26 @@ class PendingPair:
     edge_side: str
     signal_edge_bps: Decimal
     mean_bps: Decimal
+    std_bps: Decimal
     signal_event_ns: int
     signal_ts_ns: int
     signal_venue: str
     on_quote_ns: int
     before_inventory: Decimal
     after_inventory: Decimal
-    repairs: dict[str, PendingLeg] = None
-
-    def __post_init__(self) -> None:
-        self.repairs = {}
+    repairs: dict[str, PendingLeg] = field(default_factory=dict)
 
     # 记录一笔订单的部分或完整成交。
     def record_fill(self, order_id: str, qty: Decimal, px: Decimal, event_ns: int) -> None:
         leg = self.leg(order_id)
         leg.filled_qty += qty
         leg.filled_notional += qty * px
+        if leg.best_px is None:
+            leg.best_px = px
+        elif leg.side == OrderSide.BUY:
+            leg.best_px = min(leg.best_px, px)
+        else:
+            leg.best_px = max(leg.best_px, px)
         leg.fill_event_ns = max(leg.fill_event_ns or 0, event_ns)
         if leg.full_fill_event_ns is None and leg.filled():
             leg.full_fill_event_ns = event_ns
@@ -122,54 +127,37 @@ class PendingPair:
                 return leg.filled_notional / leg.filled_qty
         return None
 
+
 @dataclass
-class PositionState:
-    instrument_id: InstrumentId
+class PnlLedger:
     signed_qty: Decimal = Decimal("0")
     avg_px: Decimal | None = None
-    realized_pnl: Decimal = Decimal("0")
+    realized: Decimal = Decimal("0")
     fee: Decimal = Decimal("0")
-    unrealized_pnl: Decimal = Decimal("0")
 
-    # 用成交事件推进单 instrument 仓位、均价和已实现盈亏。
-    def apply_fill(self, side: OrderSide, qty: Decimal, px: Decimal, fee: Decimal) -> None:
+    # 只用本策略 fill 累计已实现盈亏和手续费。
+    def record_fill(self, side: OrderSide, qty: Decimal, px: Decimal, fee: Decimal) -> None:
         fill_qty = qty if side == OrderSide.BUY else -qty
         self.fee += fee
-        self.realized_pnl -= fee
+        self.realized -= fee
         if self.signed_qty == 0 or (self.signed_qty > 0) == (fill_qty > 0):
-            old_abs = abs(self.signed_qty)
-            new_abs = old_abs + abs(fill_qty)
-            self.avg_px = px if old_abs == 0 else (self.avg_px * old_abs + px * abs(fill_qty)) / new_abs
+            old_qty = abs(self.signed_qty)
+            new_qty = old_qty + abs(fill_qty)
+            self.avg_px = px if old_qty == 0 else (self.avg_px * old_qty + px * abs(fill_qty)) / new_qty
             self.signed_qty += fill_qty
             return
 
         close_qty = min(abs(self.signed_qty), abs(fill_qty))
         if self.signed_qty > 0:
-            self.realized_pnl += (px - self.avg_px) * close_qty
+            self.realized += (px - self.avg_px) * close_qty
         else:
-            self.realized_pnl += (self.avg_px - px) * close_qty
+            self.realized += (self.avg_px - px) * close_qty
         self.signed_qty += fill_qty
         if self.signed_qty == 0:
             self.avg_px = None
         elif abs(fill_qty) > close_qty:
             self.avg_px = px
 
-    # 用最新 quote 估算立刻平仓后的未实现盈亏，包含预估平仓滑点和手续费。
-    def mark(self, bid: Decimal, ask: Decimal, slippage_bps: Decimal) -> None:
-        if self.signed_qty == 0 or self.avg_px is None:
-            self.unrealized_pnl = Decimal("0")
-            return
-        slippage = slippage_bps / BPS
-        fee_rate = EXIT_FEE_BPS / BPS
-        if self.signed_qty > 0:
-            exit_px = bid * (Decimal("1") - slippage)
-            exit_notional = exit_px * self.signed_qty
-            self.unrealized_pnl = (exit_px - self.avg_px) * self.signed_qty - exit_notional * fee_rate
-            return
-        qty = abs(self.signed_qty)
-        exit_px = ask * (Decimal("1") + slippage)
-        exit_notional = exit_px * qty
-        self.unrealized_pnl = (self.avg_px - exit_px) * qty - exit_notional * fee_rate
 
 @dataclass
 class EdgePair:
@@ -186,53 +174,33 @@ class EdgePair:
     short_min_bps: Decimal
     long_bps: Decimal | None = None
     short_bps: Decimal | None = None
-    long_values: deque[tuple[int, Decimal]] = None
-    short_values: deque[tuple[int, Decimal]] = None
-    next_close_ns: int | None = None
-    minute_quote_sums: dict[int, dict[InstrumentId, tuple[Decimal, Decimal, int]]] = None
-    last_price_means: dict[InstrumentId, tuple[Decimal, Decimal]] = None
-    minute_counts: deque[dict[str, int]] = None
-
-    def __post_init__(self) -> None:
-        self.long_values = deque()
-        self.short_values = deque()
-        self.minute_quote_sums = {}
-        self.last_price_means = {}
-        self.minute_counts = deque(maxlen=10)
+    long_values: deque[tuple[int, Decimal]] = field(default_factory=deque)
+    short_values: deque[tuple[int, Decimal]] = field(default_factory=deque)
+    quote_sums: dict[InstrumentId, tuple[Decimal, Decimal, int]] = field(default_factory=dict)
+    last_price_means: dict[InstrumentId, tuple[Decimal, Decimal]] = field(default_factory=dict)
+    minute_counts: deque[dict[str, int]] = field(default_factory=lambda: deque(maxlen=10))
 
     # 每个 quote 事件后更新当前 long/short edge。
     def update(self, binance: QuoteTick, okx: QuoteTick) -> None:
-        bn_bid = Decimal(str(binance.bid_price))
-        bn_ask = Decimal(str(binance.ask_price))
-        okx_bid = Decimal(str(okx.bid_price)) * self.okx_price_multiplier
-        okx_ask = Decimal(str(okx.ask_price)) * self.okx_price_multiplier
+        bn_bid = binance.bid_price.as_decimal()
+        bn_ask = binance.ask_price.as_decimal()
+        okx_bid = okx.bid_price.as_decimal() * self.okx_price_multiplier
+        okx_ask = okx.ask_price.as_decimal() * self.okx_price_multiplier
         self.long_bps, self.short_bps = self.from_prices(bn_bid, bn_ask, okx_bid, okx_ask)
 
-    # 将 quote 放入事件时间对应的分钟桶；分钟结算统一由 housekeeping 推进。
-    def record_quote(self, tick: QuoteTick, binance_id: InstrumentId, okx_id: InstrumentId) -> None:
-        minute_ns = int(tick.ts_event) // MINUTE_NS * MINUTE_NS
-        if self.next_close_ns is None:
-            self.next_close_ns = minute_ns
-        if minute_ns < self.next_close_ns:
-            return
-        bucket = self.minute_quote_sums.setdefault(minute_ns, {})
-        bid_sum, ask_sum, count = bucket.get(tick.instrument_id, (Decimal("0"), Decimal("0"), 0))
-        bucket[tick.instrument_id] = (
-            bid_sum + Decimal(str(tick.bid_price)),
-            ask_sum + Decimal(str(tick.ask_price)),
+    # 将 quote 累加到当前 housekeeping interval。
+    def record_quote(self, tick: QuoteTick) -> None:
+        bid_sum, ask_sum, count = self.quote_sums.get(tick.instrument_id, (Decimal("0"), Decimal("0"), 0))
+        self.quote_sums[tick.instrument_id] = (
+            bid_sum + tick.bid_price.as_decimal(),
+            ask_sum + tick.ask_price.as_decimal(),
             count + 1,
         )
 
-    # housekeeping 统一结算已经结束的分钟。
-    def fill_to(self, now_ns: int, binance_id: InstrumentId, okx_id: InstrumentId) -> None:
-        current_minute_ns = now_ns // MINUTE_NS * MINUTE_NS
-        while self.next_close_ns is not None and self.next_close_ns < current_minute_ns:
-            self.close_minute(self.next_close_ns, binance_id, okx_id)
-            self.next_close_ns += MINUTE_NS
-
-    # 用一分钟内 bid/ask 均值生成一个时间加权 edge 样本。
-    def close_minute(self, minute_ns: int, binance_id: InstrumentId, okx_id: InstrumentId) -> None:
-        bucket = dict(self.minute_quote_sums.pop(minute_ns, {}))
+    # 用当前 interval 的 bid/ask 均值生成一个时间加权 edge 样本。
+    def close_bucket(self, ts_ns: int, binance_id: InstrumentId, okx_id: InstrumentId) -> None:
+        bucket = self.quote_sums
+        self.quote_sums = {}
         counts = {
             str(binance_id): bucket.get(binance_id, (Decimal("0"), Decimal("0"), 0))[2],
             str(okx_id): bucket.get(okx_id, (Decimal("0"), Decimal("0"), 0))[2],
@@ -244,15 +212,15 @@ class EdgePair:
         okx_bid *= self.okx_price_multiplier
         okx_ask *= self.okx_price_multiplier
         long_bps, short_bps = self.from_prices(bn_bid, bn_ask, okx_bid, okx_ask)
-        self._add_value(self.long_values, minute_ns, long_bps)
-        self._add_value(self.short_values, minute_ns, short_bps)
+        self._add_value(self.long_values, ts_ns, long_bps)
+        self._add_value(self.short_values, ts_ns, short_bps)
         self.update_stats()
-        self.minute_counts.append({"minute_ns": minute_ns, **counts})
+        self.minute_counts.append({"minute_ns": ts_ns, **counts})
 
     def _add_value(self, values: deque[tuple[int, Decimal]], ts_ns: int, value: Decimal) -> None:
         values.append((ts_ns, value))
         cutoff = ts_ns - self.window_ns
-        while values and values[0][0] < cutoff:
+        while values and values[0][0] <= cutoff:
             values.popleft()
 
     def _mean(self, values: list[tuple[int, Decimal]]) -> Decimal:
@@ -275,7 +243,7 @@ class EdgePair:
     ) -> None:
         minute_quote_sums: dict[int, dict[str, tuple[Decimal, Decimal, int]]] = {}
         for row in rows:
-            event_ns = int(row["ts_exchange_ms"]) * 1_000_000 if int(row["ts_exchange_ms"]) > 0 else int(row["ts_local_ns"])
+            event_ns = int(row["ts_exchange_ms"]) * 1_000_000
             minute_ns = event_ns // MINUTE_NS * MINUTE_NS
             venue = str(row["venue"]).upper()
             item = minute_quote_sums.setdefault(minute_ns, {})
@@ -288,7 +256,7 @@ class EdgePair:
                 item[venue] = old[0] + bid, old[1] + ask, old[2] + 1
         self.long_values.clear()
         self.short_values.clear()
-        self.minute_quote_sums.clear()
+        self.quote_sums.clear()
         self.minute_counts.clear()
         last: dict[str, tuple[Decimal, Decimal]] = {}
         minute_ns = start_ns // MINUTE_NS * MINUTE_NS
@@ -320,7 +288,6 @@ class EdgePair:
         self.update_stats()
         self.last_price_means[binance_id] = last["BINANCE"]
         self.last_price_means[okx_id] = last["OKX"]
-        self.next_close_ns = end_minute_ns + MINUTE_NS
 
     # 用 Binance/OKX 的 bid/ask 计算 long/short 两条 edge。
     def from_prices(

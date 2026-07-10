@@ -111,7 +111,7 @@ def build_backtest_engine(settings: dict[str, Any]) -> BacktestEngine:
             logging=LoggingConfig(
                 log_level=settings["backtest"]["logging"]["log_level"],
                 bypass_logging=bool(settings["backtest"]["logging"]["bypass"]),
-                **log_file_settings(settings, "backtest"),
+                **log_file_settings(settings),
             ),
         ),
     )
@@ -319,18 +319,15 @@ def market_store(
     settings: dict[str, Any] | None = None,
     dataset: dict[str, Any] | None = None,
 ) -> MarketDataStore:
-    store = MarketDataStore.__new__(MarketDataStore)
-    store.settings = settings or {"project": {"data_dir": "data"}}
+    store_settings = settings or {"project": {"data_dir": "data"}}
     if dataset and "data_dir" in dataset:
-        store.settings = {**store.settings, "project": {"data_dir": dataset["data_dir"]}}
-    store.factory = factory
-    store.markets = factory.markets
-    return store
+        store_settings = {**store_settings, "project": {"data_dir": dataset["data_dir"]}}
+    return MarketDataStore(store_settings, factory)
 
 
 # 把 NT 生成的报告保存到当前 set 对应的目录。
 def write_reports(engine: BacktestEngine, result, settings: dict) -> dict[str, float]:
-    payload = write_backtest_result(result, settings)
+    payload = write_backtest_result(result)
     started = time.perf_counter()
     write_trader_reports(engine.trader, settings, "backtest")
     summary_elapsed = print_backtest_summary(payload, settings)
@@ -343,7 +340,7 @@ def run_case(settings: dict[str, Any]) -> dict[str, Any]:
     engine = None
     total_started = time.perf_counter()
     try:
-        prepare_report_dir(settings, "backtest")
+        prepare_report_dir(settings)
         build_started = time.perf_counter()
         engine = build_backtest_engine(settings)
         build_elapsed = time.perf_counter() - build_started
@@ -357,7 +354,7 @@ def run_case(settings: dict[str, Any]) -> dict[str, Any]:
             "run_elapsed_sec": run_elapsed,
             "total_elapsed_sec": total_elapsed,
             **report_times,
-            "report_dir": str(run_reports_dir(settings, "backtest")),
+            "report_dir": str(run_reports_dir(settings)),
         }
         print_timing(times)
         return times
@@ -384,7 +381,7 @@ def main(config_name: str) -> dict[str, Any]:
 # 回测配置只接受 grid_params/case_params，并在运行前展开成普通 strategy.params。
 def expand_batch_settings(settings: dict[str, Any]) -> list[dict[str, Any]]:
     strategy = single_strategy(settings)
-    grid = strategy["grid_params"] or {}
+    grid = strategy.get("grid_params") or {}
     case_params = strategy["case_params"]
     rows = case_param_rows(case_params)
     combos = grid_param_combos(grid)

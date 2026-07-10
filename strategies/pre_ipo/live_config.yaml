@@ -19,6 +19,7 @@ strategy:
       long_max_bps: 520
       max_position: 2
       qty: 0.05
+      # 仅用于开仓保证金检查和风控 lock 估算；不会修改交易所实际杠杆。
       margin_leverage: 5
       margin_buffer: 1.1
 

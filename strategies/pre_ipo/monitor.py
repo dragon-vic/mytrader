@@ -28,6 +28,9 @@ from utils.arguments import EXTERNAL_COMMAND_DEFAULT_PORT
 BEIJING_TZ = timezone(timedelta(hours=8))
 SNAPSHOT_NAME = "pre_ipo_snapshot.json"
 PAGE_COUNT = 2
+REFRESH_SEC = 60.0
+NODE_CHECK_SEC = 1.0
+KEY_POLL_SEC = 0.1
 
 
 def snapshot_path(value: str) -> Path:
@@ -82,6 +85,32 @@ def edge_table(payload: dict) -> Table:
     edge = payload.get("edge") or {}
     for key in ("long_bps", "long_mean_bps", "long_std_bps", "short_bps", "short_mean_bps", "short_std_bps"):
         table.add_row(key, str(edge.get(key, "-")))
+    return table
+
+
+def accounts_table(payload: dict) -> Table:
+    table = Table(title="Account USDT", expand=True)
+    accounts = payload.get("accounts") or {}
+    risk = payload.get("risk") or {}
+    venues = list(accounts)
+    table.add_column("metric", justify="left", no_wrap=True)
+    if not accounts:
+        table.add_column("value", justify="right", no_wrap=True)
+        table.add_row("-", "-")
+        return table
+    for venue in venues:
+        table.add_column(str(venue), justify="right", no_wrap=True)
+    metrics = (
+        ("total", accounts, "total_usdt"),
+        ("free", accounts, "free_usdt"),
+        ("locked", accounts, "locked_usdt"),
+        ("strategy lock", risk, "locked_usdt"),
+        ("available", risk, "available_usdt"),
+        ("unrealized", risk, "unrealized_usdt"),
+        ("risk", risk, "risk_rate"),
+    )
+    for label, source, key in metrics:
+        table.add_row(label, *(str((source.get(venue) or {}).get(key, "-")) for venue in venues))
     return table
 
 
@@ -181,7 +210,7 @@ def actions_table(payload: dict) -> Table:
     return table
 
 
-def build_view(payload: dict, snapshot: Path, session_name: str | None, notice: str, page: int) -> Group:
+def build_view(payload: dict, session_name: str | None, notice: str, page: int) -> Group:
     keys = "↑/↓翻页 | r减仓 | n正常 | s停止 | Esc退出"
     header = Panel.fit(f"PRE IPO Monitor | Page {page + 1}/{PAGE_COUNT} | {keys}", border_style="cyan")
     if page == 1:
@@ -191,7 +220,11 @@ def build_view(payload: dict, snapshot: Path, session_name: str | None, notice: 
         )
     return Group(
         header,
-        Columns([status_table(payload, session_name, notice), edge_table(payload)], equal=True, expand=True),
+        Columns(
+            [status_table(payload, session_name, notice), edge_table(payload), accounts_table(payload)],
+            equal=True,
+            expand=True,
+        ),
         quotes_table(payload),
         positions_table(payload),
     )
@@ -267,26 +300,43 @@ def main(path: Path, session_name: str | None = None) -> None:
     console = Console()
     notice = ""
     page = 0
+    payload = {}
+    last_refresh = 0.0
+    last_node_check = 0.0
+    dirty = True
     try:
-        with Live(console=console, screen=True, refresh_per_second=1) as live:
+        with Live(console=console, screen=True, auto_refresh=False) as live:
             while True:
-                payload = load_snapshot(path)
-                live.update(build_view(payload, path, session_name, notice, page), refresh=True)
-                if not node_running(session_name):
-                    return
-                key = read_key(1.0)
+                now = time.monotonic()
+                if now - last_refresh >= REFRESH_SEC:
+                    payload = load_snapshot(path)
+                    last_refresh = now
+                    dirty = True
+                if dirty:
+                    live.update(build_view(payload, session_name, notice, page), refresh=True)
+                    dirty = False
+                if now - last_node_check >= NODE_CHECK_SEC:
+                    if not node_running(session_name):
+                        return
+                    last_node_check = now
+                key = read_key(KEY_POLL_SEC)
                 if key == "escape":
                     return
                 if key == "up":
                     page = (page - 1) % PAGE_COUNT
+                    dirty = True
                 elif key == "down":
                     page = (page + 1) % PAGE_COUNT
+                    dirty = True
                 elif key == "r" and session_name:
                     notice = send_command("reduce")
+                    dirty = True
                 elif key == "n" and session_name:
                     notice = send_command("normal")
+                    dirty = True
                 elif key == "s" and session_name:
                     notice = send_command("stop")
+                    dirty = True
     except KeyboardInterrupt:
         return
 

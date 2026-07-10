@@ -3,11 +3,6 @@ cache:
   tick_capacity: 1000
   bar_capacity: 1000
 
-# NT actor。
-actors:
-  data_recorder:
-    enabled: false
-
 # 报告输出。
 reports:
   enabled: true
@@ -19,12 +14,6 @@ project:
 
 # 回测默认模块参数。
 backtest:
-  client: binance_futures
-  markets: []
-  venue_account:
-    starting_balance: "100000 USDT"
-    account_type: MARGIN
-    oms_type: NETTING
   logging:
     log_level: INFO
     bypass: false
@@ -66,7 +55,6 @@ node:
     log_colors: true
     component_levels:
       Portfolio: INFO
-      DataRecorder: INFO
       ExecClient-BINANCE: WARNING
       ExecClient-OKX: WARNING
       ExecClient-KRAKEN: WARNING
@@ -191,7 +179,6 @@ node:
         enabled: false
         markets: []
         margin_type: CROSS
-        leverage: 1
 
       okx_spot:
         enabled: false

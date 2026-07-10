@@ -44,9 +44,9 @@ def strategy_instruments(settings: dict[str, Any], run_type: str, params: dict[s
     if run_type == "backtest":
         return InstrumentFactory.from_client(backtest_client_config(settings, client))
     node = settings["node"]
-    source = node["data"]["clients"].get(client) or node["exec"]["clients"].get(client)
-    if source is None:
-        raise ValueError(f"strategy.params.instrument_client not found: {client}")
+    source = node["data"]["clients"].get(client)
+    if source is None or not source["enabled"]:
+        raise ValueError(f"strategy.params.instrument_client is not an enabled data client: {client}")
     return InstrumentFactory.from_client(source)
 
 
@@ -94,19 +94,20 @@ def strategy_params(
             for market in instruments.markets
         ]
     if "event_log_path" in fields and params.get("event_log_path", "auto") == "auto":
-        params["event_log_path"] = str(run_reports_dir(settings, run_type) / "strategy_events.csv")
+        params["event_log_path"] = str(run_reports_dir(settings) / "strategy_events.csv")
     if "snapshot_path" in fields and params.get("snapshot_path", "auto") == "auto":
-        params["snapshot_path"] = str(run_reports_dir(settings, run_type) / f"{settings['project']['config_name']}_snapshot.json")
+        params["snapshot_path"] = str(run_reports_dir(settings) / f"{settings['project']['config_name']}_snapshot.json")
     if "tick_log_path" in fields and params.get("tick_log_path", "auto") == "auto":
-        params["tick_log_path"] = str(run_reports_dir(settings, run_type) / "poly_ticks.parquet")
+        params["tick_log_path"] = str(run_reports_dir(settings) / "poly_ticks.parquet")
     if "poly_trade_path" in fields and params.get("poly_trade_path", "auto") == "auto":
-        params["poly_trade_path"] = str(run_reports_dir(settings, run_type) / "poly_trades.parquet")
+        params["poly_trade_path"] = str(run_reports_dir(settings) / "poly_trades.parquet")
     if "poly_quote_path" in fields and params.get("poly_quote_path", "auto") == "auto":
-        params["poly_quote_path"] = str(run_reports_dir(settings, run_type) / "poly_quotes.parquet")
+        params["poly_quote_path"] = str(run_reports_dir(settings) / "poly_quotes.parquet")
     if "binance_tick_path" in fields and params.get("binance_tick_path", "auto") == "auto":
-        params["binance_tick_path"] = str(run_reports_dir(settings, run_type) / "binance_btc_ticks.parquet")
+        params["binance_tick_path"] = str(run_reports_dir(settings) / "binance_btc_ticks.parquet")
     if "event_windows" in fields:
         params["event_windows"] = settings.get("runtime", {}).get("event_windows", {})
     if "proxy_url" in fields:
         params["proxy_url"] = proxy_url(settings) or ""
+    params.pop("instrument_client", None)
     return params

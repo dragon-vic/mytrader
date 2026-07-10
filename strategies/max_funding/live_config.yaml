@@ -31,54 +31,15 @@ strategy:
       api_timeout: 0.8
       stop_close: true
 
-
-backtest:
-  markets: [1000000BOB, AXS, BARD, CFG, COS,
-            DRIFT, ENJ, ENSO, GTC, GUA,
-            KITE, LYN, NOM, ORCA, POWER,
-            RAVE, RIVER, SAHARA, SIREN, SOON,
-            STEEM, SIGN, CHIP, MBOX, VIC,
-            BB, SOLV, MEGA, INJ, DOGS,
-            SAPIEN, KERNEL, COMP, SAGA, MOVE]
-  venue_account:
-    starting_balance: "100000 USDT"
-    account_type: MARGIN
-    oms_type: NETTING
-  logging:
-    log_level: INFO
-    bypass: true
-  data:
-    timeframe: 1s
-    limit: 1000
-    batches: 1
-  instrument:
-    settlement_currency: USDT
-    is_inverse: false
-    price_precision: 5
-    size_precision: 1
-    price_increment: "0.00010"
-    size_increment: "0.1"
-    multiplier: "1"
-    min_quantity: "0.1"
-    max_quantity: "1000000"
-    min_notional: "5"
-    max_price: "1000000"
-    margin_init: "1"
-    margin_maint: "1"
-    maker_fee: "0.0002"
-    taker_fee: "0.0005"
-
 node:
   logging:
     strategy_log_level: INFO
-
 
   data:
     clients:
       binance_futures:
         enabled: true
         markets: all
-
 
   exec:
     clients:
