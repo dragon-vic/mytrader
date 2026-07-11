@@ -8,10 +8,6 @@ from datetime import timezone
 from decimal import Decimal
 from pathlib import Path
 
-import pyarrow as pa
-import pyarrow.compute as pc
-import pyarrow.dataset as ds
-
 from adapters.external_command import ExternalCommand
 from adapters.external_command import external_command_type
 from nautilus_trader.config import StrategyConfig
@@ -47,14 +43,13 @@ from strategies.pre_ipo.anthropic_core import EdgePair
 from strategies.pre_ipo.anthropic_core import PendingLeg
 from strategies.pre_ipo.anthropic_core import PendingPair
 from strategies.pre_ipo.anthropic_core import PnlLedger
+from strategies.pre_ipo.anthropic_warmup import load_warmup_quotes
+from strategies.pre_ipo.anthropic_warmup import quote_event_ns
 from utils.arguments import EXTERNAL_COMMAND_CLIENT_NAME
 from utils.arguments import NODE_STOP_TOPIC
 
 
 BEIJING_TZ = timezone(timedelta(hours=8))
-COLLECTOR_COLUMNS = ("ts_local_ns", "ts_exchange_ms", "venue", "symbol", "bid", "ask", "bid_size", "ask_size")
-
-
 class AnthropicArbConfig(StrategyConfig, frozen=True):
     instruments: list[str]
     window_minutes: Decimal
@@ -405,21 +400,22 @@ class AnthropicArbStrategy(Strategy):
             risk_inputs,
         )
 
-    # 根据本策略 lock、未实现盈亏和账户 free 更新风险模式。
+    # 根据本策略未实现盈亏和账户 total 更新风险模式。
     def _check_risk(self, inputs: dict[str, dict[str, Decimal | None]]) -> dict[str, dict[str, str]]:
         rows = {}
         max_rate = Decimal("0")
         for venue, values in inputs.items():
             account = self._account_for_venue(venue)
+            total = self._money_decimal(account.balance_total(USDT))
             free = self._money_decimal(account.balance_free(USDT))
             locked = values["locked_usdt"]
             unrealized = values["unrealized_usdt"]
             available = None if free is None or locked is None else free + locked
             risk_rate = None
-            if available is not None and unrealized is not None:
+            if total is not None and unrealized is not None:
                 loss = max(-unrealized, Decimal("0"))
-                if available > 0:
-                    risk_rate = loss / available
+                if total > 0:
+                    risk_rate = loss / total
                 elif loss > 0:
                     risk_rate = Decimal("1")
                 else:
@@ -480,9 +476,8 @@ class AnthropicArbStrategy(Strategy):
             pending_pair = self.pending
             main_legs = pending_pair.legs.copy()
             repair_legs = pending_pair.repairs.copy()
-            best_edge = self._best_edge_bps(pending_pair)
-            actual_edge = self._actual_edge_bps(pending_pair)
-            edge_slip = self._edge_slippage_bps(pending_pair, best_edge)
+            best_edge = pending_pair.best_edge_bps()
+            actual_edge = pending_pair.actual_edge_bps()
             pending = {
                 "signal": pending_pair.signal,
                 "edge_side": pending_pair.edge_side,
@@ -495,8 +490,8 @@ class AnthropicArbStrategy(Strategy):
                 "signal_event_ns": str(pending_pair.signal_event_ns),
                 "signal_ts_ns": str(pending_pair.signal_ts_ns),
                 "on_quote_ns": str(pending_pair.on_quote_ns),
-                "edge_slip": self._fmt(edge_slip),
-                "fill_slip": self._fmt(self._fill_slippage_bps(pending_pair, best_edge, actual_edge)),
+                "edge_slip": self._fmt(pending_pair.edge_slippage_bps()),
+                "fill_slip": self._fmt(pending_pair.fill_slippage_bps()),
                 "age_sec": self._fmt(max((now_ns - pending_pair.on_quote_ns) / 1_000_000_000, 0.0)),
                 "orders": [
                     {
@@ -639,6 +634,7 @@ class AnthropicArbStrategy(Strategy):
             on_quote_ns=on_quote_ns,
             before_inventory=before_inventory,
             after_inventory=after_inventory,
+            okx_price_multiplier=self.edge.okx_price_multiplier,
         )
         self.submit_order(buy_order)
         self.submit_order(sell_order)
@@ -749,10 +745,9 @@ class AnthropicArbStrategy(Strategy):
     def _warm_initial_window(self) -> None:
         scan_end_ns = self.clock.timestamp_ns()
         scan_start_ns = scan_end_ns - (int(self.config.window_minutes) + 60) * MINUTE_NS
-        read_start_ns = scan_start_ns // (60 * MINUTE_NS) * (60 * MINUTE_NS)
-        paths = self._collector_quote_files(read_start_ns, scan_end_ns)
-        rows = self._load_collector_quotes(paths, scan_start_ns, scan_end_ns)
-        latest_event_ns = max(self._quote_event_ns(row) for row in rows)
+        collector_dir = Path(__file__).resolve().parent / "collector" / "bidask1-live"
+        rows = load_warmup_quotes(collector_dir, ASSET, scan_start_ns, scan_end_ns)
+        latest_event_ns = max(quote_event_ns(row) for row in rows)
         end_minute_ns = latest_event_ns // MINUTE_NS * MINUTE_NS - MINUTE_NS
         start_minute_ns = end_minute_ns - (int(self.config.window_minutes) - 1) * MINUTE_NS
         self.edge.warm_from_rows(rows, start_minute_ns, end_minute_ns, self.binance_id, self.okx_id)
@@ -762,60 +757,13 @@ class AnthropicArbStrategy(Strategy):
             f"short_mean={self.edge.short_mean_bps:.2f}",
         )
 
-    # 找到 collector 在窗口内的 merged/raw quote 文件。
-    def _collector_quote_files(self, start_ns: int, end_ns: int) -> list[Path]:
-        base_dir = Path(__file__).resolve().parent / "collector" / "bidask1-live"
-        merged_dir = base_dir / "quote_merged"
-        raw_dir = base_dir / "quote_raw"
-        paths: list[Path] = []
-        for key in self._collector_hour_keys(start_ns, end_ns):
-            merged = merged_dir / ASSET / f"bidask1-{key}.parquet"
-            if merged.exists():
-                paths.append(merged)
-            hour_dir = raw_dir / ASSET / key
-            if hour_dir.exists():
-                paths.extend(sorted(hour_dir.glob("*.parquet")))
-        return sorted(set(paths), key=lambda path: str(path))
-
-    # collector 文件按北京时间小时分桶。
-    def _collector_hour_keys(self, start_ns: int, end_ns: int) -> list[str]:
-        start = datetime.fromtimestamp(start_ns / 1_000_000_000, BEIJING_TZ).replace(minute=0, second=0, microsecond=0)
-        end = datetime.fromtimestamp(end_ns / 1_000_000_000, BEIJING_TZ).replace(minute=0, second=0, microsecond=0)
-        keys = []
-        current = start
-        while current <= end:
-            keys.append(current.strftime("%Y%m%d%H"))
-            current += timedelta(hours=1)
-        return keys
-
-    # 读取并裁剪 collector quote 行。
-    def _load_collector_quotes(self, paths: list[Path], start_ns: int, end_ns: int) -> list[dict[str, object]]:
-        if not paths:
-            raise RuntimeError("no bidask1 collector parquet files found for initial window")
-        dataset = ds.dataset([str(path) for path in paths], format="parquet")
-        filt = (
-            (pc.field("ts_local_ns") >= pa.scalar(start_ns, pa.int64()))
-            & (pc.field("ts_local_ns") <= pa.scalar(end_ns, pa.int64()))
-            & (pc.field("ts_exchange_ms") > pa.scalar(0, pa.int64()))
-            & pc.field("symbol").isin([ASSET])
-        )
-        table = dataset.to_table(columns=list(COLLECTOR_COLUMNS), filter=filt)
-        rows = table.to_pylist()
-        if not rows:
-            raise RuntimeError("no bidask1 collector rows found for initial window")
-        return sorted(rows, key=self._quote_event_ns)
-
-    # collector warmup 统一使用交易所事件时间。
-    def _quote_event_ns(self, row: dict[str, object]) -> int:
-        return int(row["ts_exchange_ms"]) * 1_000_000
-
     # 用 warmup 最后一条 bid/ask 构造初始 QuoteTick。
     def _seed_initial_quotes(self, rows: list[dict[str, object]]) -> None:
         latest: dict[str, dict[str, object]] = {}
         for row in rows:
             venue = str(row["venue"]).upper()
             old = latest.get(venue)
-            if old is None or self._quote_event_ns(row) >= self._quote_event_ns(old):
+            if old is None or quote_event_ns(row) >= quote_event_ns(old):
                 latest[venue] = row
         ts_init = self.clock.timestamp_ns()
         for instrument_id in self.instrument_ids:
@@ -824,7 +772,7 @@ class AnthropicArbStrategy(Strategy):
             instrument = self.cache.instrument(instrument_id)
             bid_size = Decimal(str(row["bid_size"]))
             ask_size = Decimal(str(row["ask_size"]))
-            ts_event = self._quote_event_ns(row)
+            ts_event = quote_event_ns(row)
             self.quotes[instrument_id] = QuoteTick(
                 instrument_id=instrument_id,
                 bid_price=instrument.make_price(Decimal(str(row["bid"]))),
@@ -856,10 +804,10 @@ class AnthropicArbStrategy(Strategy):
 
     # 记录一笔 pending 完成后的动作摘要。
     def _action_row(self, pending: PendingPair, status: str) -> dict[str, object]:
-        best_edge = self._best_edge_bps(pending)
-        actual_edge = self._actual_edge_bps(pending)
-        edge_slippage = self._edge_slippage_bps(pending, best_edge)
-        fill_slippage = self._fill_slippage_bps(pending, best_edge, actual_edge)
+        best_edge = pending.best_edge_bps()
+        actual_edge = pending.actual_edge_bps()
+        edge_slippage = pending.edge_slippage_bps()
+        fill_slippage = pending.fill_slippage_bps()
         submit_events = {"BINANCE": "-", "OKX": "-"}
         accept_events = {"BINANCE": "-", "OKX": "-"}
         fill_events = {"BINANCE": "-", "OKX": "-"}
@@ -902,59 +850,6 @@ class AnthropicArbStrategy(Strategy):
             "std": self._fmt(pending.std_bps),
             "time": time_text,
         }
-
-    # 用指定的双腿价格计算实际操作方向的 edge。
-    def _pair_edge_bps(self, pending: PendingPair, buy_px: Decimal, sell_px: Decimal) -> Decimal:
-        buy_id = self.okx_id if pending.signal == "long" else self.binance_id
-        sell_id = self.binance_id if pending.signal == "long" else self.okx_id
-        if buy_id == self.okx_id:
-            buy_px *= self.edge.okx_price_multiplier
-        if sell_id == self.okx_id:
-            sell_px *= self.edge.okx_price_multiplier
-        if pending.edge_side == SHORT_EDGE:
-            return (sell_px - buy_px) / buy_px * BPS
-        return (buy_px - sell_px) / sell_px * BPS
-
-    # 用双腿成交均价计算完整成交 edge。
-    def _actual_edge_bps(self, pending: PendingPair) -> Decimal | None:
-        buy_id = self.okx_id if pending.signal == "long" else self.binance_id
-        sell_id = self.binance_id if pending.signal == "long" else self.okx_id
-        buy_avg = pending.avg_px(buy_id)
-        sell_avg = pending.avg_px(sell_id)
-        if buy_avg is None or sell_avg is None:
-            return None
-        return self._pair_edge_bps(pending, buy_avg, sell_avg)
-
-    # 用两条腿实际撮合中的最优 fill 价格计算理论最优成交 edge。
-    def _best_edge_bps(self, pending: PendingPair) -> Decimal | None:
-        buy_id = self.okx_id if pending.signal == "long" else self.binance_id
-        sell_id = self.binance_id if pending.signal == "long" else self.okx_id
-        buy_leg = next((leg for leg in pending.legs.values() if leg.instrument_id == buy_id), None)
-        sell_leg = next((leg for leg in pending.legs.values() if leg.instrument_id == sell_id), None)
-        if buy_leg is None or sell_leg is None or buy_leg.best_px is None or sell_leg.best_px is None:
-            return None
-        return self._pair_edge_bps(pending, buy_leg.best_px, sell_leg.best_px)
-
-    # signal edge 到最优 fill edge 的变化，表示订单延迟期间的 edge 偏移。
-    def _edge_slippage_bps(self, pending: PendingPair, best_edge: Decimal | None) -> Decimal | None:
-        if best_edge is None:
-            return None
-        if pending.edge_side == SHORT_EDGE:
-            return best_edge - pending.signal_edge_bps
-        return pending.signal_edge_bps - best_edge
-
-    # 最优 fill edge 到完整成交 edge 的变化，表示深度成交带来的偏移。
-    def _fill_slippage_bps(
-        self,
-        pending: PendingPair,
-        best_edge: Decimal | None,
-        actual_edge: Decimal | None,
-    ) -> Decimal | None:
-        if best_edge is None or actual_edge is None:
-            return None
-        if pending.edge_side == SHORT_EDGE:
-            return actual_edge - best_edge
-        return best_edge - actual_edge
 
     # 按 venue 找账户，用于下单前余额检查。
     def _account_for_venue(self, venue: str):

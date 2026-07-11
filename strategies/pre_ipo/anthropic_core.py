@@ -48,6 +48,12 @@ class PendingLeg:
     def done(self) -> bool:
         return self.failed or self.filled()
 
+    # 返回当前累计成交均价。
+    def avg_px(self) -> Decimal | None:
+        if self.filled_qty == 0:
+            return None
+        return self.filled_notional / self.filled_qty
+
 
 @dataclass
 class PendingPair:
@@ -63,6 +69,7 @@ class PendingPair:
     on_quote_ns: int
     before_inventory: Decimal
     after_inventory: Decimal
+    okx_price_multiplier: Decimal
     repairs: dict[str, PendingLeg] = field(default_factory=dict)
 
     # 记录一笔订单的部分或完整成交。
@@ -120,12 +127,58 @@ class PendingPair:
             return self.repairs[order_id]
         raise KeyError(order_id)
 
-    # 获取某条交易腿的成交均价。
-    def avg_px(self, instrument_id: InstrumentId) -> Decimal | None:
-        for leg in self.legs.values():
-            if leg.instrument_id == instrument_id and leg.filled_qty > 0:
-                return leg.filled_notional / leg.filled_qty
-        return None
+    # 获取主订单指定方向的交易腿。
+    def _side_leg(self, side: OrderSide) -> PendingLeg:
+        return next(leg for leg in self.legs.values() if leg.side == side)
+
+    # 用双腿价格计算实际操作方向的 edge。
+    def _edge_bps(self, buy_px: Decimal, sell_px: Decimal) -> Decimal:
+        buy_leg = self._side_leg(OrderSide.BUY)
+        sell_leg = self._side_leg(OrderSide.SELL)
+        if str(buy_leg.instrument_id.venue).upper() == "OKX":
+            buy_px *= self.okx_price_multiplier
+        if str(sell_leg.instrument_id.venue).upper() == "OKX":
+            sell_px *= self.okx_price_multiplier
+        if self.edge_side == SHORT_EDGE:
+            return (sell_px - buy_px) / buy_px * BPS
+        return (buy_px - sell_px) / sell_px * BPS
+
+    # 用双腿成交均价计算完整成交 edge。
+    def actual_edge_bps(self) -> Decimal | None:
+        buy_leg = self._side_leg(OrderSide.BUY)
+        sell_leg = self._side_leg(OrderSide.SELL)
+        buy_px = buy_leg.avg_px()
+        sell_px = sell_leg.avg_px()
+        if buy_px is None or sell_px is None:
+            return None
+        return self._edge_bps(buy_px, sell_px)
+
+    # 用两条腿实际撮合中的最优 fill 价格计算理论最优成交 edge。
+    def best_edge_bps(self) -> Decimal | None:
+        buy_leg = self._side_leg(OrderSide.BUY)
+        sell_leg = self._side_leg(OrderSide.SELL)
+        if buy_leg.best_px is None or sell_leg.best_px is None:
+            return None
+        return self._edge_bps(buy_leg.best_px, sell_leg.best_px)
+
+    # signal edge 到最优 fill edge 的变化。
+    def edge_slippage_bps(self) -> Decimal | None:
+        best_edge = self.best_edge_bps()
+        if best_edge is None:
+            return None
+        if self.edge_side == SHORT_EDGE:
+            return best_edge - self.signal_edge_bps
+        return self.signal_edge_bps - best_edge
+
+    # 最优 fill edge 到完整成交 edge 的变化。
+    def fill_slippage_bps(self) -> Decimal | None:
+        best_edge = self.best_edge_bps()
+        actual_edge = self.actual_edge_bps()
+        if best_edge is None or actual_edge is None:
+            return None
+        if self.edge_side == SHORT_EDGE:
+            return actual_edge - best_edge
+        return best_edge - actual_edge
 
 
 @dataclass
