@@ -36,6 +36,7 @@ source: https://github.com/forrestchang/andrej-karpathy-skills
 - 当前仍处于早期阶段，避免创建 package 文件夹。面向用户的入口脚本放在仓库根目录，策略文件直接放在仓库根目录的 `strategies/` 目录下。
 - 本项目不要使用 argparse 任务分发器。当前入口脚本是 `fetch_data.py`、`backtest.py` 和 `live.py`。
 - 策略、回测、沙盒执行和交易所适配器优先使用 NautilusTrader 原生组件。只有 NautilusTrader 没有需要的通用数据路径时才使用 CCXT。
+- 使用 NautilusTrader 或交易所 adapter 的账户余额、可用资金、保证金、仓位、PnL 和风控数据前，必须检查当前版本的实际 adapter 映射，并用对应交易所的真实事件验证字段会实时更新。源码含 TODO、空列表/零值占位、测试实现或实测不更新的接口不得作为交易和风控依据；在策略目录内用口径明确、可验证的计算替代，不用 fallback 掩盖缺失数据。
 - 默认交易所是 Binance，除非用户明确更改。
 - 除非用户另有说明，新的 live 相关配置默认面向 Binance USDT futures testnet。
 - 第一版保持最小化。不要在出现真实需求前添加额外框架层。

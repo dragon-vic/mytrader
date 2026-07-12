@@ -21,6 +21,7 @@ from utils.arguments import EXTERNAL_COMMAND_DEFAULT_PORT
 
 @customdataclass
 class ExternalCommand(Data):
+    target: str = ""
     command: str = ""
     reason: str = ""
     source: str = ""
@@ -40,7 +41,7 @@ class ExternalCommandDataClientConfig(LiveDataClientConfig, frozen=True):
 class ExternalCommandDataClient(LiveDataClient):
     """Receives one JSON command per TCP connection.
 
-    Required fields: command, reason, source and sent_ns.
+    Required fields: target, command, reason, source and sent_ns.
     """
 
     def __init__(self, loop, msgbus, cache, clock, config, name=None):
@@ -89,6 +90,7 @@ class ExternalCommandDataClient(LiveDataClient):
             command = ExternalCommand(
                 sent_ns,
                 sent_ns,
+                target=str(payload["target"]),
                 command=str(payload["command"]),
                 reason=str(payload["reason"]),
                 source=str(payload["source"]),

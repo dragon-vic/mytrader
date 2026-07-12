@@ -8,6 +8,7 @@ from typing import Any
 
 from nautilus_trader.common.enums import LogColor
 from nautilus_trader.config import LoggingConfig
+from nautilus_trader.config import ImportableActorConfig
 from nautilus_trader.config import TradingNodeConfig
 from nautilus_trader.live.config import LiveDataEngineConfig
 from nautilus_trader.live.config import LiveExecEngineConfig
@@ -20,7 +21,7 @@ from utils.config_loader import load_settings
 from utils.config_loader import proxy_url
 from utils.instrument_factory import InstrumentFactory
 from utils.report_writer import log_file_settings
-from utils.polymarket_btc5m import up_down_instrument_windows
+from utils.report_writer import run_reports_dir
 from utils.report_writer import print_live_summary
 from utils.report_writer import TraderReportWriter
 from utils.runtime_ids import claim_run
@@ -43,13 +44,6 @@ def reconciliation_instrument_ids(settings: dict[str, Any]):
         raise ValueError("exec.engine.reconciliation_scope=configured_markets requires exactly one enabled exec client")
 
     source = exec_clients[0]
-    if source["adapter"] == "polymarket":
-        windows = up_down_instrument_windows(proxy_url(settings))
-        instrument_ids = [InstrumentId.from_str(instrument_id) for instrument_id in windows]
-        settings["runtime"]["instrument_ids"] = instrument_ids
-        settings["runtime"]["event_windows"] = windows
-        return instrument_ids
-
     if settings["markets_all"]:
         return None
 
@@ -70,6 +64,23 @@ def exec_engine_config(settings: dict[str, Any]) -> LiveExecEngineConfig:
         **cfg,
         reconciliation_instrument_ids=reconciliation_instrument_ids(settings),
     )
+
+
+# 把 YAML 中的 Actor 声明转换成 NT 原生 importable config。
+def build_actor_configs(settings: dict[str, Any]) -> list[ImportableActorConfig]:
+    actors = []
+    for name, actor in settings["node"]["actors"].items():
+        config = dict(actor["config"])
+        if config.get("snapshot_path") == "auto":
+            config["snapshot_path"] = str(run_reports_dir(settings) / f"{name.lower()}_snapshot.json")
+        actors.append(
+            ImportableActorConfig(
+                actor_path=actor["actor_path"],
+                config_path=actor["config_path"],
+                config=config,
+            ),
+        )
+    return actors
 
 
 # 构建所有启用的行情客户端。
@@ -136,6 +147,7 @@ def build_live_node(settings: dict[str, Any]) -> TradingNode:
         data_clients=data_clients,
         exec_clients=exec_clients,
         exec_engine=exec_engine_config(settings),
+        actors=build_actor_configs(settings),
     )
 
     node = TradingNode(config=trade_config)

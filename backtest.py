@@ -35,6 +35,7 @@ from nautilus_trader.model.objects import Quantity
 from nautilus_trader.persistence.catalog import ParquetDataCatalog
 
 from adapters.common import cache_config
+from utils.backtest_margin import MARGIN_POOL
 from utils.config_loader import ROOT
 from utils.config_loader import load_settings
 from utils.instrument_factory import InstrumentFactory
@@ -46,8 +47,8 @@ from utils.report_writer import run_reports_dir
 from utils.report_writer import write_backtest_result
 from utils.report_writer import write_trader_reports
 from utils.runtime_ids import claim_run
-from utils.strategy_factory import build_strategy
-from utils.strategy_factory import single_strategy
+from utils.strategy_factory import build_strategies
+from utils.strategy_factory import enabled_strategy_configs
 
 
 class BpsSlippageFillModel(FillModel):
@@ -105,6 +106,7 @@ class BpsSlippageFillModel(FillModel):
 
 # 为当前 set 创建一个新的 NT 回测引擎。
 def build_backtest_engine(settings: dict[str, Any]) -> BacktestEngine:
+    MARGIN_POOL.reset()
     engine = BacktestEngine(
         config=BacktestEngineConfig(
             cache=cache_config(settings),
@@ -119,8 +121,8 @@ def build_backtest_engine(settings: dict[str, Any]) -> BacktestEngine:
     add_venues(engine, settings)
     add_instruments(engine, factories)
     add_datasets(engine, settings, factories)
-    name = next(iter(settings["strategy"]))
-    engine.add_strategy(build_strategy(settings, name, "backtest"))
+    for strategy in build_strategies(settings, "backtest"):
+        engine.add_strategy(strategy)
     return engine
 
 
@@ -330,6 +332,7 @@ def write_reports(engine: BacktestEngine, result, settings: dict) -> dict[str, f
     payload = write_backtest_result(result)
     started = time.perf_counter()
     write_trader_reports(engine.trader, settings, "backtest")
+    MARGIN_POOL.write_denials(run_reports_dir(settings))
     summary_elapsed = print_backtest_summary(payload, settings)
     report_elapsed = time.perf_counter() - started
     return {"report_elapsed_sec": report_elapsed, "summary_elapsed_sec": summary_elapsed}
@@ -378,30 +381,43 @@ def main(config_name: str) -> dict[str, Any]:
     return run_batch(cases)
 
 
-# 回测配置只接受 grid_params/case_params，并在运行前展开成普通 strategy.params。
+# 每个策略独立展开参数，多个策略之间做笛卡尔积。
 def expand_batch_settings(settings: dict[str, Any]) -> list[dict[str, Any]]:
-    strategy = single_strategy(settings)
-    grid = strategy.get("grid_params") or {}
+    names = list(enabled_strategy_configs(settings))
+    if not names:
+        raise ValueError("at least one strategy must be enabled")
+    expanded = [strategy_param_cases(settings["strategy"][name]) for name in names]
+    return [multi_case_settings(settings, names, choices) for choices in itertools.product(*expanded)]
+
+
+def strategy_param_cases(strategy: dict[str, Any]) -> list[tuple[dict[str, Any], dict[str, Any]]]:
     case_params = strategy["case_params"]
     rows = case_param_rows(case_params)
-    combos = grid_param_combos(grid)
+    combos = grid_param_combos(strategy.get("grid_params") or {})
     cases = []
     for row in rows:
         for grid_values in combos:
-            cases.append(case_settings(settings, row, grid_values))
+            params = dict(row)
+            params.update(grid_values)
+            selected = selected_param_rows(grid_values, case_params, params)
+            cases.append((params, selected))
     return cases
 
 
-def case_settings(settings: dict[str, Any], base_params: dict[str, Any], grid_values: dict[str, Any]) -> dict[str, Any]:
+def multi_case_settings(
+    settings: dict[str, Any],
+    names: list[str],
+    choices: tuple[tuple[dict[str, Any], dict[str, Any]], ...],
+) -> dict[str, Any]:
     case = copy.deepcopy(settings)
-    strategy = single_strategy(case)
-    case_params = strategy["case_params"]
-    params = dict(base_params)
-    params.update(grid_values)
-    strategy["params"] = params
-    case["runtime"] = {**case.get("runtime", {}), "backtest_params": selected_param_rows(grid_values, case_params, params)}
-    strategy.pop("grid_params", None)
-    strategy.pop("case_params", None)
+    selected = {}
+    for name, (params, param_rows) in zip(names, choices):
+        strategy = case["strategy"][name]
+        strategy["params"] = params
+        strategy.pop("grid_params", None)
+        strategy.pop("case_params", None)
+        selected.update({f"{name}.{key}": value for key, value in param_rows.items()})
+    case["runtime"] = {**case.get("runtime", {}), "backtest_params": selected}
     return case
 
 

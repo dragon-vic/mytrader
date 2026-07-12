@@ -1,5 +1,6 @@
 strategy:
   bintest:
+    enabled: true
     module: bintest
     class: BintestStrategy
     config: BintestConfig

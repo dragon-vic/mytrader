@@ -26,18 +26,12 @@ from utils.arguments import EXTERNAL_COMMAND_DEFAULT_PORT
 
 
 BEIJING_TZ = timezone(timedelta(hours=8))
-SNAPSHOT_NAME = "pre_ipo_snapshot.json"
+ASSETS = ("ANTHROPIC", "OPENAI")
+SNAPSHOT_FILE = "pre_ipo_snapshot.json"
 PAGE_COUNT = 2
 REFRESH_SEC = 60.0
 NODE_CHECK_SEC = 1.0
 KEY_POLL_SEC = 0.1
-
-
-def snapshot_path(value: str) -> Path:
-    path = Path(value)
-    if path.is_dir() or path.suffix == "":
-        return path / SNAPSHOT_NAME
-    return path
 
 
 def load_snapshot(path: Path) -> dict:
@@ -46,9 +40,16 @@ def load_snapshot(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def load_snapshots(report_dir: Path) -> tuple[dict[str, dict], dict]:
+    snapshot = load_snapshot(report_dir / SNAPSHOT_FILE)
+    strategies = snapshot.get("strategies") or {}
+    return {asset: strategies.get(asset) or {} for asset in ASSETS}, snapshot
+
+
 # 向 external_command data client 发送一条控制命令。
 def send_command(command: str) -> str:
     payload = {
+        "target": "ALL",
         "command": command,
         "reason": "monitor",
         "source": "pre_ipo_monitor",
@@ -64,7 +65,7 @@ def send_command(command: str) -> str:
 
 
 def status_table(payload: dict, session_name: str | None, notice: str) -> Table:
-    table = Table(title="状态", expand=True)
+    table = Table(title=f"{payload.get('asset', '-')} 状态", expand=True)
     table.add_column("项目", justify="left", no_wrap=True)
     table.add_column("值", justify="left")
     table.add_row("策略", str(payload.get("strategy", "-")))
@@ -79,7 +80,7 @@ def status_table(payload: dict, session_name: str | None, notice: str) -> Table:
 
 
 def edge_table(payload: dict) -> Table:
-    table = Table(title="Edge", expand=True)
+    table = Table(title=f"{payload.get('asset', '-')} Edge", expand=True)
     table.add_column("指标", justify="left", no_wrap=True)
     table.add_column("值", justify="right", no_wrap=True)
     edge = payload.get("edge") or {}
@@ -105,6 +106,7 @@ def accounts_table(payload: dict) -> Table:
         ("free", accounts, "free_usdt"),
         ("locked", accounts, "locked_usdt"),
         ("strategy lock", risk, "locked_usdt"),
+        ("reserved", risk, "reserved_usdt"),
         ("available", risk, "available_usdt"),
         ("unrealized", risk, "unrealized_usdt"),
         ("risk", risk, "risk_rate"),
@@ -115,7 +117,7 @@ def accounts_table(payload: dict) -> Table:
 
 
 def quotes_table(payload: dict) -> Table:
-    table = Table(title="Quote", expand=True)
+    table = Table(title=f"{payload.get('asset', '-')} Quote", expand=True)
     for column in ("venue", "bid", "ask", "bid_size", "ask_size", "last 10m count"):
         table.add_column(column, justify="right" if column != "venue" else "left", no_wrap=True)
     quotes = payload.get("quotes") or {}
@@ -138,7 +140,7 @@ def quotes_table(payload: dict) -> Table:
 
 
 def positions_table(payload: dict) -> Table:
-    table = Table(title="持仓", expand=True)
+    table = Table(title=f"{payload.get('asset', '-')} 持仓", expand=True)
     for column in ("venue", "instrument", "qty", "avg_px", "realized_usdt", "unrealized_usdt", "fee_usdt"):
         table.add_column(column, justify="right" if column not in {"venue", "instrument"} else "left", no_wrap=True)
     positions = payload.get("positions") or {}
@@ -175,7 +177,7 @@ def event_latency_ms(row: dict, venue: str) -> str:
     return f"{(int(end) - int(start)) / 1_000_000:.2f}"
 
 
-def actions_table(payload: dict) -> Table:
+def actions_table(payloads: dict[str, dict]) -> Table:
     table = Table(title="行动历史", expand=True)
     columns = (
         "time",
@@ -193,7 +195,11 @@ def actions_table(payload: dict) -> Table:
     left_columns = {"time", "asset", "edge_side", "status"}
     for column in columns:
         table.add_column(column, justify="left" if column in left_columns else "right", no_wrap=True)
-    rows = payload.get("actions") or []
+    rows = [row for payload in payloads.values() for row in (payload.get("actions") or [])]
+    rows.sort(
+        key=lambda row: int((row.get("metadata") or {}).get("signal_event_ns", 0)),
+        reverse=True,
+    )
     if not rows:
         table.add_row(*("-" for _ in columns))
         return table
@@ -210,23 +216,31 @@ def actions_table(payload: dict) -> Table:
     return table
 
 
-def build_view(payload: dict, session_name: str | None, notice: str, page: int) -> Group:
+def build_view(
+    payloads: dict[str, dict],
+    coordinator: dict,
+    session_name: str | None,
+    notice: str,
+    page: int,
+) -> Group:
     keys = "↑/↓翻页 | r减仓 | n正常 | s停止 | Esc退出"
     header = Panel.fit(f"PRE IPO Monitor | Page {page + 1}/{PAGE_COUNT} | {keys}", border_style="cyan")
     if page == 1:
         return Group(
             header,
-            actions_table(payload),
+            actions_table(payloads),
         )
+    strategy_rows = list(payloads.values())
     return Group(
         header,
         Columns(
-            [status_table(payload, session_name, notice), edge_table(payload), accounts_table(payload)],
+            [item for payload in strategy_rows for item in (status_table(payload, session_name, notice), edge_table(payload))],
             equal=True,
             expand=True,
         ),
-        quotes_table(payload),
-        positions_table(payload),
+        accounts_table(coordinator),
+        Columns([quotes_table(payload) for payload in strategy_rows], equal=True, expand=True),
+        Columns([positions_table(payload) for payload in strategy_rows], equal=True, expand=True),
     )
 
 
@@ -296,11 +310,12 @@ def node_running(session_name: str | None) -> bool:
     return result.returncode == 0
 
 
-def main(path: Path, session_name: str | None = None) -> None:
+def main(report_dir: Path, session_name: str | None = None) -> None:
     console = Console()
     notice = ""
     page = 0
-    payload = {}
+    payloads = {asset: {} for asset in ASSETS}
+    coordinator = {}
     last_refresh = 0.0
     last_node_check = 0.0
     dirty = True
@@ -309,11 +324,11 @@ def main(path: Path, session_name: str | None = None) -> None:
             while True:
                 now = time.monotonic()
                 if now - last_refresh >= REFRESH_SEC:
-                    payload = load_snapshot(path)
+                    payloads, coordinator = load_snapshots(report_dir)
                     last_refresh = now
                     dirty = True
                 if dirty:
-                    live.update(build_view(payload, session_name, notice, page), refresh=True)
+                    live.update(build_view(payloads, coordinator, session_name, notice, page), refresh=True)
                     dirty = False
                 if now - last_node_check >= NODE_CHECK_SEC:
                     if not node_running(session_name):
@@ -344,4 +359,4 @@ def main(path: Path, session_name: str | None = None) -> None:
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         raise SystemExit("Usage: python monitor.py REPORT_DIR_OR_SNAPSHOT [TMUX_SESSION]")
-    main(snapshot_path(sys.argv[1]), sys.argv[2] if len(sys.argv) > 2 else None)
+    main(Path(sys.argv[1]), sys.argv[2] if len(sys.argv) > 2 else None)

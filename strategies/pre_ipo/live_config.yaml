@@ -1,10 +1,16 @@
 strategy:
-  ANTH:
-    module: anthropic_arb
-    class: AnthropicArbStrategy
-    config: AnthropicArbConfig
+  ANTHROPIC:
+    enabled: true
+    module: pre_ipo_arb
+    class: PreIpoArbStrategy
+    config: PreIpoArbConfig
     params:
-      instruments: enabled
+      asset: ANTHROPIC
+      instruments:
+        - ANTHROPICUSDT-PERP.BINANCE
+        - ANTHROPIC-USDT-SWAP.OKX
+      # 启动 reconciliation 将两个 instrument 的已有订单和仓位归当前策略；startup 会严格检查后接管。
+      external_order_claims: true
       # OKX 2026-06-30 对 ANTHROPIC 做 rebase：价格 /10，数量 *10。
       okx_multiplier: 10
       # window_minutes 同时控制启动时读取 collector 的范围，以及 edge 均值/std 的时间窗口；300 = 5h。
@@ -17,17 +23,50 @@ strategy:
       std_mult: 3.0
       short_min_bps: 200
       long_max_bps: 520
-      max_position: 2
-      qty: 0.05
+      qty: 0.1
       # 仅用于开仓保证金检查和风控 lock 估算；不会修改交易所实际杠杆。
       margin_leverage: 5
       margin_buffer: 1.1
 
-      # live 运行时 snapshot 写到当前 report 目录，monitor/start 会读取这个文件显示 rich 表格。
-      snapshot_path: auto
+  OPENAI:
+    enabled: true
+    module: pre_ipo_arb
+    class: PreIpoArbStrategy
+    config: PreIpoArbConfig
+    params:
+      asset: OPENAI
+      instruments:
+        - OPENAIUSDT-PERP.BINANCE
+        - OPENAI-USDT-SWAP.OKX
+      external_order_claims: true
+      # OKX 的 OPENAI 价格是 Binance 的约 1/10，数量对应放大 10 倍。
+      okx_multiplier: 10
+      window_minutes: 300
+
+      entry_bps: 55
+      exit_bps: -20
+      std_mult: 3.0
+      short_min_bps: 150
+      long_max_bps: 400
+      # OPENAI 先用小仓位并行采集实盘表现。
+      qty: 0.1
+      margin_leverage: 5
+      margin_buffer: 1.1
 
 
 node:
+  actors:
+    PRE_IPO:
+      actor_path: strategies.pre_ipo.coordinator:PreIpoCoordinatorActor
+      config_path: strategies.pre_ipo.coordinator:PreIpoCoordinatorConfig
+      config:
+        assets: [ANTHROPIC, OPENAI]
+        # 两个策略共享；分别限制每个 venue 的策略估算保证金占用。
+        max_lock: 500
+        reduce_risk_rate: "0.70"
+        stop_risk_rate: "0.85"
+        snapshot_path: auto
+
   logging:
     component_levels:
       Portfolio: WARNING
@@ -44,11 +83,13 @@ node:
         enabled: true
         markets:
           - ANTHROPIC
+          - OPENAI
 
       okx_swap:
         enabled: true
         markets:
           - ANTHROPIC
+          - OPENAI
 
       kraken_futures:
         enabled: false
@@ -86,11 +127,13 @@ node:
         enabled: true
         markets:
           - ANTHROPIC
+          - OPENAI
 
       okx_swap:
         enabled: true
         markets:
           - ANTHROPIC
+          - OPENAI
 
       kraken_futures:
         enabled: false

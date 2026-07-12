@@ -39,6 +39,9 @@ backtest:
     taker_fee: "0.0005"
 
 node:
+  # NT Actor 声明；策略 set 可在这里增加具名 Actor。
+  actors: {}
+
   # node 本身只保留身份名；运行时会追加 node 序号生成 trader_id。
   name: trader
 

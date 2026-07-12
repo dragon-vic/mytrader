@@ -1,5 +1,6 @@
 strategy:
-  pre_ipo_backtest:
+  anth:
+    enabled: true
     module: pre_ipo_backtest
     class: PreIpoQuoteBacktestStrategy
     config: PreIpoQuoteBacktestConfig
@@ -9,6 +10,8 @@ strategy:
       okx_id: ANTHROPIC-USDT-SWAP.OKX
       feature_path: strategies/pre_ipo/backtest_data/anth_features_all.parquet
       qty: 0.1
+      margin_leverage: 5
+      margin_buffer: 1.1
       window_minutes: [300]
       entry_bps: [45,50,55]
       exit_bps: [-20]
@@ -23,8 +26,36 @@ strategy:
       min_hold_sec: 0
       signal_delay_ms: 0
       # 0 表示从 feature 数据集第一条开始；也可以写 live 名字里的 20260709181958，按北京时间精确到秒开始。
-      start_time: 20260709181958
+      start_time: 0
       # 0 表示自动用 feature 数据集结束前 10 秒。
+      end_ns: 0
+
+  openai:
+    enabled: true
+    module: pre_ipo_backtest
+    class: PreIpoQuoteBacktestStrategy
+    config: PreIpoQuoteBacktestConfig
+
+    case_params:
+      binance_id: OPENAIUSDT-PERP.BINANCE
+      okx_id: OPENAI-USDT-SWAP.OKX
+      feature_path: strategies/pre_ipo/backtest_data/openai_features_all.parquet
+      qty: 0.1
+      margin_leverage: 5
+      margin_buffer: 1.1
+      window_minutes: [300]
+      entry_bps: [45,50,55]
+      exit_bps: [-20]
+      std_mult: [3.0]
+
+      capture_bps: 999
+      max_position: 4
+      short_min_bps: 200
+      long_max_bps: 520
+
+      min_hold_sec: 0
+      signal_delay_ms: 0
+      start_time: 0
       end_ns: 0
 
 
@@ -32,7 +63,7 @@ backtest:
   max_workers: 3
   venues:
     - client: binance_futures
-      starting_balance: "10000 USDT"
+      starting_balance: "2000 USDT"
       account_type: MARGIN
       oms_type: NETTING
       default_leverage: "5"
@@ -47,7 +78,7 @@ backtest:
         update_latency_ms: 0
         cancel_latency_ms: 0
     - client: okx_swap
-      starting_balance: "10000 USDT"
+      starting_balance: "2000 USDT"
       account_type: MARGIN
       oms_type: NETTING
       default_leverage: "5"
@@ -64,6 +95,8 @@ backtest:
   datasets:
     - type: quote_tick_objects
       path: strategies/pre_ipo/backtest_data/anth_quote_ticks_all.pkl
+    - type: quote_tick_objects
+      path: strategies/pre_ipo/backtest_data/openai_quote_ticks_all.pkl
   logging:
     log_level: ERROR
     bypass: true

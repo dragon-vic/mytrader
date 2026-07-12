@@ -5,6 +5,8 @@ from decimal import Decimal
 from typing import Any
 from typing import get_type_hints
 
+from nautilus_trader.model.identifiers import InstrumentId
+
 from utils.config_loader import backtest_client_config
 from utils.config_loader import proxy_url
 from utils.instrument_factory import InstrumentFactory
@@ -19,7 +21,7 @@ def decimal_param(value: object) -> Decimal:
 
 # 根据 set 里的策略类配置动态构建策略实例。
 def single_strategy(settings: dict[str, Any]) -> dict[str, Any]:
-    strategies = settings["strategy"]
+    strategies = enabled_strategy_configs(settings)
     if len(strategies) != 1:
         raise ValueError(f"backtest requires exactly one strategy, got: {','.join(strategies)}")
     return next(iter(strategies.values()))
@@ -30,13 +32,24 @@ def build_strategy(settings: dict[str, Any], name: str, run_type: str = "backtes
     strategy = settings["strategy"][name]
     module = importlib.import_module(strategy["module"])
     config_cls = getattr(module, strategy["config"])
-    params = strategy_params(settings, strategy, config_cls, run_type)
+    params = strategy_params(settings, name, strategy, config_cls, run_type)
     config = config_cls(**params)
     return getattr(module, strategy["class"])(config)
 
 
 def build_strategies(settings: dict[str, Any], run_type: str = "live"):
-    return [build_strategy(settings, name, run_type) for name in settings["strategy"]]
+    strategies = enabled_strategy_configs(settings)
+    if not strategies:
+        raise ValueError("at least one strategy must be enabled")
+    return [build_strategy(settings, name, run_type) for name in strategies]
+
+
+def enabled_strategy_configs(settings: dict[str, Any]) -> dict[str, Any]:
+    return {
+        name: strategy
+        for name, strategy in settings["strategy"].items()
+        if bool(strategy["enabled"])
+    }
 
 
 def strategy_instruments(settings: dict[str, Any], run_type: str, params: dict[str, Any]) -> InstrumentFactory:
@@ -66,12 +79,16 @@ def enabled_instruments(settings: dict[str, Any]) -> list[str]:
 # 按策略配置字段自动补充运行类型、报告路径和全局代理。
 def strategy_params(
     settings: dict[str, Any],
+    name: str,
     strategy: dict[str, Any],
     config_cls,
     run_type: str,
 ) -> dict[str, Any]:
     params = dict(strategy.get("params", {}))
     fields = get_type_hints(config_cls)
+    if len(enabled_strategy_configs(settings)) > 1 and "strategy_id" in fields and "strategy_id" not in params:
+        strategy_name = name.upper().replace("_", "-")
+        params["strategy_id"] = f"{strategy_name}-001"
     if "use_hyphens_in_client_order_ids" in fields:
         params["use_hyphens_in_client_order_ids"] = False
     if "instruments" in fields and params.get("instruments") == "enabled":
@@ -88,15 +105,12 @@ def strategy_params(
         if fields.get(key) is Decimal:
             params[key] = decimal_param(value)
     if params.get("external_order_claims") is True:
-        instruments = strategy_instruments(settings, run_type, params)
         params["external_order_claims"] = [
-            instruments.instrument_id(market)
-            for market in instruments.markets
+            InstrumentId.from_str(value)
+            for value in params["instruments"]
         ]
     if "event_log_path" in fields and params.get("event_log_path", "auto") == "auto":
         params["event_log_path"] = str(run_reports_dir(settings) / "strategy_events.csv")
-    if "snapshot_path" in fields and params.get("snapshot_path", "auto") == "auto":
-        params["snapshot_path"] = str(run_reports_dir(settings) / f"{settings['project']['config_name']}_snapshot.json")
     if "tick_log_path" in fields and params.get("tick_log_path", "auto") == "auto":
         params["tick_log_path"] = str(run_reports_dir(settings) / "poly_ticks.parquet")
     if "poly_trade_path" in fields and params.get("poly_trade_path", "auto") == "auto":

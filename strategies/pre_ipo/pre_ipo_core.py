@@ -3,8 +3,15 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 from dataclasses import field
+from datetime import datetime
+from datetime import timedelta
+from datetime import timezone
 from decimal import Decimal
+from pathlib import Path
 
+import pyarrow as pa
+import pyarrow.compute as pc
+import pyarrow.dataset as ds
 from nautilus_trader.model.data import QuoteTick
 from nautilus_trader.model.enums import OrderSide
 from nautilus_trader.model.identifiers import InstrumentId
@@ -12,7 +19,8 @@ from nautilus_trader.model.identifiers import InstrumentId
 
 BPS = Decimal("10000")
 MINUTE_NS = 60_000_000_000
-ASSET = "ANTHROPIC"
+BEIJING_TZ = timezone(timedelta(hours=8))
+COLLECTOR_COLUMNS = ("ts_local_ns", "ts_exchange_ms", "venue", "symbol", "bid", "ask", "bid_size", "ask_size")
 BINANCE_EXIT_SLIPPAGE_BPS = Decimal("4")
 OKX_EXIT_SLIPPAGE_BPS = Decimal("10")
 EXIT_FEE_BPS = Decimal("5")
@@ -23,6 +31,81 @@ STATE_PENDING = "pending"
 STATE_LONG = "long"
 STATE_SHORT = "short"
 STATE_UNBALANCE = "unbalance"
+
+
+@dataclass(frozen=True)
+class VenueMetrics:
+    instrument_id: InstrumentId
+    qty: Decimal
+    avg_px: Decimal | None
+    realized_usdt: Decimal
+    unrealized_usdt: Decimal | None
+    fee_usdt: Decimal
+    locked_usdt: Decimal | None
+
+
+@dataclass(frozen=True)
+class StrategyMetrics:
+    venues: dict[str, VenueMetrics]
+    realized_usdt: Decimal
+    unrealized_usdt: Decimal | None
+    fee_usdt: Decimal
+
+
+@dataclass(frozen=True)
+class WarmupLoader:
+    base_dir: Path
+    asset: str
+
+    @staticmethod
+    def event_ns(row: dict[str, object]) -> int:
+        return int(row["ts_exchange_ms"]) * 1_000_000
+
+    def _hour_keys(self, start_ns: int, end_ns: int) -> list[str]:
+        start = datetime.fromtimestamp(start_ns / 1_000_000_000, BEIJING_TZ).replace(
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+        end = datetime.fromtimestamp(end_ns / 1_000_000_000, BEIJING_TZ).replace(
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+        keys = []
+        current = start
+        while current <= end:
+            keys.append(current.strftime("%Y%m%d%H"))
+            current += timedelta(hours=1)
+        return keys
+
+    # 从 collector 的 merged/raw 文件读取当前 asset 的启动窗口。
+    def load(self, start_ns: int, end_ns: int) -> list[dict[str, object]]:
+        merged_dir = self.base_dir / "quote_merged"
+        raw_dir = self.base_dir / "quote_raw"
+        paths: list[Path] = []
+        for key in self._hour_keys(start_ns, end_ns):
+            merged = merged_dir / self.asset / f"bidask1-{key}.parquet"
+            if merged.exists():
+                paths.append(merged)
+            hour_dir = raw_dir / self.asset / key
+            if hour_dir.exists():
+                paths.extend(sorted(hour_dir.glob("*.parquet")))
+        paths = sorted(set(paths), key=str)
+        if not paths:
+            raise RuntimeError(f"warmup_files_missing asset={self.asset}")
+
+        dataset = ds.dataset([str(path) for path in paths], format="parquet")
+        filt = (
+            (pc.field("ts_local_ns") >= pa.scalar(start_ns, pa.int64()))
+            & (pc.field("ts_local_ns") <= pa.scalar(end_ns, pa.int64()))
+            & (pc.field("ts_exchange_ms") > pa.scalar(0, pa.int64()))
+            & pc.field("symbol").isin([self.asset])
+        )
+        rows = dataset.to_table(columns=list(COLLECTOR_COLUMNS), filter=filt).to_pylist()
+        if not rows:
+            raise RuntimeError(f"warmup_rows_missing asset={self.asset}")
+        return sorted(rows, key=self.event_ns)
 
 
 @dataclass
@@ -70,6 +153,7 @@ class PendingPair:
     before_inventory: Decimal
     after_inventory: Decimal
     okx_price_multiplier: Decimal
+    reservation_id: str | None = None
     repairs: dict[str, PendingLeg] = field(default_factory=dict)
 
     # 记录一笔订单的部分或完整成交。
@@ -187,6 +271,13 @@ class PnlLedger:
     avg_px: Decimal | None = None
     realized: Decimal = Decimal("0")
     fee: Decimal = Decimal("0")
+
+    # 从策略启动时接管的交易所仓位初始化会计基准。
+    def seed_position(self, signed_qty: Decimal, avg_px: Decimal) -> None:
+        self.signed_qty = signed_qty
+        self.avg_px = avg_px
+        self.realized = Decimal("0")
+        self.fee = Decimal("0")
 
     # 只用本策略 fill 累计已实现盈亏和手续费。
     def record_fill(self, side: OrderSide, qty: Decimal, px: Decimal, fee: Decimal) -> None:

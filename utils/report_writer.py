@@ -18,6 +18,7 @@ from utils.arguments import POSITIONS_FILE
 from utils.arguments import REPORT_COLUMNS
 from utils.arguments import REPORT_FILES
 from utils.arguments import SUMMARY_FILE
+from utils.backtest_margin import LOCAL_DENIALS_FILE
 from utils.funding_fees import add_funding_income
 from utils.report_labels import to_chinese_columns
 
@@ -683,6 +684,7 @@ def instrument_stats_rows(output_dir: Path, elapsed_days: float) -> list[tuple[s
 # 从订单和成交表组装执行统计行。
 def order_stats_rows(output_dir: Path, elapsed_days: float = 0.0) -> list[tuple[str, str]]:
     orders = read_report_csv(output_dir, "orders.csv")
+    local_denials = local_denial_count(output_dir)
     if orders.empty:
         return [
             ("订单总数", "0"),
@@ -692,7 +694,7 @@ def order_stats_rows(output_dir: Path, elapsed_days: float = 0.0) -> list[tuple[
             ("有成交订单数", "0"),
             ("已完成订单数", "0"),
             ("已取消订单数", "0"),
-            ("本地拒单数", "0"),
+            ("本地拒单数", format_int(local_denials)),
             ("交易所拒单数", "0"),
         ]
     filled_qty = pd.to_numeric(orders["已成交数量"], errors="coerce").fillna(0)
@@ -704,9 +706,16 @@ def order_stats_rows(output_dir: Path, elapsed_days: float = 0.0) -> list[tuple[
         ("有成交订单数", format_int((filled_qty > 0).sum())),
         ("已完成订单数", format_int((orders["订单状态"] == "FILLED").sum())),
         ("已取消订单数", format_int((orders["订单状态"] == "CANCELED").sum())),
-        ("本地拒单数", format_int((orders["订单状态"] == "DENIED").sum())),
+        ("本地拒单数", format_int((orders["订单状态"] == "DENIED").sum() + local_denials)),
         ("交易所拒单数", format_int((orders["订单状态"] == "REJECTED").sum())),
     ]
+
+
+def local_denial_count(output_dir: Path) -> int:
+    path = output_dir / LOCAL_DENIALS_FILE
+    if not path.exists():
+        return 0
+    return len(pd.read_csv(path))
 
 
 # 用持仓表估算运行覆盖天数。

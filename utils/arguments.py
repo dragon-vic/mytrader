@@ -10,7 +10,7 @@ MODE_OPTIONS = [
 RUN_MODES = ("backtest", "testnet", "live")
 
 # 项目默认入口参数。
-DEFAULT_CONFIG_NAME = "max_funding"
+DEFAULT_CONFIG_NAME = "pre_ipo"
 
 # NT msgbus topic。
 NODE_STOP_TOPIC = "controls.node.stop"

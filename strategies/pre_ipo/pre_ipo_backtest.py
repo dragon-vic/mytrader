@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import pyarrow.parquet as pq
 from nautilus_trader.config import StrategyConfig
+from nautilus_trader.model.currencies import USDT
 from nautilus_trader.model.data import QuoteTick
 from nautilus_trader.model.enums import OrderSide
 from nautilus_trader.model.enums import TimeInForce
@@ -19,6 +20,7 @@ from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.trading.strategy import Strategy
 
 from utils.arguments import NODE_STOP_TOPIC
+from utils.backtest_margin import MARGIN_POOL
 
 
 LONG = "long"
@@ -181,6 +183,8 @@ class PreIpoQuoteBacktestConfig(StrategyConfig, frozen=True):
     feature_path: str
     qty: Decimal
     max_position: Decimal
+    margin_leverage: Decimal
+    margin_buffer: Decimal
     capture_bps: float
     std_mult: float
     entry_bps: float
@@ -206,6 +210,10 @@ class PreIpoQuoteBacktestStrategy(Strategy):
         self.max_position = decimal_param(config.max_position)
         if self.max_position <= 0:
             raise RuntimeError("max_position must be positive")
+        self.margin_leverage = decimal_param(config.margin_leverage)
+        self.margin_buffer = decimal_param(config.margin_buffer)
+        if self.margin_leverage <= 0 or self.margin_buffer < 1:
+            raise RuntimeError("margin_leverage must be positive and margin_buffer must be >= 1")
         self.capture_bps = float_param(config.capture_bps)
         self.std_mult = float_param(config.std_mult)
         self.short_entry_bps = float_param(config.entry_bps)
@@ -231,6 +239,7 @@ class PreIpoQuoteBacktestStrategy(Strategy):
         self.last_state: tuple[float, float, float, float, float, float] | None = None
         self.entry_ns = 0
         self.entry_edge = 0.0
+        self.quotes: dict[InstrumentId, QuoteTick] = {}
 
     def on_start(self) -> None:
         self.subscribe_quote_ticks(self.binance_id)
@@ -244,6 +253,7 @@ class PreIpoQuoteBacktestStrategy(Strategy):
         )
 
     def on_quote_tick(self, tick: QuoteTick) -> None:
+        self.quotes[tick.instrument_id] = tick
         state = self.features.next(tick, self.window_minutes)
         self.last_state = state
         if self.halted:
@@ -280,6 +290,7 @@ class PreIpoQuoteBacktestStrategy(Strategy):
 
     def on_order_denied(self, event: OrderDenied) -> None:
         pending = self.pending
+        MARGIN_POOL.release(str(self.id))
         self.pending = None
         self.halted = True
         self._cancel_signal()
@@ -291,6 +302,7 @@ class PreIpoQuoteBacktestStrategy(Strategy):
         self.log.warning(message)
 
     def on_stop(self) -> None:
+        MARGIN_POOL.release(str(self.id))
         self.unsubscribe_quote_ticks(self.binance_id)
         self.unsubscribe_quote_ticks(self.okx_id)
 
@@ -299,6 +311,7 @@ class PreIpoQuoteBacktestStrategy(Strategy):
         if pending is None:
             return False
         if pending.target == "flat":
+            MARGIN_POOL.commit_reduce(str(self.id), self.position_qty, pending.qty)
             self.position_qty = max(self.position_qty - pending.qty, Decimal("0"))
             if self.position_qty <= 0:
                 self.side = "flat"
@@ -311,6 +324,7 @@ class PreIpoQuoteBacktestStrategy(Strategy):
         if new_qty <= 0:
             raise RuntimeError("pending open qty must be positive")
         entry_edge = self._pending_entry_edge(pending)
+        MARGIN_POOL.commit_open(str(self.id), self._filled_margins(pending))
         if previous_qty > 0:
             self.entry_edge = (
                 self.entry_edge * float(previous_qty) + entry_edge * float(pending.qty)
@@ -321,6 +335,13 @@ class PreIpoQuoteBacktestStrategy(Strategy):
         self.position_qty = new_qty
         self.side = pending.target
         return False
+
+    def _filled_margins(self, pending: Pending) -> dict[str, Decimal]:
+        margins = {}
+        for instrument_id in (self.binance_id, self.okx_id):
+            _qty, value = self._filled_totals(pending, instrument_id)
+            margins[str(instrument_id.venue).upper()] = value / self.margin_leverage
+        return margins
 
     # 开仓 edge 使用两腿实际成交均价；拿不到成交价时退回信号 edge。
     def _pending_entry_edge(self, pending: Pending) -> float:
@@ -353,6 +374,8 @@ class PreIpoQuoteBacktestStrategy(Strategy):
         qty = min(self.qty, self.max_position - self.position_qty)
         if qty <= 0:
             return
+        if not self._reserve_margin(target, qty, ts_ns):
+            return
         pending = Pending(target=target, qty=qty, edge=edge, ts_ns=ts_ns)
         self.pending = pending
         if target == SHORT:
@@ -363,6 +386,30 @@ class PreIpoQuoteBacktestStrategy(Strategy):
             self._submit(self.binance_id, OrderSide.SELL, qty)
             if self.pending is pending:
                 self._submit(self.okx_id, OrderSide.BUY, qty)
+
+    def _reserve_margin(self, target: str, qty: Decimal, ts_ns: int) -> bool:
+        legs = (
+            ((self.binance_id, OrderSide.BUY), (self.okx_id, OrderSide.SELL))
+            if target == SHORT
+            else ((self.binance_id, OrderSide.SELL), (self.okx_id, OrderSide.BUY))
+        )
+        required = {}
+        totals = {}
+        for instrument_id, side in legs:
+            quote = self.quotes[instrument_id]
+            price = quote.ask_price.as_decimal() if side == OrderSide.BUY else quote.bid_price.as_decimal()
+            venue = str(instrument_id.venue).upper()
+            required[venue] = price * qty / self.margin_leverage * self.margin_buffer
+            account = self._account_for_venue(venue)
+            # NT backtest locked 使用维持保证金率；开仓额度只取账户权益，保证金由共享池按实际杠杆计算。
+            total = account.balance_total(USDT)
+            if total is None:
+                raise RuntimeError(f"missing USDT balance for {venue}")
+            totals[venue] = total.as_decimal()
+        return MARGIN_POOL.reserve(str(self.id), required, totals, ts_ns)
+
+    def _account_for_venue(self, venue: str):
+        return next(account for account in self.cache.accounts() if str(account.id).upper().startswith(venue))
 
     def _candidate(
         self,
