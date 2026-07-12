@@ -48,7 +48,6 @@ strategy:
       std_mult: 3.0
       short_min_bps: 150
       long_max_bps: 400
-      # OPENAI 先用小仓位并行采集实盘表现。
       qty: 0.1
       margin_leverage: 5
       margin_buffer: 1.1
