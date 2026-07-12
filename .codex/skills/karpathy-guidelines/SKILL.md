@@ -32,6 +32,7 @@ source: https://github.com/forrestchang/andrej-karpathy-skills
 - 只有在逻辑被多处复用，或确实能让一段密集代码更清楚时，才抽取辅助函数。一次性逻辑优先保持直接、局部、浅层。
 - 除非用户明确要求，不要为多种用户输入格式添加宽泛的 fallback adapter。优先使用一种短小、文档化的配置格式，而不是接受许多等价写法。
 - Binance U 本位合约账户事件需要使用精确 topic：`events.account.BINANCE-USDT_FUTURES-master`。不要把它当成只有资金费率信号；订单活动也可能发布账户事件。
+- OKX 的 client order ID 不能包含 `-`。构建 `OrderFactory` 时必须关闭 hyphen，避免订单被交易所拒绝。
 - 不要创建会混淆 IDE 索引的重复文件夹名。仓库根目录已经是 `nt_quant`，Python 包不能也命名为 `nt_quant`。
 - 当前仍处于早期阶段，避免创建 package 文件夹。面向用户的入口脚本放在仓库根目录，策略文件直接放在仓库根目录的 `strategies/` 目录下。
 - 本项目不要使用 argparse 任务分发器。当前入口脚本是 `fetch_data.py`、`backtest.py` 和 `live.py`。
