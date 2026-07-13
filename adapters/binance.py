@@ -67,6 +67,20 @@ def futures_margin_types(cfg: dict[str, Any]) -> dict[BinanceSymbol, BinanceFutu
     }
 
 
+# 从 set 配置为每个 Binance futures symbol 设置 NT 原生初始杠杆。
+def futures_leverages(cfg: dict[str, Any]) -> dict[BinanceSymbol, int] | None:
+    leverage = cfg.get("leverage")
+    if leverage is None or cfg["markets_all"]:
+        return None
+    value = int(leverage)
+    if value <= 0:
+        raise ValueError("binance futures leverage must be positive")
+    return {
+        BinanceSymbol(market["raw_symbol"]): value
+        for market in cfg["markets"]
+    }
+
+
 def routing(cfg: dict[str, Any]) -> RoutingConfig:
     return RoutingConfig(default=True, venues=frozenset({Venue(cfg["venue"])}))
 
@@ -98,6 +112,7 @@ def build_exec_client(settings: dict[str, Any], cfg: dict[str, Any]):
             account_type=getattr(BinanceAccountType, cfg["account_type"]),
             environment=environment(settings),
             proxy_url=proxy_url(settings),
+            futures_leverages=futures_leverages(cfg),
             futures_margin_types=futures_margin_types(cfg),
             instrument_provider=instrument_provider(cfg),
             routing=routing(cfg),

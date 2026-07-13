@@ -1,0 +1,48 @@
+strategy:
+  sk_adr_arb:
+    enabled: true
+    module: sk_adr_arb
+    class: SkAdrArbStrategy
+    config: SkAdrArbConfig
+    params:
+      instrument_client: binance_futures
+      sk_instrument: SKHYNIXUSDT-PERP.BINANCE
+      adr_instrument: SKHYUSDT-PERP.BINANCE
+      leverage: 5
+      max_leg_notional: 2500
+      tier_leg_notional: 1500
+      tier_one_premium: 0.25
+      tier_two_premium: 0.30
+      close_premium: 0.03
+      close_leg_notional: 200
+      rebalance_threshold: 50
+      max_imbalance_ratio: 0.05
+      retry_delay_sec: 10
+      price_check_interval_sec: 1
+      max_mark_age_sec: 5
+      telegram_notify_step: 0.01
+
+node:
+  logging:
+    strategy_log_level: INFO
+
+  data:
+    clients:
+      binance_futures:
+        enabled: true
+        markets:
+          - SKHYNIX/USDT
+          - SKHY/USDT
+
+  exec:
+    engine:
+      reconciliation_scope: configured_markets
+
+    clients:
+      binance_futures:
+        enabled: true
+        markets:
+          - SKHYNIX/USDT
+          - SKHY/USDT
+        margin_type: CROSS
+        leverage: 5
