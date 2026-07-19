@@ -209,13 +209,6 @@ node:
           # 跳过不想加载的 IB secType，例如 [WAR, IOPT]。
           filter_sec_types: []
 
-      external_signal:
-        enabled: false
-        adapter: external_signal
-        client_id: EXTERNAL_SIGNAL
-        host: 127.0.0.1
-        port: 9001
-
       external_command:
         enabled: false
         adapter: external_command

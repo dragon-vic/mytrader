@@ -1,0 +1,61 @@
+strategy:
+  framework_test:
+    enabled: true
+    strategy_path: strategies.framework_test.framework_test:FrameworkTestStrategy
+    config_path: strategies.framework_test.framework_test:FrameworkTestConfig
+    config:
+      order_id_tag: FWTEST
+      instrument_ids:
+        - DOGEUSDT-PERP.BINANCE
+        - DOGE-USDT-SWAP.OKX
+      bar_types:
+        - DOGEUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL
+        - DOGE-USDT-SWAP.OKX-1-SECOND-LAST-INTERNAL
+      data_clients:
+        DOGEUSDT-PERP.BINANCE: BINANCE_USDT_FUTURES
+        DOGE-USDT-SWAP.OKX: OKX_SWAP
+      round_trips:
+        - instrument_id: DOGEUSDT-PERP.BINANCE
+          qty: 100
+        - instrument_id: DOGE-USDT-SWAP.OKX
+          qty: 0.02
+      run_seconds: 90
+
+node:
+  actors:
+    FRAMEWORK_TEST:
+      actor_path: strategies.framework_test.framework_test:FrameworkTestActor
+      config_path: strategies.framework_test.framework_test:FrameworkTestActorConfig
+      config: {}
+      artifacts:
+        status_path: framework_test_status.json
+
+  logging:
+    strategy_log_level: INFO
+
+  data:
+    clients:
+      binance_futures:
+        enabled: true
+        markets: [DOGE/USDT]
+
+      okx_swap:
+        enabled: true
+        markets: [DOGE/USDT]
+
+      external_command:
+        enabled: true
+
+  exec:
+    engine:
+      reconciliation: true
+      reconciliation_scope: null
+
+    clients:
+      okx_swap:
+        enabled: true
+        markets: [DOGE/USDT]
+
+      binance_futures:
+        enabled: true
+        markets: [DOGE/USDT]
