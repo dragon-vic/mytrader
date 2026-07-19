@@ -12,8 +12,8 @@ strategy:
         - ETH-USDT.OKX
         - BTC-USDT-SWAP.OKX
         - ETH-USDT-SWAP.OKX
-        # 2028 Democratic nomination: John Fetterman / Yes。
-        - 0xca1d1139b0c3a29983407f499476ae642482788e841a277eb86faeeb9fa4a85c-71289010523270989807437428651002770360280908813019627976988032260868574107425.POLYMARKET
+        - BTC-USD-PERP.HYPERLIQUID
+        - ETH-USD-PERP.HYPERLIQUID
       bar_types:
         - BTCUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL
         - ETHUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL
@@ -21,6 +21,8 @@ strategy:
         - ETH-USDT.OKX-1-SECOND-LAST-INTERNAL
         - BTC-USDT-SWAP.OKX-1-SECOND-LAST-INTERNAL
         - ETH-USDT-SWAP.OKX-1-SECOND-LAST-INTERNAL
+        - BTC-USD-PERP.HYPERLIQUID-1-SECOND-LAST-INTERNAL
+        - ETH-USD-PERP.HYPERLIQUID-1-SECOND-LAST-INTERNAL
       data_clients:
         BTCUSDT-PERP.BINANCE: BINANCE_USDT_FUTURES
         ETHUSDT-PERP.BINANCE: BINANCE_USDT_FUTURES
@@ -28,7 +30,8 @@ strategy:
         ETH-USDT.OKX: OKX
         BTC-USDT-SWAP.OKX: OKX
         ETH-USDT-SWAP.OKX: OKX
-        0xca1d1139b0c3a29983407f499476ae642482788e841a277eb86faeeb9fa4a85c-71289010523270989807437428651002770360280908813019627976988032260868574107425.POLYMARKET: POLYMARKET
+        BTC-USD-PERP.HYPERLIQUID: HYPERLIQUID
+        ETH-USD-PERP.HYPERLIQUID: HYPERLIQUID
       run_seconds: 30
 
 node:
@@ -69,11 +72,15 @@ node:
         contract_types: [LINEAR]
         instrument_families: null
 
-      polymarket:
+      hyperliquid_perp:
         enabled: true
         markets:
-          - condition_id: "0xca1d1139b0c3a29983407f499476ae642482788e841a277eb86faeeb9fa4a85c"
-            token_id: "71289010523270989807437428651002770360280908813019627976988032260868574107425"
+          - symbol: BTC/USD
+            raw_symbol: BTC
+            instrument_symbol: BTC-USD-PERP
+          - symbol: ETH/USD
+            raw_symbol: ETH
+            instrument_symbol: ETH-USD-PERP
 
       external_signal:
         enabled: true
@@ -112,10 +119,14 @@ node:
         enabled: true
         markets: [BTC/USDT, ETH/USDT]
 
-      polymarket:
+      hyperliquid_perp:
         enabled: true
         markets:
-          - condition_id: "0xca1d1139b0c3a29983407f499476ae642482788e841a277eb86faeeb9fa4a85c"
-            token_id: "71289010523270989807437428651002770360280908813019627976988032260868574107425"
+          - symbol: BTC/USD
+            raw_symbol: BTC
+            instrument_symbol: BTC-USD-PERP
+          - symbol: ETH/USD
+            raw_symbol: ETH
+            instrument_symbol: ETH-USD-PERP
 
-      # Kraken、Hyperliquid 缺少本机 exec 凭证，IBKR 本机没有运行 TWS/Gateway。
+      # Kraken 缺少 exec 凭证，IBKR 没有运行 TWS/Gateway。
