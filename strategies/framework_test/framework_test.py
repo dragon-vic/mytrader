@@ -337,7 +337,15 @@ class FrameworkTestStrategy(Strategy):
             instrument, quantity, quote = self._order_inputs(test)
             notional = instrument.notional_value(quantity, quote.ask_price)
             required = notional.as_decimal() * BALANCE_BUFFER
-            account = self.cache.account_for_venue(test.instrument_id.venue)
+            client_id = self.data_clients[test.instrument_id]
+            account = next(
+                (
+                    account
+                    for account in self.cache.accounts()
+                    if account.id.get_issuer() == str(client_id)
+                ),
+                None,
+            )
             available = account.balance_free(notional.currency) if account is not None else None
             available_value = available.as_decimal() if available is not None else None
             if available_value is None or available_value < required:
