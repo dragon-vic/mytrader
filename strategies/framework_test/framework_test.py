@@ -372,6 +372,16 @@ class FrameworkTestStrategy(Strategy):
             return
         self.failed = True
         self._publish_status("failed")
+        self.pending = None
+        self.pending_order_id = None
+        open_positions = any(
+            self.cache.positions_open(instrument_id=instrument_id)
+            for instrument_id in self.instrument_ids
+        )
+        if not open_positions:
+            self.log.error(f"framework_test order_{status} order={order_id}; stopping safely")
+            self._request_stop(f"order {status} without open position")
+            return
         self.log.error(
             f"framework_test order_{status} order={order_id}; "
             "node remains running for manual intervention",
