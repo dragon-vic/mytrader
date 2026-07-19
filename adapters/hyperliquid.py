@@ -81,7 +81,6 @@ def build_data_client(context: LiveContext, cfg: dict[str, Any]):
         HyperliquidDataClientConfig(
             environment=environment(context.mode),
             proxy_url=context.proxy_url,
-            testnet=context.mode == "testnet",
             product_types=enum_tuple(cfg["product_types"]),
             instrument_provider=instrument_provider(cfg),
             routing=routing(cfg),
@@ -101,7 +100,6 @@ def build_exec_client(context: LiveContext, cfg: dict[str, Any]):
             account_address=os.environ.get("HYPERLIQUID_ACCOUNT_ADDRESS"),
             environment=environment(context.mode),
             proxy_url=context.proxy_url,
-            testnet=context.mode == "testnet",
             product_types=enum_tuple(cfg["product_types"]),
             instrument_provider=instrument_provider(cfg),
             routing=routing(cfg),
