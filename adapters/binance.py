@@ -20,7 +20,7 @@ from adapters.common import LiveContext
 from adapters.common import load_ids
 from adapters.common import market_dict
 from adapters.common import normalize_markets
-from utils.config_loader import ROOT
+from utils.constants import PROJECT_ROOT
 
 BINANCE_ENVS = {
     "testnet": {
@@ -127,7 +127,7 @@ def build_data_client(context: LiveContext, cfg: dict[str, Any]):
 
 # 构建 Binance live exec client 配置。
 def build_exec_client(context: LiveContext, cfg: dict[str, Any]):
-    load_dotenv(ROOT / ".env")
+    load_dotenv(PROJECT_ROOT / ".env")
     api_key, api_secret = credentials(context.mode)
     return (
         cfg["client_id"],

@@ -14,9 +14,9 @@ from nautilus_trader.model.data import CustomData
 from nautilus_trader.model.identifiers import ClientId
 from strategies.pre_ipo.pre_ipo_core import MINUTE_NS
 from strategies.pre_ipo.pre_ipo_core import STATE_FLAT
-from utils.arguments import EXTERNAL_COMMAND_CLIENT_NAME
-from utils.control_messages import NODE_STOP_TOPIC
-from utils.control_messages import NodeStopRequest
+from utils.constants import EXTERNAL_COMMAND_CLIENT_NAME
+from utils.constants import NODE_STOP_TOPIC
+from utils.live_control import NodeStopRequest
 
 
 BIND_ENDPOINT = "PreIpoCoordinator.bind"

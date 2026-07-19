@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import subprocess
@@ -8,18 +7,15 @@ import sys
 import time
 from pathlib import Path
 
-from rich.columns import Columns
-from rich.console import Console
-from rich.table import Table
-
-from utils.arguments import MODE_OPTIONS
-from utils.arguments import RUN_MODES
-from utils.arguments import SUMMARY_FILE
-from utils.config_loader import ROOT
-from utils.config_loader import STRATEGIES_DIR
-from utils.config_loader import config_names
-from utils.config_loader import has_config
-from utils.config_loader import load_settings
+from utils.config import config_names
+from utils.config import has_config
+from utils.config import load_settings
+from utils.constants import MODE_OPTIONS
+from utils.constants import PROJECT_ROOT
+from utils.constants import RUN_MODES
+from utils.constants import STRATEGIES_DIR
+from utils.constants import SUMMARY_FILE
+from utils.summary import print_saved_summary
 
 
 MENU_LAUNCH = "启动"
@@ -216,7 +212,7 @@ def tmux_sessions() -> list[str]:
         return []
     result = subprocess.run(
         ["tmux", "list-sessions", "-F", "#{session_name}"],
-        cwd=ROOT,
+        cwd=PROJECT_ROOT,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -271,7 +267,7 @@ def run_monitor(session_name: str) -> None:
     if not monitor.exists():
         raise RuntimeError(f"当前策略没有 monitor.py：{folder}")
     report_dir = live_report_dir(folder, session_name)
-    os.chdir(ROOT)
+    os.chdir(PROJECT_ROOT)
     os.execv(sys.executable, [sys.executable, str(monitor), str(report_dir), session_name])
 
 
@@ -304,12 +300,12 @@ def run_background(config_name: str, mode: str) -> None:
     )
     shell_command = f"bash -lc {shlex_quote(command)}"
     subprocess.run(
-        ["tmux", "new-session", "-d", "-s", session_name, "-c", str(ROOT), shell_command],
+        ["tmux", "new-session", "-d", "-s", session_name, "-c", str(PROJECT_ROOT), shell_command],
         check=True,
     )
     pid = subprocess.check_output(
         ["tmux", "display-message", "-p", "-t", session_name, "#{pane_pid}"],
-        cwd=ROOT,
+        cwd=PROJECT_ROOT,
         text=True,
     ).strip()
     print(f"后台进程已启动：{config_name} {mode}")
@@ -355,7 +351,7 @@ def shlex_quote(value: str) -> str:
 
 def report_dirs() -> list[Path]:
     dirs: list[Path] = []
-    for root in (ROOT / "strategies").glob("*/report"):
+    for root in STRATEGIES_DIR.glob("*/report"):
         dirs.extend(summary.parent for summary in root.glob(f"**/{SUMMARY_FILE}"))
     return sorted(dirs, key=lambda path: path.stat().st_mtime, reverse=True)
 
@@ -421,9 +417,9 @@ def show_latest_report(wait: bool = True, clear: bool = True) -> None:
         if wait:
             wait_key()
         return
-    print(f"总结：{summary.relative_to(ROOT)}")
+    print(f"总结：{summary.relative_to(PROJECT_ROOT)}")
     print()
-    print_summary_tables(summary)
+    print_saved_summary(summary)
     if wait:
         wait_key()
 
@@ -433,13 +429,13 @@ def show_report(report_dir: Path, wait: bool = True, clear: bool = True) -> None
         clear_screen()
     summary = report_dir / SUMMARY_FILE
     if not summary.exists():
-        print(f"未找到：{summary.relative_to(ROOT)}")
+        print(f"未找到：{summary.relative_to(PROJECT_ROOT)}")
         if wait:
             wait_key()
         return
-    print(f"总结：{summary.relative_to(ROOT)}")
+    print(f"总结：{summary.relative_to(PROJECT_ROOT)}")
     print()
-    print_summary_tables(summary)
+    print_saved_summary(summary)
     if wait:
         wait_key()
 
@@ -450,36 +446,6 @@ def wait_key() -> None:
     print()
     print("按任意键返回")
     read_key()
-
-
-def print_summary_tables(summary: Path) -> None:
-    sections = parse_summary_json(summary)
-    if not sections:
-        Console().print(summary.read_text(encoding="utf-8-sig"))
-        return
-    console = Console()
-    top = [table for title, table in sections if title != "标的统计"]
-    instruments = [table for title, table in sections if title == "标的统计"]
-    if top:
-        console.print(Columns(top, equal=True, expand=True))
-    for table in instruments:
-        console.print(table)
-
-
-def parse_summary_json(summary: Path) -> list[tuple[str, Table]]:
-    payload = json.loads(summary.read_text(encoding="utf-8-sig"))
-    sections: list[tuple[str, Table]] = []
-    for section in payload["sections"]:
-        title = str(section["title"])
-        table = Table(title=title)
-        headers = [str(header) for header in section["headers"]]
-        for index, header in enumerate(headers):
-            table.add_column(header, justify="left" if index == 0 else "right")
-        for row in section["rows"]:
-            values = [str(value) for value in row]
-            table.add_row(*values)
-        sections.append((title, table))
-    return sections
 
 
 def run_interactive() -> None:

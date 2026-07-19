@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from nautilus_trader.common.enums import LogColor
 from nautilus_trader.live.node import TradingNode
 
-from utils.control_messages import NODE_STOP_TOPIC
-from utils.control_messages import NodeStopRequest
+from utils.constants import NODE_STOP_TOPIC
+
+
+@dataclass(frozen=True)
+class NodeStopRequest:
+    source: str
+    reason: str
 
 
 class NodeStopController:

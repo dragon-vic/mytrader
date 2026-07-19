@@ -23,8 +23,8 @@ from nautilus_trader.model.events import OrderRejected
 from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.trading.strategy import Strategy
 
-from utils.control_messages import NODE_STOP_TOPIC
-from utils.control_messages import NodeStopRequest
+from utils.constants import NODE_STOP_TOPIC
+from utils.live_control import NodeStopRequest
 
 
 ADR_COMMON_SHARE_RATIO = Decimal("0.1")

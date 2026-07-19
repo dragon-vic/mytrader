@@ -15,17 +15,19 @@ from nautilus_trader.model.identifiers import InstrumentId
 
 from adapters.common import cache_config
 from adapters.common import LiveContext
-from utils.component_factory import actor_specs
-from utils.component_factory import strategy_components
-from utils.component_factory import strategy_specs
-from utils.config_loader import load_settings
-from utils.config_loader import proxy_url
-from utils.control_messages import NodeStopRequest
+from utils.config import load_settings
+from utils.config import proxy_url
 from utils.live_control import NodeStopController
-from utils.report_writer import log_file_settings
-from utils.report_writer import print_live_summary
-from utils.report_writer import TraderReportWriter
-from utils.runtime_ids import claim_run
+from utils.live_control import NodeStopRequest
+from utils.reports import TraderReportWriter
+from utils.runtime_setup import actor_specs
+from utils.runtime_setup import claim_run
+from utils.runtime_setup import log_file_settings
+from utils.runtime_setup import prepare_run_dir
+from utils.runtime_setup import runtime_start_ns
+from utils.runtime_setup import strategy_components
+from utils.runtime_setup import strategy_specs
+from utils.summary import print_live_summary
 
 
 def adapter_module(name: str):
@@ -166,18 +168,23 @@ def finalize_live(
     stop.detach()
     try:
         if built:
-            writer.write_final_reports(node.trader)
+            writer.write(node.trader)
     finally:
         try:
             node.dispose()
         finally:
-            print_live_summary(settings)
+            print_live_summary(settings, writer.output_dir)
 
 
 # 运行 live/testnet，由 run.py 负责传入配置名和模式。
 def main(config_name: str | None = None, mode: str = "live") -> None:
     settings = claim_run(load_settings(config_name, mode=mode))
-    writer = TraderReportWriter.from_settings(settings, mode)
+    output_dir = prepare_run_dir(settings)
+    writer = TraderReportWriter(
+        output_dir,
+        bool(settings["reports"]["enabled"]),
+        runtime_start_ns(settings),
+    )
     node = build_live_node(settings)
     stop = NodeStopController(node)
     built = False

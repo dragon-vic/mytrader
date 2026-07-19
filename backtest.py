@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from concurrent.futures import ProcessPoolExecutor
+from dataclasses import asdict
 from decimal import Decimal
 from decimal import ROUND_CEILING
 from decimal import ROUND_FLOOR
@@ -25,22 +26,21 @@ from nautilus_trader.model.objects import Price
 from nautilus_trader.model.objects import Quantity
 
 from adapters.common import cache_config
-from utils.backtest_batch import claim_cases
-from utils.backtest_batch import expand_settings
-from utils.backtest_batch import max_workers
-from utils.backtest_batch import worker_count
-from utils.backtest_data import add_datasets
-from utils.backtest_data import add_instruments
-from utils.component_factory import create_strategies
-from utils.config_loader import load_settings
-from utils.instrument_factory import InstrumentFactory
-from utils.report_writer import log_file_settings
-from utils.report_writer import prepare_report_dir
-from utils.report_writer import print_backtest_summary
-from utils.report_writer import run_reports_dir
-from utils.report_writer import write_backtest_result
-from utils.report_writer import write_trader_reports
-from utils.runtime_ids import claim_run
+from utils.backtest_setup import add_datasets
+from utils.backtest_setup import add_instruments
+from utils.backtest_setup import claim_cases
+from utils.backtest_setup import expand_settings
+from utils.backtest_setup import InstrumentFactory
+from utils.backtest_setup import max_workers
+from utils.backtest_setup import worker_count
+from utils.config import load_settings
+from utils.reports import TraderReportWriter
+from utils.runtime_setup import claim_run
+from utils.runtime_setup import create_strategies
+from utils.runtime_setup import log_file_settings
+from utils.runtime_setup import prepare_run_dir
+from utils.runtime_setup import run_reports_dir
+from utils.summary import print_backtest_summary
 
 
 class BpsSlippageFillModel(FillModel):
@@ -195,10 +195,11 @@ def build_engine(settings: dict[str, Any]) -> BacktestEngine:
 
 
 def write_reports(engine: BacktestEngine, result, settings: dict[str, Any]) -> dict[str, float]:
-    payload = write_backtest_result(result)
+    payload = asdict(result)
     started = time.perf_counter()
-    write_trader_reports(engine.trader, settings, "backtest")
-    summary_elapsed = print_backtest_summary(payload, settings)
+    output_dir = run_reports_dir(settings)
+    TraderReportWriter(output_dir, bool(settings["reports"]["enabled"])).write(engine.trader)
+    summary_elapsed = print_backtest_summary(payload, settings, output_dir)
     return {
         "report_elapsed_sec": time.perf_counter() - started,
         "summary_elapsed_sec": summary_elapsed,
@@ -209,7 +210,7 @@ def run_case(settings: dict[str, Any]) -> dict[str, Any]:
     engine = None
     total_started = time.perf_counter()
     try:
-        prepare_report_dir(settings)
+        prepare_run_dir(settings)
         build_started = time.perf_counter()
         engine = build_engine(settings)
         build_elapsed = time.perf_counter() - build_started

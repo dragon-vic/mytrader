@@ -22,7 +22,7 @@ from nautilus_trader.config import RoutingConfig
 from adapters.common import LiveContext
 from adapters.common import load_ids
 from adapters.common import normalize_markets
-from utils.config_loader import ROOT
+from utils.constants import PROJECT_ROOT
 
 
 # 从配置构建 IBKR 连接参数。
@@ -102,7 +102,7 @@ def build_data_client(_context: LiveContext, cfg: dict[str, Any]):
 
 # 构建 IBKR live exec client 配置。
 def build_exec_client(_context: LiveContext, cfg: dict[str, Any]):
-    load_dotenv(ROOT / ".env")
+    load_dotenv(PROJECT_ROOT / ".env")
     return (
         cfg["client_id"],
         InteractiveBrokersExecClientConfig(

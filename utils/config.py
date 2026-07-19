@@ -7,17 +7,11 @@ from typing import Any
 
 import yaml
 
-from utils.arguments import DEFAULT_CONFIG_NAME
-
-
-ROOT = Path(__file__).resolve().parent.parent
-STRATEGIES_DIR = ROOT / "strategies"
-GLOBAL_CONFIG_PATH = STRATEGIES_DIR / "global.yaml"
-CONFIG_FILES = {
-    "backtest": "backtest_config.yaml",
-    "live": "live_config.yaml",
-    "testnet": "live_config.yaml",
-}
+from utils.constants import DEFAULT_CONFIG_NAME
+from utils.constants import CONFIG_FILES
+from utils.constants import GLOBAL_CONFIG_PATH
+from utils.constants import PROJECT_ROOT
+from utils.constants import STRATEGIES_DIR
 
 
 def _required(mapping: dict[str, Any], keys: tuple[str, ...], location: str) -> None:
@@ -205,7 +199,7 @@ def normalize_backtest(settings: dict[str, Any]) -> None:
         relative = Path(dataset["path"])
         if relative.is_absolute():
             raise ValueError(f"{location}.path must be relative")
-        (ROOT / relative).resolve().relative_to(ROOT.resolve())
+        (PROJECT_ROOT / relative).resolve().relative_to(PROJECT_ROOT.resolve())
 
     settings.pop("node")
 
@@ -245,7 +239,7 @@ def config_filename(mode: str) -> str:
 def config_path(config_name: str, mode: str) -> Path:
     path = STRATEGIES_DIR / config_name / config_filename(mode)
     if not path.exists():
-        raise FileNotFoundError(f"Config not found: {path.relative_to(ROOT)}")
+        raise FileNotFoundError(f"Config not found: {path.relative_to(PROJECT_ROOT)}")
     return path
 
 

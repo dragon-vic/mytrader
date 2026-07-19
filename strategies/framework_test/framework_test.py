@@ -27,9 +27,9 @@ from nautilus_trader.model.identifiers import ClientId
 from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.trading.strategy import Strategy
 
-from utils.arguments import EXTERNAL_COMMAND_CLIENT_NAME
-from utils.control_messages import NODE_STOP_TOPIC
-from utils.control_messages import NodeStopRequest
+from utils.constants import EXTERNAL_COMMAND_CLIENT_NAME
+from utils.constants import NODE_STOP_TOPIC
+from utils.live_control import NodeStopRequest
 
 
 STATUS_TOPIC = "framework_test.status"

@@ -15,7 +15,7 @@ from nautilus_trader.model.identifiers import Venue
 from adapters.common import LiveContext
 from adapters.common import load_ids
 from adapters.common import normalize_markets
-from utils.config_loader import ROOT
+from utils.constants import PROJECT_ROOT
 
 
 # py_clob_client_v2 会直接 urlsafe_b64decode(secret)，缺少 padding 会报 Incorrect padding。
@@ -85,7 +85,7 @@ def routing(cfg: dict[str, Any]) -> RoutingConfig:
 
 # 构建 Polymarket live data client 配置。
 def build_data_client(context: LiveContext, cfg: dict[str, Any]):
-    load_dotenv(ROOT / ".env")
+    load_dotenv(PROJECT_ROOT / ".env")
     provider = instrument_config(cfg)
     venue = Venue(cfg["venue"])
     creds = credentials()
@@ -105,7 +105,7 @@ def build_data_client(context: LiveContext, cfg: dict[str, Any]):
 
 # 构建 Polymarket live exec client 配置。
 def build_exec_client(context: LiveContext, cfg: dict[str, Any]):
-    load_dotenv(ROOT / ".env")
+    load_dotenv(PROJECT_ROOT / ".env")
     provider = instrument_config(cfg)
     venue = Venue(cfg["venue"])
     creds = credentials()

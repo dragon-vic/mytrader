@@ -21,8 +21,8 @@ from rich.table import Table
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from utils.arguments import EXTERNAL_COMMAND_DEFAULT_HOST
-from utils.arguments import EXTERNAL_COMMAND_DEFAULT_PORT
+from utils.constants import EXTERNAL_COMMAND_DEFAULT_HOST
+from utils.constants import EXTERNAL_COMMAND_DEFAULT_PORT
 
 
 BEIJING_TZ = timezone(timedelta(hours=8))
