@@ -104,11 +104,7 @@ def print_summary_tables(
     for title, headers, rows in sections:
         if title != "标的统计" or not rows:
             continue
-        if console.width >= 160:
-            console.print(summary_table(title, headers, rows))
-            continue
-        for row in rows:
-            console.print(instrument_detail_table(headers, row))
+        console.print(summary_table(title, headers, rows))
 
 
 def summary_table(title: str, headers: tuple[str, ...], rows: list[tuple[Any, ...]]) -> Table:
@@ -117,15 +113,6 @@ def summary_table(title: str, headers: tuple[str, ...], rows: list[tuple[Any, ..
         table.add_column(str(header), justify="left" if index == 0 else "right")
     for row in rows:
         table.add_row(*(str(value) for value in row))
-    return table
-
-
-def instrument_detail_table(headers: tuple[str, ...], row: tuple[Any, ...]) -> Table:
-    table = Table(title=f"标的统计：{row[0]}")
-    table.add_column("指标")
-    table.add_column("数值", justify="right")
-    for header, value in zip(headers[1:], row[1:]):
-        table.add_row(str(header), str(value))
     return table
 
 
