@@ -35,6 +35,7 @@ from utils.control_messages import NodeStopRequest
 STATUS_TOPIC = "framework_test.status"
 STOP_TIMER = "framework_test.stop"
 COMPLETE_TIMER = "framework_test.complete"
+BALANCE_BUFFER = Decimal("1.05")
 
 
 @dataclass(frozen=True)
@@ -199,6 +200,8 @@ class FrameworkTestStrategy(Strategy):
             self.log.info(f"framework_test first_quote instrument={key}")
         if not self.trading_started and all(self.quote_counts.values()):
             self.trading_started = True
+            if not self._validate_opening_balances():
+                return
             self._submit_open()
 
     def on_trade_tick(self, tick: TradeTick) -> None:
@@ -289,20 +292,7 @@ class FrameworkTestStrategy(Strategy):
 
     def _submit_open(self) -> None:
         test = self.round_trips[self.current_round_trip]
-        instrument = self.cache.instrument(test.instrument_id)
-        quote = self.cache.quote_tick(test.instrument_id)
-        if instrument is None or quote is None:
-            raise RuntimeError(f"instrument is not ready: {test.instrument_id}")
-        quantity = instrument.make_qty(test.qty)
-        if quantity.as_decimal() != test.qty:
-            raise ValueError(f"qty is not aligned to instrument precision: {test}")
-        if instrument.min_quantity is not None and quantity < instrument.min_quantity:
-            raise ValueError(f"qty is below minimum quantity: {test}")
-        if (
-            instrument.min_notional is not None
-            and instrument.notional_value(quantity, quote.ask_price) < instrument.min_notional
-        ):
-            raise ValueError(f"qty is below minimum notional: {test}")
+        _, quantity, _ = self._order_inputs(test)
 
         order = self.order_factory.market(
             instrument_id=test.instrument_id,
@@ -341,6 +331,49 @@ class FrameworkTestStrategy(Strategy):
         self._publish_status("closing")
         self.log.info(f"framework_test submit_close instrument={instrument_id} qty={quantity}")
         self.submit_order(order)
+
+    def _validate_opening_balances(self) -> bool:
+        for test in self.round_trips:
+            instrument, quantity, quote = self._order_inputs(test)
+            notional = instrument.notional_value(quantity, quote.ask_price)
+            required = notional.as_decimal() * BALANCE_BUFFER
+            account = self.cache.account_for_venue(test.instrument_id.venue)
+            available = account.balance_free(notional.currency) if account is not None else None
+            available_value = available.as_decimal() if available is not None else None
+            if available_value is None or available_value < required:
+                self.failed = True
+                self._publish_status("balance_check_failed")
+                self.log.error(
+                    f"framework_test insufficient_balance instrument={test.instrument_id} "
+                    f"available={available_value} required={required} "
+                    f"currency={notional.currency}",
+                )
+                self._request_stop("opening balance check failed")
+                return False
+            self.log.info(
+                f"framework_test balance_checked instrument={test.instrument_id} "
+                f"available={available_value} required={required} "
+                f"currency={notional.currency}",
+            )
+        self._publish_status("balance_checked")
+        return True
+
+    def _order_inputs(self, test: RoundTripConfig):
+        instrument = self.cache.instrument(test.instrument_id)
+        quote = self.cache.quote_tick(test.instrument_id)
+        if instrument is None or quote is None:
+            raise RuntimeError(f"instrument is not ready: {test.instrument_id}")
+        quantity = instrument.make_qty(test.qty)
+        if quantity.as_decimal() != test.qty:
+            raise ValueError(f"qty is not aligned to instrument precision: {test}")
+        if instrument.min_quantity is not None and quantity < instrument.min_quantity:
+            raise ValueError(f"qty is below minimum quantity: {test}")
+        if (
+            instrument.min_notional is not None
+            and instrument.notional_value(quantity, quote.ask_price) < instrument.min_notional
+        ):
+            raise ValueError(f"qty is below minimum notional: {test}")
+        return instrument, quantity, quote
 
     def _schedule_stop(self) -> None:
         self._publish_status("completed")
