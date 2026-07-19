@@ -460,9 +460,9 @@ class EdgePair:
     def signal(self, state: str) -> str | None:
         long_threshold = self.exit_bps if state == STATE_SHORT else max(self.entry_bps, self.long_std_bps * self.std_mult)
         short_threshold = self.exit_bps if state == STATE_LONG else max(self.entry_bps, self.short_std_bps * self.std_mult)
-        if self.long_mean_bps - self.long_bps > long_threshold and self.long_bps <= self.long_max_bps:
+        if self.long_mean_bps - self.long_bps >= long_threshold and self.long_bps <= self.long_max_bps:
             return "long"
-        if self.short_bps - self.short_mean_bps > short_threshold and self.short_bps >= self.short_min_bps:
+        if self.short_bps - self.short_mean_bps >= short_threshold and self.short_bps >= self.short_min_bps:
             return "short"
         return None
 

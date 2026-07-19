@@ -1,74 +1,78 @@
 strategy:
   anth:
     enabled: true
-    module: pre_ipo_backtest
-    class: PreIpoQuoteBacktestStrategy
-    config: PreIpoQuoteBacktestConfig
-
-    case_params:
+    strategy_path: strategies.pre_ipo.pre_ipo_backtest:PreIpoQuoteBacktestStrategy
+    config_path: strategies.pre_ipo.pre_ipo_backtest:PreIpoQuoteBacktestConfig
+    config:
+      order_id_tag: ANTH
       binance_id: ANTHROPICUSDT-PERP.BINANCE
       okx_id: ANTHROPIC-USDT-SWAP.OKX
       feature_path: strategies/pre_ipo/backtest_data/anth_features_all.parquet
       qty: 0.1
       margin_leverage: 5
       margin_buffer: 1.1
-      window_minutes: [300]
-      entry_bps: [45,50,55]
-      exit_bps: [-20]
-      std_mult: [3.0]
-
+      window_minutes: 300
+      entry_bps: 55
+      exit_bps: 20
+      std_mult: 3.0
       capture_bps: 999
       max_position: 4
       short_min_bps: 200
       long_max_bps: 520
-      # window_minutes 同时控制 edge 均线、std/band 和 warmup；300 = 5h。
-
       min_hold_sec: 0
       signal_delay_ms: 0
-      # 0 表示从 feature 数据集第一条开始；也可以写 live 名字里的 20260709181958，按北京时间精确到秒开始。
+      # 0 表示从 feature 数据集第一条开始；也可用 YYYYMMDDHHMMSS 北京时间。
       start_time: 0
-      # 0 表示自动用 feature 数据集结束前 10 秒。
+      # 0 表示自动使用 feature 数据集结束前 10 秒。
       end_ns: 0
+    artifacts:
+      denials_path: local_denials.csv
 
   openai:
     enabled: true
-    module: pre_ipo_backtest
-    class: PreIpoQuoteBacktestStrategy
-    config: PreIpoQuoteBacktestConfig
-
-    case_params:
+    strategy_path: strategies.pre_ipo.pre_ipo_backtest:PreIpoQuoteBacktestStrategy
+    config_path: strategies.pre_ipo.pre_ipo_backtest:PreIpoQuoteBacktestConfig
+    config:
+      order_id_tag: OPENAI
       binance_id: OPENAIUSDT-PERP.BINANCE
       okx_id: OPENAI-USDT-SWAP.OKX
       feature_path: strategies/pre_ipo/backtest_data/openai_features_all.parquet
       qty: 0.1
       margin_leverage: 5
       margin_buffer: 1.1
-      window_minutes: [300]
-      entry_bps: [45,50,55]
-      exit_bps: [-20]
-      std_mult: [3.0]
-
+      window_minutes: 300
+      entry_bps: 55
+      exit_bps: 20
+      std_mult: 3.0
       capture_bps: 999
       max_position: 4
-      short_min_bps: 200
-      long_max_bps: 520
-
+      short_min_bps: 150
+      long_max_bps: 350
       min_hold_sec: 0
       signal_delay_ms: 0
       start_time: 0
       end_ns: 0
+    artifacts:
+      denials_path: local_denials.csv
 
 
 backtest:
   max_workers: 3
+
   venues:
-    - client: binance_futures
-      starting_balance: "2000 USDT"
+    binance:
+      adapter: binance
+      venue: BINANCE
+      instrument_kind: perpetual
+      quote_currency: USDT
+      markets:
+        - ANTHROPIC
+        - OPENAI
+      starting_balances: ["2000 USDT"]
       account_type: MARGIN
       oms_type: NETTING
       default_leverage: "5"
       use_market_order_acks: true
-      # bps_slippage 会把实际成交价按方向滑点；1bps 在当前价格附近约 17 ticks。
       fill_model:
         type: bps_slippage
         slippage_bps: 1
@@ -77,13 +81,20 @@ backtest:
         insert_latency_ms: 3
         update_latency_ms: 0
         cancel_latency_ms: 0
-    - client: okx_swap
-      starting_balance: "2000 USDT"
+
+    okx:
+      adapter: okx
+      venue: OKX
+      instrument_kind: perpetual
+      quote_currency: USDT
+      markets:
+        - ANTHROPIC
+        - OPENAI
+      starting_balances: ["2000 USDT"]
       account_type: MARGIN
       oms_type: NETTING
       default_leverage: "5"
       use_market_order_acks: true
-      # bps_slippage 会把实际成交价按方向滑点；10bps 在当前价格附近约 165-173 ticks。
       fill_model:
         type: bps_slippage
         slippage_bps: 10
@@ -92,43 +103,32 @@ backtest:
         insert_latency_ms: 5
         update_latency_ms: 0
         cancel_latency_ms: 0
+
   datasets:
     - type: quote_tick_objects
       path: strategies/pre_ipo/backtest_data/anth_quote_ticks_all.pkl
     - type: quote_tick_objects
       path: strategies/pre_ipo/backtest_data/openai_quote_ticks_all.pkl
+
   logging:
     log_level: ERROR
     bypass: true
+
   instrument:
-    settlement_currency: USDT
     is_inverse: false
     price_precision: 2
     size_precision: 3
     price_increment: "0.01"
     size_increment: "0.001"
+    lot_size: "0.001"
     multiplier: "1"
     min_quantity: "0.001"
     max_quantity: "10000"
     min_notional: "0"
+    max_notional: null
+    min_price: "0.01"
     max_price: "10000000"
     margin_init: "0.2"
     margin_maint: "0.1"
     maker_fee: "0.0002"
     taker_fee: "0.0004"
-
-node:
-  data:
-    clients:
-      binance_futures:
-        enabled: true
-        markets:
-          - symbol: ANTHROPIC/USDT
-          - symbol: OPENAI/USDT
-            timeframe: 1s
-      okx_swap:
-        enabled: true
-        markets:
-          - symbol: ANTHROPIC/USDT
-          - symbol: OPENAI/USDT
-            timeframe: 1s

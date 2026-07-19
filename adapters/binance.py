@@ -16,9 +16,11 @@ from nautilus_trader.adapters.binance.futures.enums import BinanceFuturesMarginT
 from nautilus_trader.config import RoutingConfig
 from nautilus_trader.model.identifiers import Venue
 
+from adapters.common import LiveContext
+from adapters.common import load_ids
+from adapters.common import market_dict
+from adapters.common import normalize_markets
 from utils.config_loader import ROOT
-from utils.config_loader import proxy_url
-from utils.instrument_factory import InstrumentFactory
 
 BINANCE_ENVS = {
     "testnet": {
@@ -35,24 +37,47 @@ BINANCE_ENVS = {
 
 
 # 根据运行模式推导 Binance 环境。
-def environment(settings: dict[str, Any]) -> BinanceEnvironment:
-    return getattr(BinanceEnvironment, BINANCE_ENVS[settings["mode"]]["environment"])
+def environment(mode: str) -> BinanceEnvironment:
+    return getattr(BinanceEnvironment, BINANCE_ENVS[mode]["environment"])
 
 
 # 根据运行模式从 .env 读取 Binance 执行凭证。
-def credentials(settings: dict[str, Any]) -> tuple[str, str]:
-    envs = BINANCE_ENVS[settings["mode"]]
+def credentials(mode: str) -> tuple[str, str]:
+    envs = BINANCE_ENVS[mode]
     return os.environ[envs["api_key"]], os.environ[envs["api_secret"]]
+
+
+# 把 Binance 短 symbol 展开为 live 层统一使用的 InstrumentId。
+def normalize_client(cfg: dict[str, Any]) -> None:
+    def normalize(value: object) -> dict[str, Any]:
+        market = market_dict(value, cfg["quote_currency"])
+        if "symbol" not in market:
+            raise KeyError("binance.markets[] requires symbol")
+        base, quote = str(market["symbol"]).split("/")
+        raw_symbol = market.get("raw_symbol") or f"{base}{quote}"
+        instrument_symbol = market.get("instrument_symbol") or (
+            raw_symbol if cfg["instrument_kind"] == "spot" else f"{raw_symbol}-PERP"
+        )
+        return {
+            **market,
+            "base_currency": market.get("base_currency", base),
+            "quote_currency": market.get("quote_currency", quote),
+            "settlement_currency": market.get("settlement_currency", quote),
+            "raw_symbol": raw_symbol,
+            "instrument_symbol": instrument_symbol,
+            "instrument_id": f"{instrument_symbol}.{cfg['venue']}",
+        }
+
+    normalize_markets(cfg, normalize)
 
 
 # 构建 Binance instrument provider 配置。
 def instrument_provider(cfg: dict[str, Any]) -> BinanceInstrumentProviderConfig:
     if cfg["markets_all"]:
         return BinanceInstrumentProviderConfig(load_all=True)
-    factory = InstrumentFactory.from_client(cfg)
     return BinanceInstrumentProviderConfig(
         load_all=False,
-        load_ids=frozenset(factory.instrument_id(market) for market in factory.markets),
+        load_ids=load_ids(cfg),
     )
 
 
@@ -86,13 +111,13 @@ def routing(cfg: dict[str, Any]) -> RoutingConfig:
 
 
 # 构建 Binance live data client 配置。
-def build_data_client(settings: dict[str, Any], cfg: dict[str, Any]):
+def build_data_client(context: LiveContext, cfg: dict[str, Any]):
     return (
         cfg["client_id"],
         BinanceDataClientConfig(
             account_type=getattr(BinanceAccountType, cfg["account_type"]),
-            environment=environment(settings),
-            proxy_url=proxy_url(settings),
+            environment=environment(context.mode),
+            proxy_url=context.proxy_url,
             instrument_provider=instrument_provider(cfg),
             routing=routing(cfg),
         ),
@@ -101,17 +126,17 @@ def build_data_client(settings: dict[str, Any], cfg: dict[str, Any]):
 
 
 # 构建 Binance live exec client 配置。
-def build_exec_client(settings: dict[str, Any], cfg: dict[str, Any]):
+def build_exec_client(context: LiveContext, cfg: dict[str, Any]):
     load_dotenv(ROOT / ".env")
-    api_key, api_secret = credentials(settings)
+    api_key, api_secret = credentials(context.mode)
     return (
         cfg["client_id"],
         BinanceExecClientConfig(
             api_key=api_key,
             api_secret=api_secret,
             account_type=getattr(BinanceAccountType, cfg["account_type"]),
-            environment=environment(settings),
-            proxy_url=proxy_url(settings),
+            environment=environment(context.mode),
+            proxy_url=context.proxy_url,
             futures_leverages=futures_leverages(cfg),
             futures_margin_types=futures_margin_types(cfg),
             instrument_provider=instrument_provider(cfg),

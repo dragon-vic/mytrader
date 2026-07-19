@@ -1,25 +1,27 @@
 strategy:
   ANTHROPIC:
     enabled: true
-    module: pre_ipo_arb
-    class: PreIpoArbStrategy
-    config: PreIpoArbConfig
-    params:
+    strategy_path: strategies.pre_ipo.pre_ipo_arb:PreIpoArbStrategy
+    config_path: strategies.pre_ipo.pre_ipo_arb:PreIpoArbConfig
+    config:
+      order_id_tag: ANTHROPIC
       asset: ANTHROPIC
       instruments:
         - ANTHROPICUSDT-PERP.BINANCE
         - ANTHROPIC-USDT-SWAP.OKX
       # 启动 reconciliation 将两个 instrument 的已有订单和仓位归当前策略；startup 会严格检查后接管。
-      external_order_claims: true
+      external_order_claims:
+        - ANTHROPICUSDT-PERP.BINANCE
+        - ANTHROPIC-USDT-SWAP.OKX
       # OKX 2026-06-30 对 ANTHROPIC 做 rebase：价格 /10，数量 *10。
       okx_multiplier: 10
       # window_minutes 同时控制启动时读取 collector 的范围，以及 edge 均值/std 的时间窗口；300 = 5h。
       window_minutes: 300
 
       # long_edge 低于均线 entry 开 long；short_edge 高于均线 entry 开 short。
-      # 持仓后反向 edge 偏离 exit 就减仓或翻向；reduce mode 只允许减仓方向。
+      # 持仓后反向 edge 越过均线 exit_bps 才减仓；exit_bps 使用正的距离。
       entry_bps: 55
-      exit_bps: -20
+      exit_bps: 20
       std_mult: 3.0
       short_min_bps: 200
       long_max_bps: 520
@@ -30,24 +32,26 @@ strategy:
 
   OPENAI:
     enabled: true
-    module: pre_ipo_arb
-    class: PreIpoArbStrategy
-    config: PreIpoArbConfig
-    params:
+    strategy_path: strategies.pre_ipo.pre_ipo_arb:PreIpoArbStrategy
+    config_path: strategies.pre_ipo.pre_ipo_arb:PreIpoArbConfig
+    config:
+      order_id_tag: OPENAI
       asset: OPENAI
       instruments:
         - OPENAIUSDT-PERP.BINANCE
         - OPENAI-USDT-SWAP.OKX
-      external_order_claims: true
+      external_order_claims:
+        - OPENAIUSDT-PERP.BINANCE
+        - OPENAI-USDT-SWAP.OKX
       # OKX 的 OPENAI 价格是 Binance 的约 1/10，数量对应放大 10 倍。
       okx_multiplier: 10
       window_minutes: 300
 
       entry_bps: 55
-      exit_bps: -20
+      exit_bps: 20
       std_mult: 3.0
       short_min_bps: 150
-      long_max_bps: 400
+      long_max_bps: 350
       qty: 0.1
       margin_leverage: 5
       margin_buffer: 1.1
@@ -64,7 +68,8 @@ node:
         max_lock: 500
         reduce_risk_rate: "0.70"
         stop_risk_rate: "0.85"
-        snapshot_path: auto
+      artifacts:
+        snapshot_path: pre_ipo_snapshot.json
 
   logging:
     component_levels:
@@ -118,8 +123,8 @@ node:
 
   exec:
     engine:
-      # 启动对账只回看最近 6h，避免 OKX 旧 pre-market 订单/fill 在启动时大量重建。
-      reconciliation_lookback_mins: 360
+      # 启动时回看最近 24h 的订单和成交，用于恢复交易所执行状态。
+      reconciliation_lookback_mins: 1440
 
     clients:
       binance_futures:

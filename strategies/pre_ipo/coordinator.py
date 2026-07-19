@@ -15,7 +15,8 @@ from nautilus_trader.model.identifiers import ClientId
 from strategies.pre_ipo.pre_ipo_core import MINUTE_NS
 from strategies.pre_ipo.pre_ipo_core import STATE_FLAT
 from utils.arguments import EXTERNAL_COMMAND_CLIENT_NAME
-from utils.arguments import NODE_STOP_TOPIC
+from utils.control_messages import NODE_STOP_TOPIC
+from utils.control_messages import NodeStopRequest
 
 
 BIND_ENDPOINT = "PreIpoCoordinator.bind"
@@ -240,7 +241,10 @@ class PreIpoCoordinatorActor(Actor):
             and all(strategy.trade_state == STATE_FLAT for strategy in self.strategies.values())
         ):
             self.node_stop_published = True
-            self.msgbus.publish(NODE_STOP_TOPIC, {"source": "pre_ipo_coordinator", "reason": "all_flat"})
+            self.msgbus.publish(
+                NODE_STOP_TOPIC,
+                NodeStopRequest(source="pre_ipo_coordinator", reason="all_flat"),
+            )
 
     def _reserved_lock_usdt(self, venue: str) -> Decimal:
         return sum(

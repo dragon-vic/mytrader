@@ -1,13 +1,45 @@
 strategy:
   bintest:
     enabled: true
-    module: bintest
-    class: BintestStrategy
-    config: BintestConfig
-    params:
-      instrument_client: binance_futures
+    strategy_path: strategies.bintest.bintest:BintestStrategy
+    config_path: strategies.bintest.bintest:BintestConfig
+    config:
+      order_id_tag: BINTEST
+      instrument_ids:
+        - BTCUSDT-PERP.BINANCE
+        - ETHUSDT-PERP.BINANCE
+        - BTC-USDT.OKX
+        - ETH-USDT.OKX
+        - BTC-USDT-SWAP.OKX
+        - ETH-USDT-SWAP.OKX
+        # 2028 Democratic nomination: John Fetterman / Yes。
+        - 0xca1d1139b0c3a29983407f499476ae642482788e841a277eb86faeeb9fa4a85c-71289010523270989807437428651002770360280908813019627976988032260868574107425.POLYMARKET
+      bar_types:
+        - BTCUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL
+        - ETHUSDT-PERP.BINANCE-1-SECOND-LAST-INTERNAL
+        - BTC-USDT.OKX-1-SECOND-LAST-INTERNAL
+        - ETH-USDT.OKX-1-SECOND-LAST-INTERNAL
+        - BTC-USDT-SWAP.OKX-1-SECOND-LAST-INTERNAL
+        - ETH-USDT-SWAP.OKX-1-SECOND-LAST-INTERNAL
+      data_clients:
+        BTCUSDT-PERP.BINANCE: BINANCE_USDT_FUTURES
+        ETHUSDT-PERP.BINANCE: BINANCE_USDT_FUTURES
+        BTC-USDT.OKX: OKX
+        ETH-USDT.OKX: OKX
+        BTC-USDT-SWAP.OKX: OKX
+        ETH-USDT-SWAP.OKX: OKX
+        0xca1d1139b0c3a29983407f499476ae642482788e841a277eb86faeeb9fa4a85c-71289010523270989807437428651002770360280908813019627976988032260868574107425.POLYMARKET: POLYMARKET
+      run_seconds: 30
 
 node:
+  actors:
+    BINTEST:
+      actor_path: strategies.bintest.bintest:BintestActor
+      config_path: strategies.bintest.bintest:BintestActorConfig
+      config: {}
+      artifacts:
+        status_path: bintest_status.json
+
   logging:
     strategy_log_level: INFO
 
@@ -15,16 +47,75 @@ node:
     clients:
       binance_futures:
         enabled: true
+        markets: [BTC/USDT, ETH/USDT]
+
+      okx:
+        enabled: true
+        adapter: okx
+        client_id: OKX
+        venue: OKX
+        instrument_kind: mixed
+        quote_currency: USDT
         markets:
           - symbol: BTC/USDT
-            timeframe: 1s
+            instrument_kind: spot
+          - symbol: ETH/USDT
+            instrument_kind: spot
+          - symbol: BTC/USDT
+            instrument_kind: perpetual
+          - symbol: ETH/USDT
+            instrument_kind: perpetual
+        instrument_types: [SPOT, SWAP]
+        contract_types: [LINEAR]
+        instrument_families: null
+
+      polymarket:
+        enabled: true
+        markets:
+          - condition_id: "0xca1d1139b0c3a29983407f499476ae642482788e841a277eb86faeeb9fa4a85c"
+            token_id: "71289010523270989807437428651002770360280908813019627976988032260868574107425"
+
+      external_signal:
+        enabled: true
+
+      external_command:
+        enabled: true
 
   exec:
     engine:
-      reconciliation: false
+      reconciliation: true
       reconciliation_scope: null
 
     clients:
+      okx:
+        enabled: true
+        adapter: okx
+        client_id: OKX
+        venue: OKX
+        instrument_kind: mixed
+        quote_currency: USDT
+        markets:
+          - symbol: BTC/USDT
+            instrument_kind: spot
+          - symbol: ETH/USDT
+            instrument_kind: spot
+          - symbol: BTC/USDT
+            instrument_kind: perpetual
+          - symbol: ETH/USDT
+            instrument_kind: perpetual
+        instrument_types: [SPOT, SWAP]
+        contract_types: [LINEAR]
+        instrument_families: null
+        margin_mode: CROSS
+
       binance_futures:
-        enabled: false
-        markets: []
+        enabled: true
+        markets: [BTC/USDT, ETH/USDT]
+
+      polymarket:
+        enabled: true
+        markets:
+          - condition_id: "0xca1d1139b0c3a29983407f499476ae642482788e841a277eb86faeeb9fa4a85c"
+            token_id: "71289010523270989807437428651002770360280908813019627976988032260868574107425"
+
+      # Kraken、Hyperliquid 缺少本机 exec 凭证，IBKR 本机没有运行 TWS/Gateway。

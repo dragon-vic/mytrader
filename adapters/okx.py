@@ -16,9 +16,11 @@ from nautilus_trader.core.nautilus_pyo3 import OKXInstrumentType
 from nautilus_trader.core.nautilus_pyo3 import OKXMarginMode
 from nautilus_trader.model.identifiers import Venue
 
+from adapters.common import LiveContext
+from adapters.common import load_ids
+from adapters.common import market_dict
+from adapters.common import normalize_markets
 from utils.config_loader import ROOT
-from utils.config_loader import proxy_url
-from utils.instrument_factory import InstrumentFactory
 
 
 OKX_ENVS = {
@@ -35,8 +37,8 @@ def enum_tuple(enum_cls, values: list[str] | tuple[str, ...] | None):
 
 
 # 根据 live/testnet 模式选择 OKX 环境。
-def environment(settings: dict[str, Any]) -> OKXEnvironment:
-    return getattr(OKXEnvironment, OKX_ENVS[settings["mode"]])
+def environment(mode: str) -> OKXEnvironment:
+    return getattr(OKXEnvironment, OKX_ENVS[mode])
 
 
 # 从 .env 读取 OKX 执行凭证。
@@ -48,14 +50,37 @@ def credentials() -> tuple[str, str, str]:
     )
 
 
+def normalize_client(cfg: dict[str, Any]) -> None:
+    def normalize(value: object) -> dict[str, Any]:
+        market = market_dict(value, cfg["quote_currency"])
+        if "symbol" not in market:
+            raise KeyError("okx.markets[] requires symbol")
+        base, quote = str(market["symbol"]).split("/")
+        instrument_kind = market.get("instrument_kind", cfg["instrument_kind"])
+        suffix = "" if instrument_kind == "spot" else "-SWAP"
+        raw_symbol = market.get("raw_symbol") or f"{base}-{quote}{suffix}"
+        instrument_symbol = market.get("instrument_symbol") or raw_symbol
+        return {
+            **market,
+            "instrument_kind": instrument_kind,
+            "base_currency": market.get("base_currency", base),
+            "quote_currency": market.get("quote_currency", quote),
+            "settlement_currency": market.get("settlement_currency", quote),
+            "raw_symbol": raw_symbol,
+            "instrument_symbol": instrument_symbol,
+            "instrument_id": f"{instrument_symbol}.{cfg['venue']}",
+        }
+
+    normalize_markets(cfg, normalize)
+
+
 # 构建 OKX instrument provider 配置。
 def instrument_provider(cfg: dict[str, Any]) -> InstrumentProviderConfig:
     if cfg["markets_all"]:
         return InstrumentProviderConfig(load_all=True)
-    factory = InstrumentFactory.from_client(cfg)
     return InstrumentProviderConfig(
         load_all=False,
-        load_ids=frozenset(factory.instrument_id(market) for market in factory.markets),
+        load_ids=load_ids(cfg),
     )
 
 
@@ -64,12 +89,12 @@ def routing(cfg: dict[str, Any]) -> RoutingConfig:
 
 
 # 构建 OKX live data client 配置。
-def build_data_client(settings: dict[str, Any], cfg: dict[str, Any]):
+def build_data_client(context: LiveContext, cfg: dict[str, Any]):
     return (
         cfg["client_id"],
         OKXDataClientConfig(
-            environment=environment(settings),
-            proxy_url=proxy_url(settings),
+            environment=environment(context.mode),
+            proxy_url=context.proxy_url,
             instrument_types=enum_tuple(OKXInstrumentType, cfg["instrument_types"]),
             contract_types=enum_tuple(OKXContractType, cfg.get("contract_types")),
             instrument_families=tuple(cfg["instrument_families"]) if cfg.get("instrument_families") else None,
@@ -81,7 +106,7 @@ def build_data_client(settings: dict[str, Any], cfg: dict[str, Any]):
 
 
 # 构建 OKX live exec client 配置。
-def build_exec_client(settings: dict[str, Any], cfg: dict[str, Any]):
+def build_exec_client(context: LiveContext, cfg: dict[str, Any]):
     load_dotenv(ROOT / ".env")
     api_key, api_secret, passphrase = credentials()
     return (
@@ -90,8 +115,8 @@ def build_exec_client(settings: dict[str, Any], cfg: dict[str, Any]):
             api_key=api_key,
             api_secret=api_secret,
             api_passphrase=passphrase,
-            environment=environment(settings),
-            proxy_url=proxy_url(settings),
+            environment=environment(context.mode),
+            proxy_url=context.proxy_url,
             instrument_types=enum_tuple(OKXInstrumentType, cfg["instrument_types"]),
             contract_types=enum_tuple(OKXContractType, cfg.get("contract_types")),
             instrument_families=tuple(cfg["instrument_families"]) if cfg.get("instrument_families") else None,

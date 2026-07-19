@@ -7,17 +7,42 @@ from typing import Any
 import pandas as pd
 
 
-LOCAL_DENIALS_FILE = "local_denials.csv"
-
-
 class BacktestMarginPool:
     def __init__(self) -> None:
+        self.active: set[str] = set()
+        self.output_path: Path | None = None
         self.reset()
 
     def reset(self) -> None:
         self.reserved: dict[str, dict[str, Decimal]] = {}
         self.used: dict[str, dict[str, Decimal]] = {}
         self.denials: list[dict[str, Any]] = []
+
+    # 同一回测里的多个策略共享池；首个策略负责开始新一轮状态。
+    def register(self, owner: str, output_path: str) -> None:
+        path = Path(output_path)
+        if not self.active:
+            self.reset()
+            self.output_path = path
+        elif path != self.output_path:
+            raise RuntimeError("shared backtest margin pool requires one denial output path")
+        if owner in self.active:
+            raise RuntimeError(f"margin pool owner already registered: {owner}")
+        self.active.add(owner)
+
+    # 最后一个策略停止时写出本轮私有拒绝记录。
+    def unregister(self, owner: str) -> None:
+        self.release(owner)
+        self.active.remove(owner)
+        if self.active:
+            return
+        if self.denials:
+            pd.DataFrame(self.denials).to_csv(
+                self.output_path,
+                index=False,
+                encoding="utf-8-sig",
+            )
+        self.output_path = None
 
     # 两腿一次性检查并预占，避免同一事件内多个策略重复使用余额。
     def reserve(
@@ -54,7 +79,6 @@ class BacktestMarginPool:
     def release(self, owner: str) -> None:
         self.reserved.pop(owner, None)
 
-    # 成交后把 pending 预占转成按实际成交价计算的已用保证金。
     def commit_open(self, owner: str, margins: dict[str, Decimal]) -> None:
         self.release(owner)
         current = self.used.setdefault(owner, {})
@@ -72,14 +96,6 @@ class BacktestMarginPool:
             current[venue] *= ratio
         if ratio == 0:
             self.used.pop(owner, None)
-
-    def write_denials(self, output_dir: Path) -> None:
-        path = output_dir / LOCAL_DENIALS_FILE
-        if not self.denials:
-            if path.exists():
-                path.unlink()
-            return
-        pd.DataFrame(self.denials).to_csv(path, index=False, encoding="utf-8-sig")
 
     @staticmethod
     def _venue_sum(values: dict[str, dict[str, Decimal]], venue: str) -> Decimal:

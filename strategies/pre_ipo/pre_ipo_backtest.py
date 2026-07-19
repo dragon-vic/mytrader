@@ -19,8 +19,7 @@ from nautilus_trader.model.events import OrderFilled
 from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.trading.strategy import Strategy
 
-from utils.arguments import NODE_STOP_TOPIC
-from utils.backtest_margin import MARGIN_POOL
+from strategies.pre_ipo.backtest_margin import MARGIN_POOL
 
 
 LONG = "long"
@@ -28,18 +27,6 @@ SHORT = "short"
 MINUTE_NS = 60_000_000_000
 END_BUFFER_NS = 10_000_000_000
 BEIJING_TZ = ZoneInfo("Asia/Shanghai")
-
-
-def decimal_param(value: object) -> Decimal:
-    if isinstance(value, bool):
-        raise TypeError("numeric parameter must not be bool")
-    return Decimal(str(value))
-
-
-def float_param(value: object) -> float:
-    if isinstance(value, bool):
-        raise TypeError("numeric parameter must not be bool")
-    return float(str(value))
 
 
 def event_decimal(value: object) -> Decimal:
@@ -196,6 +183,7 @@ class PreIpoQuoteBacktestConfig(StrategyConfig, frozen=True):
     signal_delay_ms: float
     start_time: int
     end_ns: int
+    denials_path: str
 
 
 class PreIpoQuoteBacktestStrategy(Strategy):
@@ -203,32 +191,32 @@ class PreIpoQuoteBacktestStrategy(Strategy):
         super().__init__(config)
         self.binance_id = InstrumentId.from_str(config.binance_id)
         self.okx_id = InstrumentId.from_str(config.okx_id)
-        self.window_minutes = int(config.window_minutes)
-        self.start_ns = start_time_ns(int(config.start_time))
+        self.window_minutes = config.window_minutes
+        self.start_ns = start_time_ns(config.start_time)
         self.features = FeatureStore(config.feature_path, self.window_minutes, self.start_ns)
-        self.qty = decimal_param(config.qty)
-        self.max_position = decimal_param(config.max_position)
+        self.qty = config.qty
+        self.max_position = config.max_position
         if self.max_position <= 0:
             raise RuntimeError("max_position must be positive")
-        self.margin_leverage = decimal_param(config.margin_leverage)
-        self.margin_buffer = decimal_param(config.margin_buffer)
+        self.margin_leverage = config.margin_leverage
+        self.margin_buffer = config.margin_buffer
         if self.margin_leverage <= 0 or self.margin_buffer < 1:
             raise RuntimeError("margin_leverage must be positive and margin_buffer must be >= 1")
-        self.capture_bps = float_param(config.capture_bps)
-        self.std_mult = float_param(config.std_mult)
-        self.short_entry_bps = float_param(config.entry_bps)
-        self.long_entry_bps = float_param(config.entry_bps)
-        self.short_min_bps = float_param(config.short_min_bps)
-        self.long_max_bps = float_param(config.long_max_bps)
+        self.capture_bps = config.capture_bps
+        self.std_mult = config.std_mult
+        self.short_entry_bps = config.entry_bps
+        self.long_entry_bps = config.entry_bps
+        self.short_min_bps = config.short_min_bps
+        self.long_max_bps = config.long_max_bps
         if self.long_max_bps <= self.short_min_bps:
             raise RuntimeError("long_max_bps must be greater than short_min_bps")
-        self.short_exit_bps = float_param(config.exit_bps)
-        self.long_exit_bps = float_param(config.exit_bps)
-        self.min_hold_ns = int(float_param(config.min_hold_sec) * 1_000_000_000)
-        self.signal_delay_ns = int(float_param(config.signal_delay_ms) * 1_000_000)
+        self.short_exit_bps = config.exit_bps
+        self.long_exit_bps = config.exit_bps
+        self.min_hold_ns = int(config.min_hold_sec * 1_000_000_000)
+        self.signal_delay_ns = int(config.signal_delay_ms * 1_000_000)
         if self.signal_delay_ns < 0:
             raise RuntimeError("signal_delay_ms must be non-negative")
-        config_end_ns = int(config.end_ns)
+        config_end_ns = config.end_ns
         self.end_ns = max(0, self.features.end_ns - END_BUFFER_NS) if config_end_ns <= 0 else config_end_ns
         self.side = "flat"
         self.position_qty = Decimal("0")
@@ -242,6 +230,7 @@ class PreIpoQuoteBacktestStrategy(Strategy):
         self.quotes: dict[InstrumentId, QuoteTick] = {}
 
     def on_start(self) -> None:
+        MARGIN_POOL.register(str(self.id), self.config.denials_path)
         self.subscribe_quote_ticks(self.binance_id)
         self.subscribe_quote_ticks(self.okx_id)
         # 自动 end_ns 取数据集结束前 10 秒，给最终强平市价单留出后续 quote 触发成交。
@@ -302,7 +291,7 @@ class PreIpoQuoteBacktestStrategy(Strategy):
         self.log.warning(message)
 
     def on_stop(self) -> None:
-        MARGIN_POOL.release(str(self.id))
+        MARGIN_POOL.unregister(str(self.id))
         self.unsubscribe_quote_ticks(self.binance_id)
         self.unsubscribe_quote_ticks(self.okx_id)
 
@@ -503,16 +492,15 @@ class PreIpoQuoteBacktestStrategy(Strategy):
         return self.side == "flat" or (self.side == target and self.position_qty < self.max_position)
 
     def _short_reduce(self, edge: float, mean: float) -> bool:
-        return (edge >= mean - self.short_exit_bps) or (edge >= self.entry_edge + self.capture_bps)
+        return (edge >= mean + self.short_exit_bps) or (edge >= self.entry_edge + self.capture_bps)
 
     def _long_reduce(self, edge: float, mean: float) -> bool:
-        return (edge <= mean + self.long_exit_bps) or (edge <= self.entry_edge - self.capture_bps)
+        return (edge <= mean - self.long_exit_bps) or (edge <= self.entry_edge - self.capture_bps)
 
     def _on_end_alert(self) -> None:
         self.halted = True
         self._cancel_signal()
         self._flatten(force=True)
-        self.msgbus.publish(NODE_STOP_TOPIC, {"reason": "pre_ipo_backtest_end_ns"})
 
     def _flatten(self, force: bool = False) -> None:
         if (self.halted and not force) or self.pending is not None or self.side == "flat" or self.position_qty <= 0:

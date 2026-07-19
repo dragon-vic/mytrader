@@ -12,9 +12,10 @@ from nautilus_trader.adapters.polymarket.providers import PolymarketInstrumentPr
 from nautilus_trader.config import RoutingConfig
 from nautilus_trader.model.identifiers import Venue
 
+from adapters.common import LiveContext
+from adapters.common import load_ids
+from adapters.common import normalize_markets
 from utils.config_loader import ROOT
-from utils.config_loader import proxy_url
-from utils.instrument_factory import InstrumentFactory
 
 
 # py_clob_client_v2 会直接 urlsafe_b64decode(secret)，缺少 padding 会报 Incorrect padding。
@@ -34,16 +35,45 @@ def credentials() -> dict[str, str]:
     }
 
 
+def normalize_client(cfg: dict[str, Any]) -> None:
+    def normalize(value: object) -> dict[str, Any]:
+        if isinstance(value, str):
+            market: dict[str, Any] = {"instrument_id": value}
+        elif isinstance(value, dict):
+            market = dict(value)
+        else:
+            raise TypeError("polymarket.markets[] must be a mapping or InstrumentId string")
+        instrument_id = market.get("instrument_id")
+        if instrument_id is None:
+            try:
+                symbol = f"{market['condition_id']}-{market['token_id']}"
+            except KeyError as exc:
+                raise KeyError(
+                    "polymarket.markets[] requires instrument_id or condition_id and token_id",
+                ) from exc
+            instrument_id = f"{symbol}.{cfg['venue']}"
+        else:
+            instrument_id = str(instrument_id)
+            symbol = instrument_id.rsplit(".", 1)[0]
+        return {
+            **market,
+            "raw_symbol": market.get("raw_symbol", symbol),
+            "instrument_symbol": market.get("instrument_symbol", symbol),
+            "instrument_id": instrument_id,
+        }
+
+    normalize_markets(cfg, normalize)
+
+
 # 构建 Polymarket instrument provider 配置。
 def instrument_config(cfg: dict[str, Any]) -> PolymarketInstrumentProviderConfig:
     provider = cfg["instrument_provider"]
-    load_ids = None
+    ids = None
     if not cfg["markets_all"]:
-        factory = InstrumentFactory.from_client(cfg)
-        load_ids = frozenset(factory.instrument_id(market) for market in factory.markets)
+        ids = load_ids(cfg)
     return PolymarketInstrumentProviderConfig(
         load_all=bool(provider["load_all"]) or cfg["markets_all"],
-        load_ids=load_ids,
+        load_ids=ids,
         use_gamma_markets=bool(provider["use_gamma_markets"]),
         event_slug_builder=provider["event_slug_builder"],
     )
@@ -54,7 +84,7 @@ def routing(cfg: dict[str, Any]) -> RoutingConfig:
 
 
 # 构建 Polymarket live data client 配置。
-def build_data_client(settings: dict[str, Any], cfg: dict[str, Any]):
+def build_data_client(context: LiveContext, cfg: dict[str, Any]):
     load_dotenv(ROOT / ".env")
     provider = instrument_config(cfg)
     venue = Venue(cfg["venue"])
@@ -66,7 +96,7 @@ def build_data_client(settings: dict[str, Any], cfg: dict[str, Any]):
             venue=venue,
             signature_type=int(cfg["signature_type"]),
             **creds,
-            proxy_url=proxy_url(settings),
+            proxy_url=context.proxy_url,
             routing=routing(cfg),
         ),
         PolymarketLiveDataClientFactory,
@@ -74,7 +104,7 @@ def build_data_client(settings: dict[str, Any], cfg: dict[str, Any]):
 
 
 # 构建 Polymarket live exec client 配置。
-def build_exec_client(settings: dict[str, Any], cfg: dict[str, Any]):
+def build_exec_client(context: LiveContext, cfg: dict[str, Any]):
     load_dotenv(ROOT / ".env")
     provider = instrument_config(cfg)
     venue = Venue(cfg["venue"])
@@ -86,7 +116,7 @@ def build_exec_client(settings: dict[str, Any], cfg: dict[str, Any]):
             venue=venue,
             signature_type=int(cfg["signature_type"]),
             **creds,
-            proxy_url=proxy_url(settings),
+            proxy_url=context.proxy_url,
             routing=routing(cfg),
         ),
         PolymarketLiveExecClientFactory,

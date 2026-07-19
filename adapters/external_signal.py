@@ -15,6 +15,7 @@ from nautilus_trader.model.data import DataType
 from nautilus_trader.model.identifiers import ClientId
 from nautilus_trader.model.identifiers import InstrumentId
 
+from adapters.common import LiveContext
 from utils.arguments import EXTERNAL_SIGNAL_CLIENT_NAME
 from utils.arguments import EXTERNAL_SIGNAL_DEFAULT_HOST
 from utils.arguments import EXTERNAL_SIGNAL_DEFAULT_INSTRUMENT
@@ -121,8 +122,12 @@ class ExternalSignalLiveDataClientFactory(LiveDataClientFactory):
         )
 
 
+def normalize_client(_cfg: dict[str, Any]) -> None:
+    pass
+
+
 # 构建外部信号 live data client 配置。
-def build_data_client(settings: dict[str, Any], cfg: dict[str, Any]):
+def build_data_client(_context: LiveContext, cfg: dict[str, Any]):
     return (
         cfg["client_id"],
         ExternalSignalDataClientConfig(

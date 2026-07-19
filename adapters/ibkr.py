@@ -18,8 +18,10 @@ from nautilus_trader.adapters.interactive_brokers.factories import (
     InteractiveBrokersLiveExecClientFactory,
 )
 from nautilus_trader.config import RoutingConfig
-from nautilus_trader.model.identifiers import InstrumentId
 
+from adapters.common import LiveContext
+from adapters.common import load_ids
+from adapters.common import normalize_markets
 from utils.config_loader import ROOT
 
 
@@ -35,12 +37,28 @@ def connection(cfg: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-# 把配置里的市场转成 NT InstrumentId。
-def load_ids(cfg: dict[str, Any]) -> frozenset[InstrumentId]:
-    return frozenset(
-        InstrumentId.from_str(market["instrument_id"])
-        for market in cfg["markets"]
-    )
+def normalize_client(cfg: dict[str, Any]) -> None:
+    def normalize(value: object) -> dict[str, Any]:
+        if isinstance(value, str):
+            instrument_id = value
+            market: dict[str, Any] = {}
+        elif isinstance(value, dict) and "instrument_id" in value:
+            market = dict(value)
+            instrument_id = str(market["instrument_id"])
+        else:
+            raise TypeError("ibkr.markets[] must be an InstrumentId string or mapping")
+        if "." not in instrument_id:
+            raise ValueError("ibkr.markets[] must be an InstrumentId like AAPL.XNAS")
+        symbol, venue = instrument_id.rsplit(".", 1)
+        return {
+            **market,
+            "raw_symbol": market.get("raw_symbol", symbol),
+            "instrument_symbol": market.get("instrument_symbol", symbol),
+            "venue": market.get("venue", venue),
+            "instrument_id": instrument_id,
+        }
+
+    normalize_markets(cfg, normalize, supports_all=False)
 
 
 # 构建 IBKR instrument provider 配置。
@@ -67,7 +85,7 @@ def routing(cfg: dict[str, Any]) -> RoutingConfig:
 
 
 # 构建 IBKR live data client 配置。
-def build_data_client(settings: dict[str, Any], cfg: dict[str, Any]):
+def build_data_client(_context: LiveContext, cfg: dict[str, Any]):
     return (
         cfg["client_id"],
         InteractiveBrokersDataClientConfig(
@@ -83,7 +101,7 @@ def build_data_client(settings: dict[str, Any], cfg: dict[str, Any]):
 
 
 # 构建 IBKR live exec client 配置。
-def build_exec_client(settings: dict[str, Any], cfg: dict[str, Any]):
+def build_exec_client(_context: LiveContext, cfg: dict[str, Any]):
     load_dotenv(ROOT / ".env")
     return (
         cfg["client_id"],

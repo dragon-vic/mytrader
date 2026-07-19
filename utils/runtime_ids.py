@@ -7,9 +7,9 @@ from zoneinfo import ZoneInfo
 
 
 # 分配当前策略唯一 node 身份和本次运行报告目录。
-def claim_run(settings: dict[str, Any]) -> dict[str, Any]:
+def claim_run(settings: dict[str, Any], started_at: str | None = None) -> dict[str, Any]:
     run_kind = "backtest" if settings["mode"] == "backtest" else "live"
-    start_time = os.environ.get("NT_RUN_STARTED_AT")
+    start_time = started_at or os.environ.get("NT_RUN_STARTED_AT")
     if not start_time:
         start_time = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d%H%M%S")
     strategy_name = settings["project"]["config_name"]

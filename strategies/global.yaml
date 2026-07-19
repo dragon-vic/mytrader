@@ -7,31 +7,40 @@ cache:
 reports:
   enabled: true
   root: report
+  logging:
+    log_level_file: INFO
+    log_file_name: node
+    log_file_format: null
+    log_file_max_size: null
+    log_file_max_backup_count: 5
+    clear_log_file: true
+
+# 所有 StrategyConfig 共享的 NT 原生字段。
+strategy_defaults:
+  use_hyphens_in_client_order_ids: false
 
 # 项目路径。
 project:
   data_dir: data
 
-# 回测默认模块参数。
+# 回测共享配置。
 backtest:
   logging:
     log_level: INFO
     bypass: false
-  data:
-    timeframe: 1s
-    limit: 1000
-    batches: 3
   instrument:
-    settlement_currency: USDT
     is_inverse: false
     price_precision: 2
     size_precision: 3
     price_increment: "0.01"
     size_increment: "0.001"
+    lot_size: "0.001"
     multiplier: "1"
     min_quantity: "0.001"
     max_quantity: "10000"
     min_notional: "5"
+    max_notional: null
+    min_price: "0.01"
     max_price: "10000000"
     margin_init: "1"
     margin_maint: "1"
@@ -48,12 +57,6 @@ node:
   # NT logging 默认值；策略 set 只覆盖有差异的叶子。
   logging:
     log_level: INFO
-    log_level_file: INFO
-    log_file_name: node
-    log_file_format: null
-    log_file_max_size: null
-    log_file_max_backup_count: 5
-    clear_log_file: true
     strategy_log_level: INFO 
     log_colors: true
     component_levels:
@@ -78,14 +81,31 @@ node:
     clients:
       binance_spot:
         enabled: false
+        adapter: binance
+        client_id: BINANCE_SPOT
+        venue: BINANCE
+        account_type: SPOT
+        instrument_kind: spot
+        quote_currency: USDT
         markets: []
 
       binance_futures:
         enabled: false
+        adapter: binance
+        client_id: BINANCE_USDT_FUTURES
+        venue: BINANCE
+        account_type: USDT_FUTURES
+        instrument_kind: perpetual
+        quote_currency: USDT
         markets: []
 
       okx_spot:
         enabled: false
+        adapter: okx
+        client_id: OKX_SPOT
+        venue: OKX
+        instrument_kind: spot
+        quote_currency: USDT
         markets: []
         instrument_types: [SPOT]
         contract_types: null
@@ -93,6 +113,11 @@ node:
 
       okx_swap:
         enabled: false
+        adapter: okx
+        client_id: OKX_SWAP
+        venue: OKX
+        instrument_kind: perpetual
+        quote_currency: USDT
         markets: []
         instrument_types: [SWAP]
         contract_types: [LINEAR]
@@ -100,21 +125,40 @@ node:
 
       kraken_spot:
         enabled: false
+        adapter: kraken
+        client_id: KRAKEN_SPOT
+        venue: KRAKEN
+        instrument_kind: spot
+        quote_currency: USD
         markets: []
         product_types: [SPOT]
 
       kraken_futures:
         enabled: false
+        adapter: kraken
+        client_id: KRAKEN_FUTURES
+        venue: KRAKEN
+        instrument_kind: perpetual
+        quote_currency: USD
         markets: []
         product_types: [FUTURES]
 
       hyperliquid_perp:
         enabled: false
+        adapter: hyperliquid
+        client_id: HYPERLIQUID
+        venue: HYPERLIQUID
+        instrument_kind: perpetual
+        quote_currency: USD
         markets: []
         product_types: [PERP, PERP_HIP3]
 
       polymarket:
         enabled: false
+        adapter: polymarket
+        client_id: POLYMARKET
+        venue: POLYMARKET
+        instrument_kind: binary_option
         markets: []
         signature_type: 1
         instrument_provider:
@@ -124,6 +168,10 @@ node:
 
       ibkr:
         enabled: false
+        adapter: ibkr
+        client_id: INTERACTIVE_BROKERS
+        venue: INTERACTIVE_BROKERS
+        instrument_kind: ibkr
         markets: []
         # 本机 TWS/IB Gateway 地址；默认连接本机。
         ibg_host: 127.0.0.1
@@ -163,11 +211,15 @@ node:
 
       external_signal:
         enabled: false
+        adapter: external_signal
+        client_id: EXTERNAL_SIGNAL
         host: 127.0.0.1
         port: 9001
 
       external_command:
         enabled: false
+        adapter: external_command
+        client_id: EXTERNAL_COMMAND
         host: 127.0.0.1
         port: 9002
   # NT exec engine 和所有可选 exec client。
@@ -180,11 +232,22 @@ node:
     clients:
       binance_futures:
         enabled: false
+        adapter: binance
+        client_id: BINANCE_USDT_FUTURES
+        venue: BINANCE
+        account_type: USDT_FUTURES
+        instrument_kind: perpetual
+        quote_currency: USDT
         markets: []
         margin_type: CROSS
 
       okx_spot:
         enabled: false
+        adapter: okx
+        client_id: OKX_SPOT
+        venue: OKX
+        instrument_kind: spot
+        quote_currency: USDT
         markets: []
         instrument_types: [SPOT]
         contract_types: null
@@ -193,6 +256,11 @@ node:
 
       okx_swap:
         enabled: false
+        adapter: okx
+        client_id: OKX_SWAP
+        venue: OKX
+        instrument_kind: perpetual
+        quote_currency: USDT
         markets: []
         instrument_types: [SWAP]
         contract_types: [LINEAR]
@@ -201,21 +269,40 @@ node:
 
       kraken_spot:
         enabled: false
+        adapter: kraken
+        client_id: KRAKEN_SPOT
+        venue: KRAKEN
+        instrument_kind: spot
+        quote_currency: USD
         markets: []
         product_types: [SPOT]
 
       kraken_futures:
         enabled: false
+        adapter: kraken
+        client_id: KRAKEN_FUTURES
+        venue: KRAKEN
+        instrument_kind: perpetual
+        quote_currency: USD
         markets: []
         product_types: [FUTURES]
 
       hyperliquid_perp:
         enabled: false
+        adapter: hyperliquid
+        client_id: HYPERLIQUID
+        venue: HYPERLIQUID
+        instrument_kind: perpetual
+        quote_currency: USD
         markets: []
         product_types: [PERP, PERP_HIP3]
 
       polymarket:
         enabled: false
+        adapter: polymarket
+        client_id: POLYMARKET
+        venue: POLYMARKET
+        instrument_kind: binary_option
         markets: []
         signature_type: 1
         instrument_provider:
@@ -225,6 +312,10 @@ node:
 
       ibkr:
         enabled: false
+        adapter: ibkr
+        client_id: INTERACTIVE_BROKERS
+        venue: INTERACTIVE_BROKERS
+        instrument_kind: ibkr
         # 显式列出 NT InstrumentId；应与 data.clients.ibkr.markets 保持一致。
         markets: []
         # 本机 TWS/IB Gateway 地址；默认连接本机。
