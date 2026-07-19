@@ -127,6 +127,7 @@ class FrameworkTestStrategy(Strategy):
         self.bar_counts = {str(bar_type): 0 for bar_type in self.bar_types}
         self.command_count = 0
         self.round_trips_completed = 0
+        self.round_trips_skipped = 0
         self.current_round_trip = 0
         self.pending_order_id: str | None = None
         self.pending: PendingOrder | None = None
@@ -200,9 +201,7 @@ class FrameworkTestStrategy(Strategy):
             self.log.info(f"framework_test first_quote instrument={key}")
         if not self.trading_started and all(self.quote_counts.values()):
             self.trading_started = True
-            if not self._validate_opening_balances():
-                return
-            self._submit_open()
+            self._start_next_round_trip()
 
     def on_trade_tick(self, tick: TradeTick) -> None:
         key = str(tick.instrument_id)
@@ -242,10 +241,7 @@ class FrameworkTestStrategy(Strategy):
         self.round_trips_completed += 1
         self.current_round_trip += 1
         self._publish_status("round_trip_completed")
-        if self.current_round_trip < len(self.round_trips):
-            self._submit_open()
-            return
-        self._schedule_stop()
+        self._start_next_round_trip()
 
     def on_order_rejected(self, event: OrderRejected) -> None:
         self._handle_order_failure(str(event.client_order_id), "rejected")
@@ -332,38 +328,44 @@ class FrameworkTestStrategy(Strategy):
         self.log.info(f"framework_test submit_close instrument={instrument_id} qty={quantity}")
         self.submit_order(order)
 
-    def _validate_opening_balances(self) -> bool:
-        for test in self.round_trips:
-            instrument, quantity, quote = self._order_inputs(test)
-            notional = instrument.notional_value(quantity, quote.ask_price)
-            required = notional.as_decimal() * BALANCE_BUFFER
-            client_id = self.data_clients[test.instrument_id]
-            account = next(
-                (
-                    account
-                    for account in self.cache.accounts()
-                    if account.id.get_issuer() == str(client_id)
-                ),
-                None,
-            )
-            available = account.balance_free(notional.currency) if account is not None else None
-            available_value = available.as_decimal() if available is not None else None
-            if available_value is None or available_value < required:
-                self.failed = True
-                self._publish_status("balance_check_failed")
-                self.log.error(
-                    f"framework_test insufficient_balance instrument={test.instrument_id} "
-                    f"available={available_value} required={required} "
-                    f"currency={notional.currency}",
-                )
-                self._request_stop("opening balance check failed")
-                return False
-            self.log.info(
-                f"framework_test balance_checked instrument={test.instrument_id} "
+    def _start_next_round_trip(self) -> None:
+        while self.current_round_trip < len(self.round_trips):
+            test = self.round_trips[self.current_round_trip]
+            if self._has_opening_balance(test):
+                self._submit_open()
+                return
+            self.round_trips_skipped += 1
+            self.current_round_trip += 1
+            self._publish_status("insufficient_balance")
+        self._schedule_stop()
+
+    def _has_opening_balance(self, test: RoundTripConfig) -> bool:
+        instrument, quantity, quote = self._order_inputs(test)
+        notional = instrument.notional_value(quantity, quote.ask_price)
+        required = notional.as_decimal() * BALANCE_BUFFER
+        client_id = self.data_clients[test.instrument_id]
+        account = next(
+            (
+                account
+                for account in self.cache.accounts()
+                if account.id.get_issuer() == str(client_id)
+            ),
+            None,
+        )
+        available = account.balance_free(notional.currency) if account is not None else None
+        available_value = available.as_decimal() if available is not None else None
+        if available_value is None or available_value < required:
+            self.log.warning(
+                f"framework_test insufficient_balance instrument={test.instrument_id} "
                 f"available={available_value} required={required} "
                 f"currency={notional.currency}",
             )
-        self._publish_status("balance_checked")
+            return False
+        self.log.info(
+            f"framework_test balance_checked instrument={test.instrument_id} "
+            f"available={available_value} required={required} "
+            f"currency={notional.currency}",
+        )
         return True
 
     def _order_inputs(self, test: RoundTripConfig):
@@ -447,6 +449,7 @@ class FrameworkTestStrategy(Strategy):
             "bars": sum(self.bar_counts.values()),
             "commands": self.command_count,
             "round_trips": self.round_trips_completed,
+            "skipped": self.round_trips_skipped,
         }
 
     def _publish_status(self, phase: str) -> None:
