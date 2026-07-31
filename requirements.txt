@@ -10,3 +10,4 @@ pyarrow
 nautilus-ibapi>=10.43.2
 ccxt
 websockets
+pypdf==6.14.2

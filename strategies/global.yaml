@@ -215,6 +215,13 @@ node:
         client_id: EXTERNAL_COMMAND
         host: 127.0.0.1
         port: 9002
+
+      external_json:
+        enabled: false
+        adapter: external_json
+        client_id: EXTERNAL_JSON
+        host: 127.0.0.1
+        port: 9003
   # NT exec engine 和所有可选 exec client。
   exec:
     engine:

@@ -1,0 +1,21 @@
+strategy:
+  agent_trading:
+    enabled: true
+    strategy_path: strategies.agent_trading.agent_trading:AgentTradingStrategy
+    config_path: strategies.agent_trading.agent_trading:AgentTradingConfig
+    config:
+      order_id_tag: AGENT
+
+node:
+  logging:
+    strategy_log_level: INFO
+
+  data:
+    clients:
+      external_json:
+        enabled: true
+
+  exec:
+    engine:
+      reconciliation: false
+      reconciliation_scope: null

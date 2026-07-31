@@ -2,7 +2,8 @@
 name: karpathy-guidelines
 description: 在本项目中编写、审阅或重构代码时使用，让改动保持简单、明确、聚焦、可验证。
 license: MIT
-source: https://github.com/forrestchang/andrej-karpathy-skills
+metadata:
+  source: https://github.com/forrestchang/andrej-karpathy-skills
 ---
 
 # Karpathy 准则
@@ -23,7 +24,7 @@ source: https://github.com/forrestchang/andrej-karpathy-skills
 
 ## 项目专用规则
 
-- 本机默认在 WSL 2 Ubuntu 中操作，项目路径是 `/mnt/d/project/nt_quant`。本地搜索、Git、打包和数据文件处理优先通过 `wsl.exe --distribution Ubuntu --exec bash -lc ...` 执行；只有 Windows 专属操作才使用 PowerShell 7。
+- 本地尽量在 WSL 2 Ubuntu 中操作，项目路径是 `/mnt/d/project/nt_quant`。搜索、Git、打包和数据文件处理优先通过 WSL 2 执行；只有 Windows 专属操作才使用 PowerShell 7。WSL 缺少 `rg`、`jq` 等常规命令行工具时，可以直接通过系统包管理器安装，不需要仅因工具缺失退回 Windows；Python 项目依赖、Conda、全局配置和凭据仍按权限敏感事项处理。
 - WSL 不单独复制 SSH 私钥或维护第二套 Conda。连接服务器时从 WSL 调用 `/mnt/c/Windows/System32/OpenSSH/ssh.exe` 和同目录的 `scp.exe`，复用 Windows 的 `aws`、`aliyun` alias 与密钥；运行项目 Python 时调用 `/mnt/d/app/miniconda/envs/nt/python.exe`，复用现有 `nt` 环境。
 - 发布流程按改动规模区分：小改动不创建 commit 或 PR，直接把涉及文件同步到 AWS；大改动或完整策略改动才提交 commit、push，并执行部署和验证的完整流程。改动规模不明确时先向用户确认。
 - 环境事实是工作流的一部分。如果本地权限、shell、运行时或工具问题迫使你换一种方法，把这个可复用的解决方式记录到这里，避免以后重复踩坑。
