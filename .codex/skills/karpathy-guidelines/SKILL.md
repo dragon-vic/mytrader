@@ -16,12 +16,16 @@ source: https://github.com/forrestchang/andrej-karpathy-skills
 - 行动前说明关键假设。
 - 如果请求有多种合理解释，先指出歧义。
 - 当存在更简单或更安全的做法时，直接提出。
+- 如果对用户的方案、需求或验收方式有任何疑问或不确定点，及时沟通确认；不要自作主张用替代方案绕过问题或蒙混过关。
 - 如果下一步依赖不清楚或涉及权限敏感的上下文，停下来询问。
 
 在本项目中，环境、Conda、系统目录、全局配置、网络安装都属于权限敏感事项。不要静默绕过这些问题。
 
 ## 项目专用规则
 
+- 本机默认在 WSL 2 Ubuntu 中操作，项目路径是 `/mnt/d/project/nt_quant`。本地搜索、Git、打包和数据文件处理优先通过 `wsl.exe --distribution Ubuntu --exec bash -lc ...` 执行；只有 Windows 专属操作才使用 PowerShell 7。
+- WSL 不单独复制 SSH 私钥或维护第二套 Conda。连接服务器时从 WSL 调用 `/mnt/c/Windows/System32/OpenSSH/ssh.exe` 和同目录的 `scp.exe`，复用 Windows 的 `aws`、`aliyun` alias 与密钥；运行项目 Python 时调用 `/mnt/d/app/miniconda/envs/nt/python.exe`，复用现有 `nt` 环境。
+- 发布流程按改动规模区分：小改动不创建 commit 或 PR，直接把涉及文件同步到 AWS；大改动或完整策略改动才提交 commit、push，并执行部署和验证的完整流程。改动规模不明确时先向用户确认。
 - 环境事实是工作流的一部分。如果本地权限、shell、运行时或工具问题迫使你换一种方法，把这个可复用的解决方式记录到这里，避免以后重复踩坑。
 - 在这个 Windows 工作区里，`rg.exe` 可能因为 `Access denied` 失败。发生时改用 PowerShell 原生命令，例如 `Get-ChildItem -Recurse -File -ErrorAction SilentlyContinue` 和 `Select-String`，并把范围限制在需要的文件类型或目录。
 - 递归 PowerShell 扫描可能遇到 `.pytest_cache` 等无权限路径。使用 `-ErrorAction SilentlyContinue` 或缩小搜索范围，不要把它误判为仓库损坏。

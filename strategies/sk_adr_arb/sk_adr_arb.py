@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import queue
 import threading
@@ -91,14 +90,14 @@ class SkAdrArbConfig(StrategyConfig, frozen=True):
     tier_two_premium: Decimal
     tier_three_premium: Decimal
     close_premium: Decimal
-    close_leg_notional: Decimal
-    rebalance_threshold: Decimal
+    close_full_premium: Decimal
+    close_round_ratio: Decimal
+    close_rounds: int
     retry_delay_sec: Decimal
     price_check_interval_sec: Decimal
     max_mark_age_sec: Decimal
     telegram_notify_step: Decimal
     initial_completed_stage: int
-    stage_snapshot_path: str
 
 
 class SkAdrArbStrategy(Strategy):
@@ -125,9 +124,10 @@ class SkAdrArbStrategy(Strategy):
             self.max_target_notional,
             self.final_target_notional,
         )
-        self.close_premium = config.close_premium
-        self.close_leg_notional = config.close_leg_notional
-        self.rebalance_threshold = config.rebalance_threshold
+        self.close_premium = Decimal(str(config.close_premium))
+        self.close_full_premium = Decimal(str(config.close_full_premium))
+        self.close_round_ratio = Decimal(str(config.close_round_ratio))
+        self.close_rounds = config.close_rounds
         self.retry_delay_ns = int(config.retry_delay_sec * NANOSECONDS_PER_SECOND)
         self.price_check_interval_ns = int(config.price_check_interval_sec * NANOSECONDS_PER_SECOND)
         self.max_mark_age_ns = int(config.max_mark_age_sec * NANOSECONDS_PER_SECOND)
@@ -138,8 +138,6 @@ class SkAdrArbStrategy(Strategy):
             self.tier_target_notional,
             self.max_target_notional,
             self.final_target_notional,
-            self.close_leg_notional,
-            self.rebalance_threshold,
         )
         if min(notionals) <= 0:
             raise ValueError("leverage and notionals must be positive")
@@ -152,12 +150,19 @@ class SkAdrArbStrategy(Strategy):
             raise ValueError("add notional targets must be increasing")
         if not (
             Decimal("0")
-            <= self.close_premium
+            <= self.close_full_premium
+            < self.close_premium
             < self.tier_one_premium
             < self.tier_two_premium
             < self.tier_three_premium
         ):
             raise ValueError("premium thresholds must be strictly increasing")
+        if not (
+            Decimal("0") < self.close_round_ratio
+            and self.close_rounds > 0
+            and self.close_round_ratio * self.close_rounds <= Decimal("1")
+        ):
+            raise ValueError("close round ratio and count are invalid")
         if self.retry_delay_ns < 0 or self.price_check_interval_ns <= 0 or self.max_mark_age_ns <= 0:
             raise ValueError("alert intervals and max_mark_age_sec are invalid")
         if self.telegram_notify_step <= 0:
@@ -170,6 +175,10 @@ class SkAdrArbStrategy(Strategy):
         self.pending_action: str | None = None
         self.pending_stage: int | None = None
         self.close_mode = False
+        self.close_armed = True
+        self.close_round = 0
+        self.close_target_rounds = self.close_rounds
+        self.close_start_notional: dict[InstrumentId, Decimal] | None = None
         self.ready = True
         self.halted = False
         self.alert_name: str | None = None
@@ -178,13 +187,11 @@ class SkAdrArbStrategy(Strategy):
         self.completed_stage = config.initial_completed_stage
         self.open_stage: int | None = None
         self.open_target: Decimal | None = None
-        self.stage_snapshot_path = ROOT / config.stage_snapshot_path
         self.telegram: TelegramSender | None = None
         self.last_notify_premium: Decimal | None = None
 
     def on_start(self) -> None:
         self._check_startup()
-        self._load_stage_snapshot()
         load_dotenv(ROOT / ".env")
         self.telegram = TelegramSender(
             token=os.environ["TELEGRAM_BOT_TOKEN"],
@@ -231,7 +238,7 @@ class SkAdrArbStrategy(Strategy):
         self.log.info(
             f"orders_filled round={self.round_count} action={action} stage={stage} margin={margin:.4f}",
         )
-        if action in {"close_pair", "close_rebalance"}:
+        if action == "close_pair":
             self._continue_close()
             return
         if action == "open_pair":
@@ -273,9 +280,20 @@ class SkAdrArbStrategy(Strategy):
                 ids = ",".join(str(order.client_order_id) for order in open_orders)
                 raise RuntimeError(f"startup_open_orders instrument={instrument_id} orders={ids}")
             positions = self.cache.positions_open(instrument_id=instrument_id)
+            quantities = [position.signed_decimal_qty() for position in positions]
+            has_long = any(quantity > 0 for quantity in quantities)
+            has_short = any(quantity < 0 for quantity in quantities)
+            if has_long and has_short:
+                raise RuntimeError(
+                    f"startup_offsetting_positions instrument={instrument_id} quantities={quantities}",
+                )
+            signed_qty[instrument_id] = sum(quantities, Decimal("0"))
             if len(positions) > 1:
-                raise RuntimeError(f"startup_multiple_positions instrument={instrument_id}")
-            signed_qty[instrument_id] = positions[0].signed_decimal_qty() if positions else Decimal("0")
+                # NT reconciliation can split one venue-side position across same-side position IDs.
+                self.log.warning(
+                    f"startup_multiple_same_side_positions instrument={instrument_id} "
+                    f"count={len(positions)} aggregate_qty={signed_qty[instrument_id]}",
+                )
 
         sk_qty = signed_qty[self.sk_id]
         adr_qty = signed_qty[self.adr_id]
@@ -298,11 +316,39 @@ class SkAdrArbStrategy(Strategy):
         sk_notional, adr_notional = self._position_notionals()
         premium = adr_price / ADR_COMMON_SHARE_RATIO / sk_price - Decimal("1")
         self._notify_market(sk_price, adr_price, premium)
-        if not self.close_mode and premium < self.close_premium:
+        if not self.close_mode and premium >= self.close_premium:
+            self.close_armed = True
+            self.close_round = 0
+            self.close_target_rounds = self.close_rounds
+            self.close_start_notional = None
+        has_position = min(sk_notional, adr_notional) > 0
+        if not self.close_mode and self.close_armed and has_position and premium < self.close_premium:
             self.close_mode = True
+            self.close_armed = False
+            self.close_round = 0
+            self.close_target_rounds = (
+                self.close_rounds * 2
+                if premium < self.close_full_premium
+                else self.close_rounds
+            )
+            self.close_start_notional = {
+                self.sk_id: sk_notional,
+                self.adr_id: adr_notional,
+            }
             self.log.warning(f"close_mode_entered premium={premium:.4%}")
+        elif (
+            not self.close_mode
+            and self.close_start_notional is not None
+            and self.close_round == self.close_rounds
+            and premium < self.close_full_premium
+        ):
+            self.close_mode = True
+            self.close_target_rounds = self.close_rounds * 2
+            self.log.warning(f"close_full_mode_entered premium={premium:.4%}")
         if self.close_mode:
-            self._submit_close_pair(sk_price, adr_price)
+            if premium < self.close_full_premium:
+                self.close_target_rounds = self.close_rounds * 2
+            self._submit_close_pair()
             return
         stage = self.completed_stage + 1
         if stage > len(self.stage_targets) or premium <= self.stage_premiums[stage - 1]:
@@ -397,14 +443,13 @@ class SkAdrArbStrategy(Strategy):
         self.open_target = min(self.open_target + self.add_step_notional, target_limit)
         self._schedule_attempt(self.retry_delay_ns)
 
-    # 完成状态先持久化；第三档完成后开仓永久禁用，但减仓检查继续运行。
+    # 完成状态仅在本次进程内推进；重启时由配置参数人工确认档位。
     def _complete_stage(self, stage: int, reason: str) -> None:
         if stage <= self.completed_stage:
             return
         self.completed_stage = stage
         self.open_stage = None
         self.open_target = None
-        self._save_stage_snapshot()
         self.log.warning(
             f"open_stage_completed stage={stage} reason={reason} "
             f"next_stage={stage + 1 if stage < len(self.stage_targets) else 'disabled'}",
@@ -422,26 +467,6 @@ class SkAdrArbStrategy(Strategy):
         next_target = (larger // add_step + Decimal("1")) * add_step
         return min(next_target, target_limit)
 
-    # 启动时恢复已完成档位；首次部署用配置值建立快照。
-    def _load_stage_snapshot(self) -> None:
-        if self.stage_snapshot_path.exists():
-            data = json.loads(self.stage_snapshot_path.read_text(encoding="utf-8"))
-            completed_stage = int(data["completed_stage"])
-            if not 0 <= completed_stage <= len(self.stage_targets):
-                raise ValueError("stage snapshot completed_stage is invalid")
-            self.completed_stage = max(self.completed_stage, completed_stage)
-        self._save_stage_snapshot()
-
-    # 原子写入小型状态文件，防止重启后再次执行已经完成的开仓档位。
-    def _save_stage_snapshot(self) -> None:
-        self.stage_snapshot_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.stage_snapshot_path.with_suffix(f"{self.stage_snapshot_path.suffix}.tmp")
-        tmp.write_text(
-            json.dumps({"completed_stage": self.completed_stage}, indent=2),
-            encoding="utf-8",
-        )
-        tmp.replace(self.stage_snapshot_path)
-
     # 市价单数量向上对齐合约步长，使目标腿在当前标记价下至少到达本轮档位。
     @staticmethod
     def _add_qty(instrument, notional: Decimal, price: Decimal):
@@ -454,111 +479,60 @@ class SkAdrArbStrategy(Strategy):
         quantity = (raw_qty / increment).to_integral_value(rounding=ROUND_CEILING) * increment
         return instrument.make_qty(quantity)
 
-    # 平仓模式每轮同步减少两腿；尾仓不足一轮时直接全部 reduce-only 平掉。
-    def _submit_close_pair(self, sk_price: Decimal, adr_price: Decimal) -> None:
-        sk_position_qty = self._position_qty(self.sk_id)
-        adr_position_qty = abs(self._position_qty(self.adr_id))
-        if sk_position_qty == 0 and adr_position_qty == 0:
-            self._stop_node("close_mode_positions_flat")
-            return
-        if sk_position_qty == 0 or adr_position_qty == 0:
-            self._submit_close_rebalance()
-            return
+    # 每轮减少触发时名义的 10%；清仓阶段最后一轮直接消除尾仓。
+    def _submit_close_pair(self) -> None:
+        if self.close_start_notional is None:
+            raise RuntimeError("close start notionals are missing")
+        next_round = self.close_round + 1
+        full_rounds = self.close_rounds * 2
+        orders = []
+        pending = {}
+        sides = {self.sk_id: OrderSide.SELL, self.adr_id: OrderSide.BUY}
+        for instrument_id in self.instrument_ids:
+            current_qty = abs(self._position_qty(instrument_id))
+            price = self.marks[instrument_id].value.as_decimal()
+            if next_round == full_rounds:
+                reduce_qty = current_qty
+            else:
+                round_notional = self.close_start_notional[instrument_id] * self.close_round_ratio
+                reduce_qty = min(round_notional / price, current_qty)
+            instrument = self.cache.instrument(instrument_id)
+            quantity = instrument.make_qty(reduce_qty, round_down=True)
+            order = self.order_factory.market(
+                instrument_id=instrument_id,
+                order_side=sides[instrument_id],
+                quantity=quantity,
+                time_in_force=TimeInForce.GTC,
+                reduce_only=True,
+            )
+            orders.append(order)
+            pending[str(order.client_order_id)] = PendingLeg(instrument_id, quantity.as_decimal())
 
-        sk_notional = sk_position_qty * sk_price
-        adr_notional = adr_position_qty * adr_price
-        sk_instrument = self.cache.instrument(self.sk_id)
-        adr_instrument = self.cache.instrument(self.adr_id)
-        if min(sk_notional, adr_notional) <= self.close_leg_notional:
-            sk_qty = sk_instrument.make_qty(sk_position_qty, round_down=True)
-            adr_qty = adr_instrument.make_qty(adr_position_qty, round_down=True)
-        else:
-            sk_qty = sk_instrument.make_qty(self.close_leg_notional / sk_price, round_down=True)
-            adr_qty = adr_instrument.make_qty(self.close_leg_notional / adr_price, round_down=True)
-
-        sk_order = self.order_factory.market(
-            instrument_id=self.sk_id,
-            order_side=OrderSide.SELL,
-            quantity=sk_qty,
-            time_in_force=TimeInForce.GTC,
-            reduce_only=True,
-        )
-        adr_order = self.order_factory.market(
-            instrument_id=self.adr_id,
-            order_side=OrderSide.BUY,
-            quantity=adr_qty,
-            time_in_force=TimeInForce.GTC,
-            reduce_only=True,
-        )
         self.ready = False
         self.pending_action = "close_pair"
-        self.pending = {
-            str(sk_order.client_order_id): PendingLeg(self.sk_id, sk_qty.as_decimal()),
-            str(adr_order.client_order_id): PendingLeg(self.adr_id, adr_qty.as_decimal()),
-        }
+        self.pending = pending
         self.log.info(
-            f"submit_close_pair sk_qty={sk_qty} adr_qty={adr_qty} "
-            f"sk_notional={sk_notional:.4f} adr_notional={adr_notional:.4f}",
+            f"submit_close_pair round={next_round}/{self.close_target_rounds} "
+            f"ratio={self.close_round_ratio:.2%}",
         )
-        self.submit_order(sk_order)
-        if not self.halted:
-            self.submit_order(adr_order)
+        for order in orders:
+            if self.halted:
+                break
+            self.submit_order(order)
 
-    # 每次减仓成交后检查两腿价值，差额超过阈值时先减较大侧。
+    # 五轮后保留剩余仓位；十轮后清仓并停止策略。
     def _continue_close(self) -> None:
-        sk_notional, adr_notional = self._position_notionals()
-        if sk_notional == 0 and adr_notional == 0:
+        self.close_round += 1
+        if self.close_round < self.close_target_rounds:
+            self._schedule_attempt(self.retry_delay_ns)
+            return
+        self.close_mode = False
+        self.log.warning(f"close_mode_completed rounds={self.close_round}")
+        if self.close_round == self.close_rounds * 2:
+            self.close_start_notional = None
             self._stop_node("close_mode_positions_flat")
             return
-        difference = abs(sk_notional - adr_notional)
-        self.log.info(
-            f"close_balance sk_notional={sk_notional:.4f} adr_notional={adr_notional:.4f} "
-            f"difference={difference:.4f}",
-        )
-        if difference > self.rebalance_threshold or min(sk_notional, adr_notional) == 0:
-            self._submit_close_rebalance()
-            return
-        self._schedule_attempt(self.retry_delay_ns)
-
-    # 仅对名义价值较大的腿追加一次 reduce-only 市价减仓。
-    def _submit_close_rebalance(self) -> None:
-        sk_notional, adr_notional = self._position_notionals()
-        if sk_notional == 0 and adr_notional == 0:
-            self._stop_node("close_mode_positions_flat")
-            return
-        if sk_notional >= adr_notional:
-            instrument_id = self.sk_id
-            side = OrderSide.SELL
-            price = self.marks[self.sk_id].value.as_decimal()
-        else:
-            instrument_id = self.adr_id
-            side = OrderSide.BUY
-            price = self.marks[self.adr_id].value.as_decimal()
-
-        position_qty = abs(self._position_qty(instrument_id))
-        difference = abs(sk_notional - adr_notional)
-        instrument = self.cache.instrument(instrument_id)
-        if min(sk_notional, adr_notional) == 0:
-            quantity = instrument.make_qty(position_qty, round_down=True)
-        else:
-            quantity = instrument.make_qty(min(difference / price, position_qty), round_down=True)
-        order = self.order_factory.market(
-            instrument_id=instrument_id,
-            order_side=side,
-            quantity=quantity,
-            time_in_force=TimeInForce.GTC,
-            reduce_only=True,
-        )
-        self.ready = False
-        self.pending_action = "close_rebalance"
-        self.pending = {
-            str(order.client_order_id): PendingLeg(instrument_id, quantity.as_decimal()),
-        }
-        self.log.info(
-            f"submit_close_rebalance instrument={instrument_id} side={side} qty={quantity} "
-            f"difference={difference:.4f}",
-        )
-        self.submit_order(order)
+        self._schedule_attempt(self.price_check_interval_ns)
 
     # 用单次 alert 控制下一次价格检查，避免按行情事件运行策略逻辑。
     def _schedule_attempt(self, delay_ns: int) -> None:

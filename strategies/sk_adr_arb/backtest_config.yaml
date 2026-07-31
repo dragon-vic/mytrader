@@ -1,0 +1,120 @@
+strategy:
+  sk_adr:
+    enabled: true
+    strategy_path: strategies.pre_ipo.pre_ipo_backtest:PreIpoQuoteBacktestStrategy
+    config_path: strategies.pre_ipo.pre_ipo_backtest:PreIpoQuoteBacktestConfig
+    config:
+      order_id_tag: SKADR
+      binance_id: SKHYNIXADRUSDT-PERP.BINANCE
+      okx_id: SKHY-USDT-SWAP.OKX
+      feature_path: strategies/sk_adr_arb/data/SK_ADR_FEATURES-1M-20260710.parquet
+      qty: 3
+      max_position: 30
+      margin_leverage: 5
+      margin_buffer: 1.1
+      window_minutes: 360
+      entry_bps: 100
+      exit_bps: 25
+      std_mult: 2.2
+      capture_bps: 999
+      short_min_bps: 1200
+      long_max_bps: 4200
+      min_hold_sec: 0
+      signal_delay_ms: 0
+      start_time: 0
+      end_ns: 0
+    batch:
+      cases:
+        - qty: 4
+          max_position: 40
+          window_minutes: 180
+          entry_bps: 75
+          std_mult: 1.8
+          exit_bps: 15
+        - qty: 3
+          max_position: 30
+          window_minutes: 360
+          entry_bps: 100
+          std_mult: 2.2
+          exit_bps: 25
+        - qty: 2
+          max_position: 20
+          window_minutes: 720
+          entry_bps: 150
+          std_mult: 2.7
+          exit_bps: 40
+    artifacts:
+      denials_path: local_denials.csv
+
+backtest:
+  max_workers: 3
+
+  venues:
+    binance:
+      adapter: binance
+      venue: BINANCE
+      instrument_kind: perpetual
+      quote_currency: USDT
+      markets:
+        - symbol: SKHYNIXADR/USDT
+      starting_balances: ["2000 USDT"]
+      account_type: MARGIN
+      oms_type: NETTING
+      default_leverage: "5"
+      use_market_order_acks: true
+      fill_model:
+        type: bps_slippage
+        slippage_bps: 1
+      latency:
+        base_latency_ms: 0
+        insert_latency_ms: 0
+        update_latency_ms: 0
+        cancel_latency_ms: 0
+
+    okx:
+      adapter: okx
+      venue: OKX
+      instrument_kind: perpetual
+      quote_currency: USDT
+      markets:
+        - symbol: SKHY/USDT
+      starting_balances: ["2000 USDT"]
+      account_type: MARGIN
+      oms_type: NETTING
+      default_leverage: "5"
+      use_market_order_acks: true
+      fill_model:
+        type: bps_slippage
+        slippage_bps: 1
+      latency:
+        base_latency_ms: 0
+        insert_latency_ms: 0
+        update_latency_ms: 0
+        cancel_latency_ms: 0
+
+  datasets:
+    - type: quote_ticks
+      path: strategies/sk_adr_arb/data/SK_ADR_QUOTES-1M-20260710.parquet
+
+  logging:
+    log_level: ERROR
+    bypass: true
+
+  instrument:
+    is_inverse: false
+    price_precision: 3
+    size_precision: 1
+    price_increment: "0.001"
+    size_increment: "0.1"
+    lot_size: "0.1"
+    multiplier: "1"
+    min_quantity: "0.1"
+    max_quantity: "10000"
+    min_notional: "0"
+    max_notional: null
+    min_price: "0.001"
+    max_price: "10000000"
+    margin_init: "0.2"
+    margin_maint: "0.1"
+    maker_fee: "0.0004"
+    taker_fee: "0.0004"

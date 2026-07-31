@@ -9,22 +9,21 @@ strategy:
       adr_instrument: SKHYUSDT-PERP.BINANCE
       leverage: 10
       add_step_notional: 500
-      tier_target_notional: 11000
+      tier_target_notional: 12000
       max_target_notional: 16000
       final_target_notional: 20000
-      tier_one_premium: 0.35
+      tier_one_premium: 0.36
       tier_two_premium: 0.40
-      tier_three_premium: 0.50
-      close_premium: 0.03
-      close_leg_notional: 200
-      rebalance_threshold: 50
+      tier_three_premium: 0.45
+      close_premium: 0.25
+      close_full_premium: 0.15
+      close_round_ratio: 0.10
+      close_rounds: 5
       retry_delay_sec: 10
       price_check_interval_sec: 1
       max_mark_age_sec: 5
       telegram_notify_step: 0.01
-      initial_completed_stage: 1
-    artifacts:
-      stage_snapshot_path: open_stage_snapshot.json
+      initial_completed_stage: 3
 
 node:
   logging:

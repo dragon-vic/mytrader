@@ -3,10 +3,12 @@ from __future__ import annotations
 import html
 import json
 import os
+import re
 import signal
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -18,11 +20,16 @@ from dotenv import load_dotenv
 
 
 ROOT = Path(__file__).resolve().parents[1]
+PHOTO_ROOT = Path("/tmp/telegram_codex")
 os.environ['PATH'] = f"{Path.home() / '.local' / 'bin'}:{os.environ.get('PATH', '')}"
 SESSION_FILE = Path(__file__).resolve().parent / ".telegram_codex_session"
 MAX_MESSAGE = 3800
 POLL_TIMEOUT = 5
+SEND_RETRIES = 3
+MAX_PHOTO_BYTES = 10 * 1024 * 1024
 TMUX_SESSION = "telegram-codex"
+PHOTO_RE = re.compile(r'^[ \t]*图片：“([^”\r\n]+)”[ \t]*$', re.MULTILINE)
+EMPTY_FINAL_PROMPT = "上一轮没有返回最终答案。请继续完成用户最新任务，并只输出完整最终答案。"
 ORDER_PROMPT = """给我当前正在运行的策略的 snapshot 信息。
 
 重点看订单/动作记录。每一行代表一次 long 或 short，用 ↑ 表示 long，用 ↓ 表示 short。
@@ -63,7 +70,9 @@ SYSTEM_PROMPT = """你是通过 Telegram 操作本机项目 /home/ubuntu/pycharm
 
 不要主动重启 Telegram bot、live 策略、collector、tmux session 或其它本机服务；如果判断需要重启，只说明原因和建议命令，等待用户明确下令后再执行。
 
-不要在最终回答里倾倒完整日志。只汇报关键结果、改了什么、验证了什么、还有什么风险。路径、命令、数值要写清楚。"""
+不要在最终回答里倾倒完整日志。只汇报关键结果、改了什么、验证了什么、还有什么风险。路径、命令、数值要写清楚。
+
+需要让 Telegram 发送本机图片时，先把图片保存到 /tmp/telegram_codex，再在最终回答中额外输出单独一行：图片：“绝对路径”。每张图片各写一行；其余内容仍使用 Telegram HTML。Bot 会移除图片指令并上传对应文件。"""
 
 
 class Telegram:
@@ -115,20 +124,48 @@ class Telegram:
             except requests.RequestException as exc:
                 print(f"telegram_delete_error {type(exc).__name__}", flush=True)
 
+    # 上传项目内由 Codex 生成的图片。
+    def send_photo(self, chat_id: str, path: Path) -> int:
+        for attempt in range(SEND_RETRIES):
+            try:
+                with path.open("rb") as photo:
+                    response = requests.post(
+                        f"{self.base}/sendPhoto",
+                        data={"chat_id": chat_id},
+                        files={"photo": (path.name, photo)},
+                        timeout=30,
+                    )
+                response.raise_for_status()
+                result = response.json()
+                return int((result.get("result") or {}).get("message_id") or 0)
+            except (requests.ConnectionError, requests.Timeout):
+                if attempt + 1 == SEND_RETRIES:
+                    raise
+                time.sleep(0.5 * (attempt + 1))
+        raise RuntimeError("telegram photo retry exhausted")
+
     def _send_html(self, chat_id: str, text: str) -> int:
-        response = requests.post(
-            f"{self.base}/sendMessage",
-            json={
-                "chat_id": chat_id,
-                "text": text,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True,
-            },
-            timeout=15,
-        )
-        response.raise_for_status()
-        payload = response.json()
-        return int((payload.get("result") or {}).get("message_id") or 0)
+        payload = {
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        }
+        for attempt in range(SEND_RETRIES):
+            try:
+                response = requests.post(
+                    f"{self.base}/sendMessage",
+                    json=payload,
+                    timeout=15,
+                )
+                response.raise_for_status()
+                result = response.json()
+                return int((result.get("result") or {}).get("message_id") or 0)
+            except (requests.ConnectionError, requests.Timeout):
+                if attempt + 1 == SEND_RETRIES:
+                    raise
+                time.sleep(0.5 * (attempt + 1))
+        raise RuntimeError("telegram send retry exhausted")
 
 
 class CodexRunner:
@@ -177,6 +214,7 @@ class CodexRunner:
                 self._notice(chat_id, "<i>推理中</i>", notice_gen)
             try:
                 result, usage = run_codex(merge_prompts(batch), self.session_file, self._set_proc, self._clear_proc)
+                result, photos = extract_photos(result)
             except CodexCancelled:
                 batch = self._merge_pending(batch)
                 continue
@@ -197,7 +235,18 @@ class CodexRunner:
                 self.busy = False
                 self._clear_queued(batch)
             self._delete_notices(chat_id, notice_gen)
-            self.bot.send(chat_id, with_stats(result or "Codex 没有返回内容", start, usage))
+            photo_errors = []
+            for path in photos:
+                try:
+                    self.bot.send_photo(chat_id, path)
+                except (OSError, requests.RequestException) as exc:
+                    print(f"telegram_photo_error {path} {type(exc).__name__}", flush=True)
+                    photo_errors.append(path.name)
+            if photo_errors:
+                failed = html.escape(", ".join(photo_errors))
+                result = f"{result}\n\n<i>图片发送失败：{failed}</i>".strip()
+            fallback = "图片已发送" if photos else "Codex 没有返回内容"
+            self.bot.send(chat_id, with_stats(result or fallback, start, usage))
             return
 
     def _notice(self, chat_id: str, text: str, notice_gen: int) -> None:
@@ -287,6 +336,30 @@ def split_text(text: str) -> list[str]:
     if rest:
         parts.append(rest)
     return parts
+
+
+# 提取图片指令，并限制只能读取专用临时目录内的常见图片文件。
+def extract_photos(text: str) -> tuple[str, list[Path]]:
+    photos: list[Path] = []
+
+    def extract(match: re.Match[str]) -> str:
+        path = Path(match.group(1)).expanduser().resolve()
+        try:
+            path.relative_to(PHOTO_ROOT)
+        except ValueError as exc:
+            raise ValueError(f"图片路径不在临时图片目录内: {path}") from exc
+        if not path.is_file():
+            raise ValueError(f"图片不存在: {path}")
+        if path.suffix.lower() not in {".jpg", ".jpeg", ".png"}:
+            raise ValueError(f"不支持的图片格式: {path.suffix}")
+        if path.stat().st_size > MAX_PHOTO_BYTES:
+            raise ValueError(f"图片超过 10MB: {path}")
+        photos.append(path)
+        return ""
+
+    clean = PHOTO_RE.sub(extract, text)
+    clean = re.sub(r"\n{3,}", "\n\n", clean).strip()
+    return clean, photos
 
 
 def with_stats(text: str, start: float, usage: dict[str, Any] | None) -> str:
@@ -434,14 +507,32 @@ def run_codex(
     set_proc: Any,
     clear_proc: Any,
 ) -> tuple[str, dict[str, Any] | None]:
+    output, usage = _run_once(prompt, session_file, set_proc, clear_proc)
+    if output:
+        return output, usage
+    return _run_once(EMPTY_FINAL_PROMPT, session_file, set_proc, clear_proc)
+
+
+# 使用 CLI 的最终消息文件，避免把 commentary 误当成 final。
+def _run_once(
+    prompt: str,
+    session_file: Path,
+    set_proc: Any,
+    clear_proc: Any,
+) -> tuple[str, dict[str, Any] | None]:
     session_id = read_session(session_file)
     prompt = build_prompt(prompt)
+    final_file = tempfile.NamedTemporaryFile(prefix="telegram_codex_", suffix=".txt", delete=False)
+    final_path = Path(final_file.name)
+    final_file.close()
     if session_id:
         cmd = [
             "codex",
             "exec",
             "resume",
             "--json",
+            "--output-last-message",
+            str(final_path),
             "--dangerously-bypass-approvals-and-sandbox",
             session_id,
             prompt,
@@ -451,33 +542,38 @@ def run_codex(
             "codex",
             "exec",
             "--json",
+            "--output-last-message",
+            str(final_path),
             "--sandbox",
             "danger-full-access",
             prompt,
         ]
-    proc = subprocess.Popen(
-        cmd,
-        cwd=ROOT,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        start_new_session=True,
-    )
-    set_proc(proc)
-    stdout, stderr = proc.communicate()
-    cancelled = clear_proc(proc)
-    if cancelled:
-        raise CodexCancelled()
-    output, new_session, usage = parse_codex_output(stdout)
-    if new_session and not session_id:
-        session_file.parent.mkdir(parents=True, exist_ok=True)
-        session_file.write_text(new_session, encoding="utf-8")
-    if proc.returncode != 0:
-        detail = "\n\n".join(part for part in [stderr.strip(), output] if part).strip()
-        if not detail:
-            detail = f"codex exited with code {proc.returncode}"
-        raise RuntimeError(detail[-MAX_MESSAGE:])
-    return output, usage
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+        set_proc(proc)
+        stdout, stderr = proc.communicate()
+        cancelled = clear_proc(proc)
+        if cancelled:
+            raise CodexCancelled()
+        diagnostic, new_session, usage = parse_codex_output(stdout)
+        if new_session and not session_id:
+            session_file.parent.mkdir(parents=True, exist_ok=True)
+            session_file.write_text(new_session, encoding="utf-8")
+        if proc.returncode != 0:
+            detail = "\n\n".join(part for part in [stderr.strip(), diagnostic] if part).strip()
+            if not detail:
+                detail = f"codex exited with code {proc.returncode}"
+            raise RuntimeError(detail[-MAX_MESSAGE:])
+        return final_path.read_text(encoding="utf-8").strip(), usage
+    finally:
+        final_path.unlink(missing_ok=True)
 
 
 def build_prompt(prompt: str) -> str:

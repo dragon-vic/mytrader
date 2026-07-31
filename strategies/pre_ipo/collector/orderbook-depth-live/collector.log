@@ -1,0 +1,9 @@
+2026-07-06 18:01:14 start duration_sec=20 base_dir=/home/ubuntu/pycharm_nt/strategies/pre_ipo/collector/orderbook-depth-live
+2026-07-06 18:01:14 binance depth connecting
+2026-07-06 18:01:14 okx depth connecting
+2026-07-06 18:01:14 binance depth connected
+2026-07-06 18:01:14 okx depth connected
+2026-07-06 18:01:14 okx event {'event': 'subscribe', 'arg': {'channel': 'books', 'instId': 'ANTHROPIC-USDT-SWAP'}, 'connId': 'ef7352f2'}
+2026-07-06 18:01:35 wrote depth rows=85 queue=0
+2026-07-06 18:01:39 compacted depth asset=ANTHROPIC hour=2026070618 files=1 rows=85 out=depth-2026070618.parquet
+2026-07-06 18:01:39 finished
