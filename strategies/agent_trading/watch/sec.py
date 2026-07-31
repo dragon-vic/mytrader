@@ -81,12 +81,16 @@ class SecWatcher:
         self.targets[event_id] = target
         self.changed.set()
 
-    def remove(self, event_id: str) -> None:
+    async def remove(self, event_id: str) -> None:
         self.targets.pop(event_id, None)
         self.seen = {item for item in self.seen if item[0] != event_id}
+        waiting = []
         for key, task in tuple(self.downloads.items()):
             if key[0] == event_id:
                 task.cancel()
+                waiting.append(task)
+        if waiting:
+            await asyncio.gather(*waiting, return_exceptions=True)
         self.changed.set()
 
     async def close(self) -> None:

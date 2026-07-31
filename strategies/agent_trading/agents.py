@@ -83,7 +83,7 @@ class AnalysisAgent:
     def __init__(self, runner: CodexRunner) -> None:
         self.runner = runner
 
-    # 分析 Agent 的输出由后续确定的 JSON Schema 约束。
+    # 分析只读取事件目录，避免引入披露后的外部信息。
     async def run(
         self,
         prompt: str,
@@ -96,7 +96,7 @@ class AnalysisAgent:
             work_dir=event_dir,
             output_path=output_path,
             schema_path=schema_path,
-            web_search=True,
+            web_search=False,
         )
 
 

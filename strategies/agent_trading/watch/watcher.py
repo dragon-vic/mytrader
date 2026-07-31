@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 from datetime import UTC
 from datetime import datetime
 from pathlib import Path
@@ -101,6 +102,7 @@ class DisclosureWatcher:
                 result.set_exception(exc)
 
         target = WatchTarget(plan, context_dir, ready, fail)
+        package = None
         try:
             self.sec.add(target)
             self.news.add(target)
@@ -108,8 +110,10 @@ class DisclosureWatcher:
             self._write_manifest(context_dir / "report.json", package)
             return package
         finally:
-            self.sec.remove(plan.event_id)
+            await self.sec.remove(plan.event_id)
             await self.news.remove(plan.event_id)
+            if package is not None:
+                self._discard_loser(context_dir, package.source)
 
     @staticmethod
     def _write_manifest(path: Path, package: DisclosurePackage) -> None:
@@ -119,3 +123,12 @@ class DisclosureWatcher:
             encoding="utf-8",
         )
         temporary.replace(path)
+
+    @staticmethod
+    def _discard_loser(context_dir: Path, winner: str) -> None:
+        disclosure_dir = (context_dir / "disclosure").resolve()
+        loser = "news_release" if winner == "sec" else "sec"
+        loser_dir = (disclosure_dir / loser).resolve()
+        loser_dir.relative_to(disclosure_dir)
+        if loser_dir.exists():
+            shutil.rmtree(loser_dir)

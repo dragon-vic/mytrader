@@ -45,7 +45,7 @@ class EventStore:
             result=result,
             state=root / "state.json",
             event=context / "event.json",
-            research=context / "research.md",
+            research=context / "research.json",
             watch_plan=context / "watch_plan.json",
             report=context / "report.json",
             decision=result / "decision.json",
