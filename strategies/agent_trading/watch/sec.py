@@ -102,7 +102,8 @@ class SecWatcher:
     async def _run(self) -> None:
         try:
             while not self.closed:
-                if not self.targets:
+                busy = {key[0] for key in self.downloads}
+                if not any(event_id not in busy for event_id in self.targets):
                     await self.changed.wait()
                     self.changed.clear()
                     continue
@@ -159,6 +160,7 @@ class SecWatcher:
             target.fail(exc)
         finally:
             self.downloads.pop(key, None)
+            self.changed.set()
 
     async def _download(
         self,
