@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "as_of",
+    "research_report",
+    "analysis_brief",
+    "research_complete",
+    "decision_rules",
+    "trade_candidates",
+    "evidence",
+    "watch_plan"
+  ],
+  "properties": {
+    "event_id": {"type": "string", "minLength": 1},
+    "as_of": {"type": "string", "format": "date-time"},
+    "research_report": {"type": "string", "minLength": 1},
+    "analysis_brief": {"type": "string", "minLength": 1},
+    "research_complete": {"type": "boolean"},
+    "decision_rules": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "priority", "rule", "rationale", "exceptions", "evidence_ids"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "priority": {"type": "integer", "minimum": 1},
+          "rule": {"type": "string", "minLength": 1},
+          "rationale": {"type": "string", "minLength": 1},
+          "exceptions": {"type": "array", "items": {"type": "string"}},
+          "evidence_ids": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "trade_candidates": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "symbol",
+          "instrument_id",
+          "relationship",
+          "impact_thesis",
+          "relevant_rule_ids",
+          "risks"
+        ],
+        "properties": {
+          "symbol": {"type": "string", "minLength": 1},
+          "instrument_id": {"type": "string", "minLength": 1},
+          "relationship": {"type": "string", "minLength": 1},
+          "impact_thesis": {"type": "string", "minLength": 1},
+          "relevant_rule_ids": {"type": "array", "items": {"type": "string"}},
+          "risks": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "url", "published_at", "facts", "inferences", "confidence"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "title": {"type": "string", "minLength": 1},
+          "url": {"type": "string", "minLength": 1},
+          "published_at": {"type": ["string", "null"]},
+          "facts": {"type": "array", "items": {"type": "string"}},
+          "inferences": {"type": "array", "items": {"type": "string"}},
+          "confidence": {"type": "string", "enum": ["high", "medium", "low"]}
+        }
+      }
+    },
+    "watch_plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_id", "start_at", "end_at", "sec", "news_release"],
+      "properties": {
+        "event_id": {"type": "string", "minLength": 1},
+        "start_at": {"type": "string", "format": "date-time"},
+        "end_at": {"type": "string", "format": "date-time"},
+        "sec": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["cik", "forms"],
+          "properties": {
+            "cik": {"type": "string", "pattern": "^[0-9]{10}$"},
+            "forms": {
+              "type": "array",
+              "minItems": 1,
+              "items": {"type": "string", "enum": ["8-K", "10-Q", "10-K", "6-K", "20-F", "40-F"]}
+            }
+          }
+        },
+        "news_release": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["sources"],
+          "properties": {
+            "sources": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["url", "format", "last_seen", "title_terms"],
+                "properties": {
+                  "url": {"type": "string", "minLength": 1},
+                  "format": {"type": "string", "enum": ["feed", "html"]},
+                  "last_seen": {"type": "string", "minLength": 1},
+                  "title_terms": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {"type": "string"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -57,6 +57,7 @@ class NewsReleaseWatcher:
         self.poll_seconds = poll_seconds
         self.processor = processor
         self.tasks: dict[str, set[asyncio.Task]] = {}
+        self.limits: dict[str, _HostLimiter] = {}
 
     def add(self, target: WatchTarget) -> None:
         event_id = target.plan.event_id
@@ -139,6 +140,9 @@ class NewsReleaseWatcher:
         )
 
     async def _get(self, url: str) -> _HttpBody:
+        host = urlsplit(url).netloc.casefold()
+        limit = self.limits.setdefault(host, _HostLimiter(self.poll_seconds))
+        await limit.wait()
         async with self.session.get(url) as response:
             response.raise_for_status()
             return _HttpBody(
@@ -146,6 +150,21 @@ class NewsReleaseWatcher:
                 content_type=response.headers.get("Content-Type", ""),
                 url=str(response.url),
             )
+
+
+class _HostLimiter:
+    def __init__(self, interval: float) -> None:
+        self.interval = interval
+        self.next_at = 0.0
+        self.lock = asyncio.Lock()
+
+    # 同一新闻主机上的所有事件共享请求间隔。
+    async def wait(self) -> None:
+        async with self.lock:
+            now = asyncio.get_running_loop().time()
+            if now < self.next_at:
+                await asyncio.sleep(self.next_at - now)
+            self.next_at = asyncio.get_running_loop().time() + self.interval
 
 
 class _LinkParser(HTMLParser):

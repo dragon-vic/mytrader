@@ -4,7 +4,6 @@ import asyncio
 import json
 import logging
 import shutil
-from dataclasses import replace
 from datetime import UTC
 from datetime import datetime
 from pathlib import Path
@@ -84,7 +83,7 @@ class DisclosureWatcher:
             self.sec = None
             self.news = None
 
-    # 新闻稿可以提前下载，但只有完整 SEC filing 才能触发一次分析。
+    # SEC filing 或官方新闻稿中，第一个完整处理成功的来源触发分析。
     async def watch(self, plan: WatchPlan, context_dir: Path) -> DisclosurePackage:
         if self.sec is None or self.news is None:
             raise RuntimeError("DisclosureWatcher is not started")
@@ -98,18 +97,11 @@ class DisclosureWatcher:
         context_dir = context_dir.resolve()
         context_dir.mkdir(parents=True, exist_ok=True)
         result = asyncio.get_running_loop().create_future()
-        news_package = None
 
-        async def sec_ready(package: DisclosurePackage) -> bool:
+        async def ready(package: DisclosurePackage) -> bool:
             if result.done():
                 return False
             result.set_result(package)
-            return True
-
-        async def news_ready(package: DisclosurePackage) -> bool:
-            nonlocal news_package
-            if news_package is None:
-                news_package = package
             return True
 
         def fail(exc: Exception) -> None:
@@ -119,30 +111,20 @@ class DisclosureWatcher:
         def news_fail(exc: Exception) -> None:
             LOG.warning("news watch failed event_id=%s error=%s", plan.event_id, exc)
 
-        sec_target = WatchTarget(plan, context_dir, sec_ready, fail)
-        news_target = WatchTarget(plan, context_dir, news_ready, news_fail)
+        sec_target = WatchTarget(plan, context_dir, ready, fail)
+        news_target = WatchTarget(plan, context_dir, ready, news_fail)
         package = None
         try:
             self.sec.add(sec_target)
             self.news.add(news_target)
             package = await asyncio.wait_for(result, timeout=remaining)
-            if news_package is not None and not any(
-                item.document_type.upper().startswith("EX-99")
-                for item in package.files
-            ):
-                package = replace(
-                    package,
-                    files=package.files + news_package.files,
-                )
             self._write_manifest(context_dir / "report.json", package)
             return package
         finally:
             await self.sec.remove(plan.event_id)
             await self.news.remove(plan.event_id)
-            if package is None or not any(
-                item.document_type == "NEWS_RELEASE" for item in package.files
-            ):
-                self._discard_news(context_dir)
+            if package is not None:
+                self._discard_loser(context_dir, package.source)
 
     @staticmethod
     def _write_manifest(path: Path, package: DisclosurePackage) -> None:
@@ -154,9 +136,10 @@ class DisclosureWatcher:
         temporary.replace(path)
 
     @staticmethod
-    def _discard_news(context_dir: Path) -> None:
+    def _discard_loser(context_dir: Path, winner: str) -> None:
         disclosure_dir = (context_dir / "disclosure").resolve()
-        news_dir = (disclosure_dir / "news_release").resolve()
-        news_dir.relative_to(disclosure_dir)
-        if news_dir.exists():
-            shutil.rmtree(news_dir)
+        loser = "news_release" if winner == "sec" else "sec"
+        loser_dir = (disclosure_dir / loser).resolve()
+        loser_dir.relative_to(disclosure_dir)
+        if loser_dir.exists():
+            shutil.rmtree(loser_dir)

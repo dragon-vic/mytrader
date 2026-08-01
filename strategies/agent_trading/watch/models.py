@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -197,7 +198,7 @@ def _parse_time(value: Any, name: str) -> datetime:
     parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
     if parsed.tzinfo is None:
         raise ValueError(f"{name} must include a timezone")
-    return parsed
+    return parsed.astimezone(UTC)
 
 
 def _require_keys(payload: dict[str, Any], keys: set[str], name: str) -> None:
