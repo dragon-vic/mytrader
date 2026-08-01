@@ -16,6 +16,7 @@ from strategies.agent_trading.watch import WatchPlan
 
 
 SEC_USER_AGENT = "nt_quant-agent-trading/1.0 victorice@yeah.net"
+ANALYSIS_PROMPT = Path(__file__).resolve().parent / "prompts" / "analysis.md"
 
 
 class AgentController:
@@ -80,17 +81,24 @@ class AgentController:
         if delay > 0:
             await asyncio.sleep(delay)
 
-    # 调用预研 Agent；下一次研究时间将在预研 schema 确定后由这里接管。
+    # 调用预研 Agent，并将动态分析指引从结构化结果中拆成独立文件。
     async def run_research(self, event_id: str, prompt: str) -> str:
         paths = self.event_store.paths(event_id)
         self.event_store.update(event_id, "researching")
         result = await self.research_agent.run(prompt, paths.root, paths.research)
+        payload = json.loads(result)
+        if not isinstance(payload, dict):
+            raise TypeError("research result must be a JSON object")
+        brief = payload.pop("analysis_brief")
+        self.event_store.save_research(event_id, payload)
+        brief_path = self.event_store.save_brief(event_id, brief)
         self.event_store.update(
             event_id,
             "research_ready",
             research_path=str(paths.research),
+            analysis_brief_path=str(brief_path),
         )
-        return result
+        return json.dumps(payload, ensure_ascii=False)
 
     # 校验并持久化预研 Agent 给 Watcher 的受限配置。
     def set_watch_plan(self, event_id: str, payload: dict[str, Any]) -> WatchPlan:
@@ -107,7 +115,7 @@ class AgentController:
         )
         return plan
 
-    # 两个信息源谁先完成核心披露下载，谁就唤醒 Controller。
+    # SEC 同一 accession 的核心文件全部完成后才唤醒 Controller。
     async def wait_report(self, event_id: str) -> DisclosurePackage:
         paths = self.event_store.paths(event_id)
         plan = WatchPlan.from_dict(self.event_store.load_plan(event_id))
@@ -130,13 +138,12 @@ class AgentController:
     async def run_analysis(
         self,
         event_id: str,
-        prompt: str,
         schema_path: Path | None = None,
     ) -> str:
         paths = self.event_store.paths(event_id)
         self.event_store.update(event_id, "analyzing")
         result = await self.analysis_agent.run(
-            prompt,
+            ANALYSIS_PROMPT.read_text(encoding="utf-8"),
             paths.root,
             paths.decision,
             schema_path,

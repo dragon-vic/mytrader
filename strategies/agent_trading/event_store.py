@@ -19,6 +19,7 @@ class EventPaths:
     state: Path
     event: Path
     research: Path
+    analysis_brief: Path
     watch_plan: Path
     report: Path
     decision: Path
@@ -46,6 +47,7 @@ class EventStore:
             state=root / "state.json",
             event=context / "event.json",
             research=context / "research.json",
+            analysis_brief=context / "analysis_brief.md",
             watch_plan=context / "watch_plan.json",
             report=context / "report.json",
             decision=result / "decision.json",
@@ -86,6 +88,11 @@ class EventStore:
         self._write(self.paths(event_id).state, payload)
         return payload
 
+    def save_research(self, event_id: str, payload: dict[str, Any]) -> Path:
+        path = self.paths(event_id).research
+        self._write(path, payload)
+        return path
+
     def save_plan(self, event_id: str, payload: dict[str, Any]) -> Path:
         path = self.paths(event_id).watch_plan
         self._write(path, payload)
@@ -98,6 +105,16 @@ class EventStore:
         if not isinstance(payload, dict):
             raise TypeError("watch plan must be a JSON object")
         return payload
+
+    # 将每次预研生成的分析指引独立保存，避免动态内容进入固定提示词。
+    def save_brief(self, event_id: str, text: str) -> Path:
+        if not isinstance(text, str) or not text.strip():
+            raise TypeError("analysis_brief must be non-empty text")
+        path = self.paths(event_id).analysis_brief
+        temporary = path.with_suffix(".md.tmp")
+        temporary.write_text(text.strip() + "\n", encoding="utf-8")
+        temporary.replace(path)
+        return path
 
     # 临时文件与目标文件位于同一目录，replace 保证状态切换是原子的。
     @staticmethod

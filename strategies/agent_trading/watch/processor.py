@@ -26,6 +26,7 @@ class DisclosureProcessor:
         event_dir: Path,
         raw_path: Path,
         document_type: str,
+        description: str,
         source_url: str,
         content_type: str,
     ) -> DisclosureFile:
@@ -34,6 +35,7 @@ class DisclosureProcessor:
         relative_raw = raw_path.relative_to(event_dir).as_posix()
         common = {
             "document_type": document_type,
+            "description": description,
             "source_url": source_url,
             "content_type": content_type,
             "content_format": content_format,

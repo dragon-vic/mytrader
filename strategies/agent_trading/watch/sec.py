@@ -11,6 +11,7 @@ from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote
+from urllib.parse import parse_qs
 from urllib.parse import urljoin
 from urllib.parse import urlsplit
 
@@ -51,7 +52,14 @@ class _SecEntry:
 @dataclass(frozen=True)
 class _FilingRow:
     document_type: str
+    description: str
     source_url: str
+
+
+@dataclass(frozen=True)
+class _FilingIndex:
+    items: tuple[str, ...]
+    rows: tuple[_FilingRow, ...]
 
 
 class SecWatcher:
@@ -149,6 +157,8 @@ class SecWatcher:
     ) -> None:
         try:
             package = await self._download(target, entry)
+            if package is None:
+                return
             if await target.ready(package):
                 self.targets.pop(target.plan.event_id, None)
         except asyncio.CancelledError:
@@ -170,17 +180,19 @@ class SecWatcher:
         self,
         target: WatchTarget,
         entry: _SecEntry,
-    ) -> DisclosurePackage:
+    ) -> DisclosurePackage | None:
         detected_ns = time.time_ns()
         index = await self._get(entry.index_url)
-        rows = _parse_filing_index(index.data)
-        prefixes = tuple(item.upper() for item in target.plan.sec.exhibits)
-        selected = [
-            row
-            for row in rows
-            if row.document_type.upper() == entry.form.upper()
-            or row.document_type.upper().startswith(prefixes)
-        ]
+        filing = _parse_filing_index(index.data)
+        if not _is_earnings_filing(entry.form, filing.items):
+            LOG.info(
+                "ignored non-earnings filing form=%s accession=%s items=%s",
+                entry.form,
+                entry.accession,
+                filing.items,
+            )
+            return None
+        selected = _select_rows(entry.form, filing.rows)
         if not selected:
             raise ValueError(f"no selected SEC documents: {entry.index_url}")
 
@@ -188,7 +200,7 @@ class SecWatcher:
         folder.mkdir(parents=True, exist_ok=True)
         files: list[DisclosureFile] = []
         for row in selected:
-            url = urljoin(entry.index_url, row.source_url)
+            url = _document_url(entry.index_url, row.source_url)
             body = await self._get(url)
             path = folder / _file_name(body.url, "document.html")
             path.write_bytes(body.data)
@@ -197,13 +209,21 @@ class SecWatcher:
                 target.event_dir,
                 path,
                 row.document_type,
+                row.description,
                 body.url,
                 body.content_type,
             )
+            if processed.processing_status == "failed":
+                raise RuntimeError(
+                    f"SEC document preprocessing failed: {processed.source_url}",
+                )
             files.append(processed)
         return DisclosurePackage(
             event_id=target.plan.event_id,
             source="sec",
+            form=entry.form,
+            accession=entry.accession,
+            items=filing.items,
             origin_url=entry.index_url,
             published_at=entry.updated.isoformat(),
             detected_ns=detected_ns,
@@ -245,6 +265,7 @@ class _FilingParser(HTMLParser):
         self.cell_href = ""
         self.row: list[tuple[str, str]] = []
         self.rows: list[_FilingRow] = []
+        self.page_text: list[str] = []
 
     def handle_starttag(self, tag: str, attrs) -> None:
         values = dict(attrs)
@@ -269,6 +290,7 @@ class _FilingParser(HTMLParser):
                 self.rows.append(
                     _FilingRow(
                         document_type=self.row[3][0],
+                        description=self.row[1][0],
                         source_url=self.row[2][1],
                     ),
                 )
@@ -277,6 +299,9 @@ class _FilingParser(HTMLParser):
             self.in_table = False
 
     def handle_data(self, data: str) -> None:
+        text = data.strip()
+        if text:
+            self.page_text.append(text)
         if self.in_cell:
             self.cell_text.append(data)
 
@@ -306,10 +331,47 @@ def _parse_sec_feed(data: bytes) -> tuple[_SecEntry, ...]:
     return tuple(entries)
 
 
-def _parse_filing_index(data: bytes) -> tuple[_FilingRow, ...]:
+def _parse_filing_index(data: bytes) -> _FilingIndex:
     parser = _FilingParser()
     parser.feed(data.decode("utf-8", errors="replace"))
-    return tuple(parser.rows)
+    text = " ".join(parser.page_text)
+    items = tuple(dict.fromkeys(re.findall(r"\bItem\s+(\d+\.\d+)\s*:", text)))
+    return _FilingIndex(items=items, rows=tuple(parser.rows))
+
+
+def _is_earnings_filing(form: str, items: tuple[str, ...]) -> bool:
+    return form.upper() != "8-K" or "2.02" in items
+
+
+def _select_rows(form: str, rows: tuple[_FilingRow, ...]) -> tuple[_FilingRow, ...]:
+    selected = []
+    for row in rows:
+        kind = row.document_type.upper()
+        description = row.description.casefold()
+        if (
+            kind == form.upper()
+            or kind.startswith(("EX-13", "EX-99"))
+            or any(
+                term in description
+                for term in (
+                    "earnings release",
+                    "financial results",
+                    "financial supplement",
+                    "cfo commentary",
+                    "shareholder letter",
+                )
+            )
+        ):
+            selected.append(row)
+    return tuple(selected)
+
+
+# SEC index 的 iXBRL 链接先指向 viewer，doc 参数才是真实申报文件。
+def _document_url(index_url: str, source_url: str) -> str:
+    url = urljoin(index_url, source_url)
+    parsed = urlsplit(url)
+    document = parse_qs(parsed.query).get("doc")
+    return urljoin(index_url, document[0]) if document else url
 
 
 def _sec_matches(entry: _SecEntry, plan: WatchPlan) -> bool:
@@ -358,6 +420,8 @@ def _parse_date(value: str) -> datetime:
 
 
 def _file_name(url: str, default: str) -> str:
-    name = Path(unquote(urlsplit(url).path)).name or default
+    parsed = urlsplit(url)
+    path = parse_qs(parsed.query).get("doc", [parsed.path])[0]
+    name = Path(unquote(path)).name or default
     clean = re.sub(r"[^A-Za-z0-9._-]", "_", name)
     return clean or default

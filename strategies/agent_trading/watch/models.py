@@ -10,13 +10,13 @@ from urllib.parse import urlsplit
 
 
 SOURCE_FORMATS = {"feed", "html"}
+EARNINGS_FORMS = {"8-K", "10-Q", "10-K", "6-K", "20-F", "40-F"}
 
 
 @dataclass(frozen=True)
 class SecPlan:
     cik: str
     forms: tuple[str, ...]
-    exhibits: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -44,7 +44,7 @@ class WatchPlan:
             "watch_plan",
         )
         sec_raw = _require_dict(payload["sec"], "sec")
-        _require_keys(sec_raw, {"cik", "forms", "exhibits"}, "sec")
+        _require_keys(sec_raw, {"cik", "forms"}, "sec")
         news_raw = _require_dict(payload["news_release"], "news_release")
         _require_keys(news_raw, {"sources"}, "news_release")
 
@@ -62,7 +62,6 @@ class WatchPlan:
             sec=SecPlan(
                 cik=_require_text(sec_raw["cik"], "sec.cik"),
                 forms=_text_tuple(sec_raw["forms"], "sec.forms"),
-                exhibits=_text_tuple(sec_raw["exhibits"], "sec.exhibits"),
             ),
             news_sources=sources,
         )
@@ -77,7 +76,6 @@ class WatchPlan:
             "sec": {
                 "cik": self.sec.cik,
                 "forms": list(self.sec.forms),
-                "exhibits": list(self.sec.exhibits),
             },
             "news_release": {
                 "sources": [
@@ -99,6 +97,9 @@ class WatchPlan:
             raise ValueError("sec.cik must contain 10 digits")
         if not self.sec.forms:
             raise ValueError("sec.forms must not be empty")
+        unsupported = set(self.sec.forms) - EARNINGS_FORMS
+        if unsupported:
+            raise ValueError(f"unsupported earnings forms: {sorted(unsupported)}")
         for source in self.news_sources:
             parsed = urlsplit(source.url)
             if parsed.scheme != "https" or not parsed.netloc:
@@ -112,6 +113,7 @@ class WatchPlan:
 @dataclass(frozen=True)
 class DisclosureFile:
     document_type: str
+    description: str
     source_url: str
     content_type: str
     content_format: str
@@ -127,6 +129,9 @@ class DisclosureFile:
 class DisclosurePackage:
     event_id: str
     source: str
+    form: str | None
+    accession: str | None
+    items: tuple[str, ...]
     origin_url: str
     published_at: str | None
     detected_ns: int
@@ -136,12 +141,16 @@ class DisclosurePackage:
         return {
             "event_id": self.event_id,
             "source": self.source,
+            "form": self.form,
+            "accession": self.accession,
+            "items": list(self.items),
             "origin_url": self.origin_url,
             "published_at": self.published_at,
             "detected_ns": self.detected_ns,
             "files": [
                 {
                     "document_type": item.document_type,
+                    "description": item.description,
                     "source_url": item.source_url,
                     "content_type": item.content_type,
                     "content_format": item.content_format,

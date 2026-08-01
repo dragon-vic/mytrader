@@ -122,12 +122,16 @@ class NewsReleaseWatcher:
             target.event_dir,
             path,
             "NEWS_RELEASE",
+            entry.title,
             body.url,
             body.content_type,
         )
         return DisclosurePackage(
             event_id=target.plan.event_id,
             source="news_release",
+            form=None,
+            accession=None,
+            items=(),
             origin_url=body.url,
             published_at=entry.published.isoformat() if entry.published else None,
             detected_ns=detected_ns,

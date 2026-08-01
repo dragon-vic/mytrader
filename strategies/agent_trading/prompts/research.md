@@ -10,8 +10,9 @@ Rules:
 - Do not invent URLs, identifiers, timestamps, estimates, or prior releases.
 - Build the hot watch window from schedule information that was already public by `as_of`.
 - `next_research_at` must be after `as_of` and before `watch_plan.start_at`.
-- SEC CIK must contain 10 digits. Use the expected earnings form and only relevant exhibit prefixes.
+- SEC CIK must contain 10 digits. Watch every plausible earnings form; do not predict individual exhibit numbers.
 - News sources must point to an official company listing/feed. `last_seen` must identify the latest known item in the supplied packet.
+- Write `analysis_brief` as concise Markdown for the later analysis agent. State exact comparison benchmarks, key questions, business drivers, risks, and the instrument to trade. Do not include general company background.
 - Return exactly one JSON object without Markdown fences or additional text.
 
 Output shape:
@@ -25,6 +26,7 @@ Output shape:
     "business_drivers": ["string"],
     "key_risks": ["string"]
   },
+  "analysis_brief": "# Markdown instructions for this event",
   "next_research_at": "ISO-8601 timestamp with timezone",
   "watch_plan": {
     "event_id": "string",
@@ -32,8 +34,7 @@ Output shape:
     "end_at": "ISO-8601 timestamp with timezone",
     "sec": {
       "cik": "10-digit string",
-      "forms": ["string"],
-      "exhibits": ["string"]
+      "forms": ["8-K", "10-Q"]
     },
     "news_release": {
       "sources": [
