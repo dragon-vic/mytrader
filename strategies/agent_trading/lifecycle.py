@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 
 
@@ -16,8 +18,7 @@ class EventSpec:
     event_id: str
     company: str
     ticker: str
-    expected_at: datetime
-    relevance_reason: str
+    research_hints: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -61,8 +62,7 @@ class BatchPlan:
                     "event_id": event.event_id,
                     "company": event.company,
                     "ticker": event.ticker,
-                    "expected_at": event.expected_at.isoformat(),
-                    "relevance_reason": event.relevance_reason,
+                    "research_hints": list(event.research_hints),
                 }
                 for event in self.events
             ],
@@ -78,6 +78,32 @@ class BatchPlan:
         event_ids = [event.event_id for event in self.events]
         if len(event_ids) != len(set(event_ids)):
             raise ValueError("batch event_id values must be unique")
+
+
+# 静态计划由人工按周或按月维护，运行时不再调用规划 Agent。
+def load_schedule(path: Path) -> tuple[BatchPlan, ...]:
+    payload = _dict(json.loads(path.read_text(encoding="utf-8")), "schedule")
+    _keys(payload, {"schedule_id", "timezone", "batches"}, "schedule")
+    _text(payload["schedule_id"], "schedule_id")
+    if payload["timezone"] != "UTC":
+        raise ValueError("schedule timezone must be UTC")
+
+    batches = tuple(
+        BatchPlan.from_dict(_dict(item, "batches[]"))
+        for item in _list(payload["batches"], "batches")
+    )
+    if not batches:
+        raise ValueError("schedule batches must not be empty")
+
+    batch_ids = [batch.batch_id for batch in batches]
+    if len(batch_ids) != len(set(batch_ids)):
+        raise ValueError("schedule batch_id values must be unique")
+    event_ids = [event.event_id for batch in batches for event in batch.events]
+    if len(event_ids) != len(set(event_ids)):
+        raise ValueError("schedule event_id values must be unique")
+    if list(batches) != sorted(batches, key=lambda batch: batch.watch_start_at):
+        raise ValueError("schedule batches must be ordered by watch_start_at")
+    return batches
 
 
 @dataclass(frozen=True)
@@ -241,15 +267,20 @@ def validate_decision(
 def _event(payload: dict[str, Any]) -> EventSpec:
     _keys(
         payload,
-        {"event_id", "company", "ticker", "expected_at", "relevance_reason"},
+        {"event_id", "company", "ticker", "research_hints"},
         "events[]",
     )
+    research_hints = tuple(
+        _text(item, "events[].research_hints[]")
+        for item in _list(payload["research_hints"], "events[].research_hints")
+    )
+    if not research_hints:
+        raise ValueError("events[].research_hints must not be empty")
     return EventSpec(
         event_id=_text(payload["event_id"], "events[].event_id"),
         company=_text(payload["company"], "events[].company"),
         ticker=_text(payload["ticker"], "events[].ticker"),
-        expected_at=_time(payload["expected_at"], "events[].expected_at"),
-        relevance_reason=_text(payload["relevance_reason"], "events[].relevance_reason"),
+        research_hints=research_hints,
     )
 
 

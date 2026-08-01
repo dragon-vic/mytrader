@@ -110,30 +110,6 @@ class CodexRunner:
         return output_path.read_text(encoding="utf-8")
 
 
-class ScheduleAgent:
-    def __init__(
-        self,
-        runner: CodexRunner,
-        prompts_dir: Path,
-        schemas_dir: Path,
-    ) -> None:
-        self.runner = runner
-        self.prompt = prompts_dir / "schedule.md"
-        self.schema = schemas_dir / "schedule.json"
-
-    async def run(self, work_dir: Path, output_path: Path) -> BatchPlan:
-        result = await self.runner.run(
-            prompt=self.prompt.read_text(encoding="utf-8"),
-            work_dir=work_dir,
-            output_path=output_path,
-            schema_path=self.schema,
-            web_search=True,
-            reasoning_effort="medium",
-            service_tier="fast",
-        )
-        return BatchPlan.from_dict(_json_object(result, "schedule result"))
-
-
 @dataclass(frozen=True)
 class ResearchOutcome:
     event_id: str

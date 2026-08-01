@@ -1,0 +1,278 @@
+{
+  "schedule_id": "2026-08-03_2026-08-07",
+  "timezone": "UTC",
+  "batches": [
+    {
+      "batch_id": "2026-08-03-bmo",
+      "session": "BMO",
+      "watch_start_at": "2026-08-03T10:00:00Z",
+      "watch_end_at": "2026-08-03T13:30:00Z",
+      "events": [
+        {
+          "event_id": "2026-08-03-cnh",
+          "company": "CNH Industrial",
+          "ticker": "CNH",
+          "research_hints": [
+            "Test whether CNH can create a construction or agricultural-equipment read-through for CAT; do not assume the relationship is tradable."
+          ]
+        },
+        {
+          "event_id": "2026-08-03-srad",
+          "company": "Sportradar",
+          "ticker": "SRAD",
+          "research_hints": [
+            "Test whether sports-betting data demand and customer economics can create a read-through for DKNG."
+          ]
+        },
+        {
+          "event_id": "2026-08-03-abtc",
+          "company": "American Bitcoin",
+          "ticker": "ABTC",
+          "research_hints": [
+            "Test possible Bitcoin-mining, treasury, and crypto-market read-throughs to IREN, MSTR, and COIN."
+          ]
+        }
+      ]
+    },
+    {
+      "batch_id": "2026-08-03-amc",
+      "session": "AMC",
+      "watch_start_at": "2026-08-03T20:00:00Z",
+      "watch_end_at": "2026-08-03T22:00:00Z",
+      "events": [
+        {
+          "event_id": "2026-08-03-pltr",
+          "company": "Palantir Technologies",
+          "ticker": "PLTR",
+          "research_hints": [
+            "Evaluate PLTR's own tradable instrument first and reject it if the disclosure-to-price causal case is weak."
+          ]
+        }
+      ]
+    },
+    {
+      "batch_id": "2026-08-04-bmo",
+      "session": "BMO",
+      "watch_start_at": "2026-08-04T10:00:00Z",
+      "watch_end_at": "2026-08-04T13:30:00Z",
+      "events": [
+        {
+          "event_id": "2026-08-04-cat",
+          "company": "Caterpillar",
+          "ticker": "CAT",
+          "research_hints": [
+            "Evaluate CAT's own tradable instrument first and reject it if the disclosure-to-price causal case is weak."
+          ]
+        }
+      ]
+    },
+    {
+      "batch_id": "2026-08-04-amc",
+      "session": "AMC",
+      "watch_start_at": "2026-08-04T20:00:00Z",
+      "watch_end_at": "2026-08-04T22:00:00Z",
+      "events": [
+        {
+          "event_id": "2026-08-04-spcx",
+          "company": "SpaceX",
+          "ticker": "SPCX",
+          "research_hints": [
+            "Evaluate SPCX directly and test commercial-space demand or valuation read-throughs to ASTS and RKLB."
+          ]
+        },
+        {
+          "event_id": "2026-08-04-amd",
+          "company": "Advanced Micro Devices",
+          "ticker": "AMD",
+          "research_hints": [
+            "Evaluate AMD directly and test AI-accelerator, data-center, and foundry read-throughs to NVDA and TSM."
+          ]
+        },
+        {
+          "event_id": "2026-08-04-alab",
+          "company": "Astera Labs",
+          "ticker": "ALAB",
+          "research_hints": [
+            "Evaluate ALAB directly and test data-center connectivity read-throughs to CRDO and MRVL."
+          ]
+        },
+        {
+          "event_id": "2026-08-04-anet",
+          "company": "Arista Networks",
+          "ticker": "ANET",
+          "research_hints": [
+            "Test AI-networking and optical-demand read-throughs to AVGO, CIEN, and AAOI."
+          ]
+        }
+      ]
+    },
+    {
+      "batch_id": "2026-08-05-bmo",
+      "session": "BMO",
+      "watch_start_at": "2026-08-05T05:00:00Z",
+      "watch_end_at": "2026-08-05T13:30:00Z",
+      "events": [
+        {
+          "event_id": "2026-08-05-nvo",
+          "company": "Novo Nordisk",
+          "ticker": "NVO",
+          "research_hints": [
+            "Evaluate NVO directly and test obesity and diabetes market-share read-throughs to LLY."
+          ]
+        },
+        {
+          "event_id": "2026-08-05-lly",
+          "company": "Eli Lilly",
+          "ticker": "LLY",
+          "research_hints": [
+            "Evaluate LLY directly and test obesity and diabetes market-share read-throughs to NVO."
+          ]
+        },
+        {
+          "event_id": "2026-08-05-dis",
+          "company": "The Walt Disney Company",
+          "ticker": "DIS",
+          "research_hints": [
+            "Evaluate DIS directly and test streaming demand, pricing, and profitability read-throughs to NFLX."
+          ]
+        },
+        {
+          "event_id": "2026-08-05-uber",
+          "company": "Uber Technologies",
+          "ticker": "UBER",
+          "research_hints": [
+            "Evaluate UBER's own tradable instrument first and reject it if the disclosure-to-price causal case is weak."
+          ]
+        },
+        {
+          "event_id": "2026-08-05-crcl",
+          "company": "Circle Internet Group",
+          "ticker": "CRCL",
+          "research_hints": [
+            "Evaluate CRCL directly and test stablecoin and crypto-payments read-throughs to COIN and PYPL."
+          ]
+        }
+      ]
+    },
+    {
+      "batch_id": "2026-08-05-amc",
+      "session": "AMC",
+      "watch_start_at": "2026-08-05T20:00:00Z",
+      "watch_end_at": "2026-08-05T22:00:00Z",
+      "events": [
+        {
+          "event_id": "2026-08-05-sndk",
+          "company": "Sandisk",
+          "ticker": "SNDK",
+          "research_hints": [
+            "Evaluate SNDK directly and test NAND pricing and storage-demand read-throughs to WDC and MU."
+          ]
+        },
+        {
+          "event_id": "2026-08-05-wdc",
+          "company": "Western Digital",
+          "ticker": "WDC",
+          "research_hints": [
+            "Evaluate WDC directly and test storage-demand read-throughs to SNDK and MU."
+          ]
+        },
+        {
+          "event_id": "2026-08-05-app",
+          "company": "AppLovin",
+          "ticker": "APP",
+          "research_hints": [
+            "Evaluate APP's own tradable instrument first and reject it if the disclosure-to-price causal case is weak."
+          ]
+        },
+        {
+          "event_id": "2026-08-05-flnc",
+          "company": "Fluence Energy",
+          "ticker": "FLNC",
+          "research_hints": [
+            "Evaluate FLNC directly and test grid-storage demand or pricing read-throughs to TSLA and BE."
+          ]
+        },
+        {
+          "event_id": "2026-08-05-dash",
+          "company": "DoorDash",
+          "ticker": "DASH",
+          "research_hints": [
+            "Test delivery demand, competitive intensity, and unit-economics read-throughs to UBER."
+          ]
+        }
+      ]
+    },
+    {
+      "batch_id": "2026-08-06-bmo",
+      "session": "BMO",
+      "watch_start_at": "2026-08-06T10:00:00Z",
+      "watch_end_at": "2026-08-06T13:30:00Z",
+      "events": [
+        {
+          "event_id": "2026-08-06-penn",
+          "company": "PENN Entertainment",
+          "ticker": "PENN",
+          "research_hints": [
+            "Test online sports-betting demand, promotions, and market-share read-throughs to DKNG."
+          ]
+        }
+      ]
+    },
+    {
+      "batch_id": "2026-08-06-amc",
+      "session": "AMC",
+      "watch_start_at": "2026-08-06T20:00:00Z",
+      "watch_end_at": "2026-08-06T22:00:00Z",
+      "events": [
+        {
+          "event_id": "2026-08-06-dkng",
+          "company": "DraftKings",
+          "ticker": "DKNG",
+          "research_hints": [
+            "Evaluate DKNG's own tradable instrument first and reject it if the disclosure-to-price causal case is weak."
+          ]
+        },
+        {
+          "event_id": "2026-08-06-aaoi",
+          "company": "Applied Optoelectronics",
+          "ticker": "AAOI",
+          "research_hints": [
+            "Evaluate AAOI directly and test optical-networking demand read-throughs to CIEN and LITE."
+          ]
+        },
+        {
+          "event_id": "2026-08-06-mara",
+          "company": "MARA Holdings",
+          "ticker": "MARA",
+          "research_hints": [
+            "Test Bitcoin-mining, treasury, and crypto-market read-throughs to IREN, MSTR, and COIN."
+          ]
+        }
+      ]
+    },
+    {
+      "batch_id": "2026-08-07-bmo",
+      "session": "BMO",
+      "watch_start_at": "2026-08-07T10:00:00Z",
+      "watch_end_at": "2026-08-07T13:30:00Z",
+      "events": [
+        {
+          "event_id": "2026-08-07-wen",
+          "company": "The Wendy's Company",
+          "ticker": "WEN",
+          "research_hints": [
+            "Evaluate WEN's own tradable instrument first and reject it if the disclosure-to-price causal case is weak."
+          ]
+        },
+        {
+          "event_id": "2026-08-07-ttwo",
+          "company": "Take-Two Interactive Software",
+          "ticker": "TTWO",
+          "research_hints": [
+            "Evaluate TTWO directly and test console and game-demand read-throughs to SONY."
+          ]
+        }
+      ]
+    }
+  ]
+}

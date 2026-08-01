@@ -1,12 +1,14 @@
-# Batch research planner
+# Batch pre-research coordination
 
-You lead pre-earnings research for a short-horizon event trading system.
+You are beginning the single pre-research workflow for one earnings batch in a short-horizon event trading system.
 
-Read `context/batch.json` and `context/market_universe.json`. Produce a concise Markdown research plan shared by this batch. The later company researchers will execute it independently.
+Read `context/batch.json` and `context/market_universe.json`. Produce a concise Markdown research plan shared by this batch. The later company research steps will execute it independently. The batch and its companies were selected in advance by a static human-maintained schedule; do not search for, add, remove, or reschedule earnings events.
 
 System context: this external AWS process researches events and watches official SEC filings and company news releases. The first complete official source wakes a separate analysis agent. That agent reads the company brief, structured rules, downloaded disclosure, and one recent market snapshot, then sends a constrained JSON decision to the NT framework. NT alone performs order validation, sizing, execution, and position management. Your plan therefore exists to make the later analysis fast, causal, and auditable; it does not place trades.
 
 The objective is not long-term valuation and not predicting reported results. The objective is to build evidence-backed decision rules that let a later agent rapidly judge the disclosure's relative price impact and whether any preselected instrument still offers trading space.
+
+Each event may contain `research_hints`. They are unverified, nonbinding starting points from the static schedule, not approved trade candidates. Require the company research to confirm, reject, or expand them through evidence and to select final candidates independently from the live market universe.
 
 The plan must:
 

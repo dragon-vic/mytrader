@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from datetime import UTC
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -10,10 +12,10 @@ from strategies.agent_trading.agents import AnalysisAgent
 from strategies.agent_trading.agents import CodexRunner
 from strategies.agent_trading.agents import ResearchAgent
 from strategies.agent_trading.agents import ResearchOutcome
-from strategies.agent_trading.agents import ScheduleAgent
 from strategies.agent_trading.event_store import EventStore
 from strategies.agent_trading.lifecycle import BatchPlan
 from strategies.agent_trading.lifecycle import MarketUniverse
+from strategies.agent_trading.lifecycle import load_schedule
 from strategies.agent_trading.lifecycle import validate_decision
 from strategies.agent_trading.lifecycle import validate_research
 from strategies.agent_trading.market import MarketSnapshotter
@@ -27,6 +29,7 @@ SEC_USER_AGENT = "nt_quant-agent-trading/1.0 victorice@yeah.net"
 STRATEGY_ROOT = Path(__file__).resolve().parent
 PROMPTS_DIR = STRATEGY_ROOT / "prompts"
 SCHEMAS_DIR = STRATEGY_ROOT / "schemas"
+SCHEDULE_PATH = STRATEGY_ROOT / "schedules" / "2026-08-03_2026-08-07.json"
 ANALYSIS_PROMPT = PROMPTS_DIR / "analysis.md"
 DECISION_SCHEMA = SCHEMAS_DIR / "decision.json"
 
@@ -37,7 +40,6 @@ class AgentController:
         host: str,
         port: int,
         event_store: EventStore,
-        schedule_agent: ScheduleAgent,
         research_agent: ResearchAgent,
         analysis_agent: AnalysisAgent,
         disclosure_watcher: DisclosureWatcher,
@@ -46,7 +48,6 @@ class AgentController:
         self.host = host
         self.port = port
         self.event_store = event_store
-        self.schedule_agent = schedule_agent
         self.research_agent = research_agent
         self.analysis_agent = analysis_agent
         self.disclosure_watcher = disclosure_watcher
@@ -85,10 +86,6 @@ class AgentController:
             raise TypeError("payload must be a JSON object")
         return payload
 
-    # ScheduleAgent 只生成下一个盘前或盘后批次，不承担深度公司研究。
-    async def build_schedule(self, work_dir: Path, output_path: Path) -> BatchPlan:
-        return await self.schedule_agent.run(work_dir, output_path)
-
     async def wait_until(self, timestamp_ns: int) -> None:
         delay = (timestamp_ns - time.time_ns()) / 1_000_000_000
         if delay > 0:
@@ -112,8 +109,7 @@ class AgentController:
                     "batch_id": batch.batch_id,
                     "company": event.company,
                     "ticker": event.ticker,
-                    "expected_at": event.expected_at.isoformat(),
-                    "relevance_reason": event.relevance_reason,
+                    "research_hints": list(event.research_hints),
                 },
             )
         self.event_store.update_batch(
@@ -148,6 +144,30 @@ class AgentController:
             companies=statuses,
         )
         return plans
+
+    # 静态计划中的批次各自等待 T-4h，互不因其他批次失败而取消。
+    async def run_schedule(
+        self,
+        batches: tuple[BatchPlan, ...],
+        market_universe: MarketUniverse,
+    ) -> dict[str, Exception | None]:
+        active = tuple(
+            batch
+            for batch in batches
+            if batch.watch_end_at > datetime.now(UTC)
+        )
+        tasks = {
+            batch.batch_id: asyncio.create_task(
+                self.run_batch(batch, market_universe),
+                name=f"agent-trading-batch-{batch.batch_id}",
+            )
+            for batch in active
+        }
+        results = await asyncio.gather(*tasks.values(), return_exceptions=True)
+        return {
+            batch_id: result if isinstance(result, Exception) else None
+            for batch_id, result in zip(tasks, results, strict=True)
+        }
 
     def _save_research_outcome(
         self,
@@ -340,7 +360,7 @@ class AgentController:
 
 async def main() -> None:
     runner = CodexRunner()
-    schedule_agent = ScheduleAgent(runner, PROMPTS_DIR, SCHEMAS_DIR)
+    load_schedule(SCHEDULE_PATH)
     research_agent = ResearchAgent(runner, PROMPTS_DIR, SCHEMAS_DIR)
     async with DisclosureWatcher(
         user_agent=SEC_USER_AGENT,
@@ -350,7 +370,6 @@ async def main() -> None:
             host="127.0.0.1",
             port=9003,
             event_store=EventStore(STRATEGY_ROOT),
-            schedule_agent=schedule_agent,
             research_agent=research_agent,
             analysis_agent=AnalysisAgent(runner),
             disclosure_watcher=watcher,
