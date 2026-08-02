@@ -73,12 +73,14 @@ class AgentTradingStrategy(Strategy):
         self.min_remaining = config.min_remaining_pct
         self.max_mark_age_ns = int(config.max_mark_age_sec * Decimal("1000000000"))
         if (
-            self.margin_usdt <= 0
+            self.margin_usdt < 0
             or self.leverage <= 0
             or self.min_remaining < 0
             or self.max_mark_age_ns <= 0
         ):
-            raise ValueError("agent trading risk and market parameters must be positive")
+            raise ValueError(
+                "agent trading margin must be non-negative and other risk parameters must be positive",
+            )
 
         self.instrument_ids = tuple(
             InstrumentId.from_str(item.instrument_id)
@@ -224,6 +226,10 @@ class AgentTradingStrategy(Strategy):
 
         if payload["decision"] == "HOLD":
             self.log.info(f"agent_decision_hold event_id={event_id}")
+            return
+
+        if self.margin_usdt == 0:
+            self.log.warning(f"agent_order_disabled event_id={event_id} margin_usdt=0")
             return
 
         trades: list[dict[str, Any]] = []

@@ -8,7 +8,7 @@ strategy:
       schedule_path: strategies/agent_trading/schedules/2026-08-03_2026-08-07.json
       market_universe_path: strategies/agent_trading/schedules/2026-08-03_2026-08-07_market_universe.json
       data_client: BINANCE_USDT_FUTURES
-      margin_usdt: 100
+      margin_usdt: 0
       leverage: 10
       min_remaining_pct: 2
       max_mark_age_sec: 5
