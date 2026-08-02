@@ -1,23 +1,30 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import re
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
+from datetime import UTC
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
 from pathlib import Path
+from urllib.parse import parse_qsl
 from urllib.parse import unquote
+from urllib.parse import urlencode
 from urllib.parse import urljoin
 from urllib.parse import urlsplit
+from urllib.parse import urlunsplit
 
 import aiohttp
 
 from strategies.agent_trading.watch.models import DisclosurePackage
 from strategies.agent_trading.watch.models import NewsSource
+from strategies.agent_trading.watch.models import WatchPlan
 from strategies.agent_trading.watch.models import WatchTarget
 from strategies.agent_trading.watch.processor import DisclosureProcessor
 
@@ -38,6 +45,8 @@ class _FeedEntry:
     title: str
     url: str
     published: datetime | None
+    inline_body: bytes | None = None
+    body_lookup_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -87,17 +96,43 @@ class NewsReleaseWatcher:
         for event_id in tuple(self.tasks):
             await self.remove(event_id)
 
+    # 每个新闻源独立维护已见条目，重启后继续去重。
     async def _run(self, target: WatchTarget, source: NewsSource) -> None:
+        state_path = _seen_path(target.internal_dir, source)
+        seen = _load_seen(state_path, source)
         try:
             while True:
                 try:
-                    listing = await self._get(source.url)
-                    entry = _find_news(source, listing.data)
-                    if entry is not None:
-                        package = await self._download(target, entry)
+                    listing = await self._get(source.url, source.user_agent)
+                    entries = _parse_news(source, listing.data)
+                    if not entries:
+                        raise ValueError(f"news listing has no entries: {source.url}")
+                    if seen is None:
+                        seen = {_entry_id(entry) for entry in entries}
+                        _save_seen(state_path, source, seen)
+                        await asyncio.sleep(self.poll_seconds)
+                        continue
+
+                    changed = False
+                    for entry in entries:
+                        entry_id = _entry_id(entry)
+                        if entry_id in seen:
+                            continue
+                        if not _matches_entry(source, target.plan, entry):
+                            seen.add(entry_id)
+                            changed = True
+                            continue
+                        package = await self._download(target, source, entry)
+                        seen.add(entry_id)
+                        changed = True
+                        if not _matches_content(source, target.analysis_dir, package):
+                            continue
+                        _save_seen(state_path, source, seen)
                         if await target.ready(package):
                             return
-                except aiohttp.ClientError as exc:
+                    if changed:
+                        _save_seen(state_path, source, seen)
+                except (aiohttp.ClientError, TimeoutError) as exc:
                     LOG.warning("news polling failed url=%s error=%s", source.url, exc)
                     await asyncio.sleep(self.poll_seconds)
                     continue
@@ -110,17 +145,38 @@ class NewsReleaseWatcher:
     async def _download(
         self,
         target: WatchTarget,
+        source: NewsSource,
         entry: _FeedEntry,
     ) -> DisclosurePackage:
         detected_ns = time.time_ns()
-        body = await self._get(entry.url)
-        folder = target.event_dir / "disclosure" / "news_release" / "raw"
+        if entry.inline_body is not None:
+            body = _HttpBody(entry.inline_body, "text/html; charset=utf-8", entry.url)
+        elif entry.body_lookup_url is not None:
+            lookup = await self._get(entry.body_lookup_url, source.user_agent)
+            full_entry = next(
+                (
+                    candidate
+                    for candidate in _parse_q4_json(entry.body_lookup_url, lookup.data)
+                    if candidate.item_id == entry.item_id
+                ),
+                None,
+            )
+            if full_entry is None or full_entry.inline_body is None:
+                raise ValueError(f"Q4 press-release body is missing: {entry.item_id}")
+            body = _HttpBody(
+                full_entry.inline_body,
+                "text/html; charset=utf-8",
+                entry.url,
+            )
+        else:
+            body = await self._get(entry.url, source.user_agent)
+        folder = target.internal_dir / "disclosure" / "news_release" / "raw"
         folder.mkdir(parents=True, exist_ok=True)
         path = folder / _file_name(body.url, "release.html")
         path.write_bytes(body.data)
         processed = await asyncio.to_thread(
             self.processor.process,
-            target.event_dir,
+            target.analysis_dir,
             path,
             "NEWS_RELEASE",
             entry.title,
@@ -139,11 +195,12 @@ class NewsReleaseWatcher:
             files=(processed,),
         )
 
-    async def _get(self, url: str) -> _HttpBody:
+    async def _get(self, url: str, user_agent: str | None = None) -> _HttpBody:
         host = urlsplit(url).netloc.casefold()
         limit = self.limits.setdefault(host, _HostLimiter(self.poll_seconds))
         await limit.wait()
-        async with self.session.get(url) as response:
+        headers = {"User-Agent": user_agent} if user_agent else None
+        async with self.session.get(url, headers=headers) as response:
             response.raise_for_status()
             return _HttpBody(
                 data=await response.read(),
@@ -196,40 +253,97 @@ class _LinkParser(HTMLParser):
                 self.text.append(text)
 
 
-def _find_news(source: NewsSource, data: bytes) -> _FeedEntry | None:
-    terms = tuple(term.casefold() for term in source.title_terms)
+# 将 RSS/Atom 与 HTML 列表统一成带稳定 ID 的新闻条目。
+def _parse_news(source: NewsSource, data: bytes) -> tuple[_FeedEntry, ...]:
     if source.format == "feed":
-        entries = _parse_news_feed(data)
-        baseline = next(
-            (
-                index
-                for index, entry in enumerate(entries)
-                if source.last_seen in {entry.item_id, entry.url}
-            ),
-            None,
-        )
-        if baseline is None:
-            raise ValueError(f"news baseline was not found: {source.last_seen}")
-        for entry in entries[:baseline]:
-            if all(term in entry.title.casefold() for term in terms):
-                return entry
-        return None
+        return _parse_news_feed(source.url, data)
+    if source.format == "q4_json":
+        return _parse_q4_json(source.url, data)
+    if source.format != "html":
+        raise ValueError(f"unsupported news source format: {source.format}")
 
     parser = _LinkParser(source.url)
     parser.feed(data.decode("utf-8", errors="replace"))
-    baseline_found = False
-    for link in parser.links:
-        if link.url == source.last_seen:
-            baseline_found = True
-            break
-        if all(term in link.title.casefold() for term in terms):
-            return _FeedEntry("", link.title, link.url, None)
-    if not baseline_found:
-        raise ValueError(f"news baseline was not found: {source.last_seen}")
-    return None
+    return tuple(
+        _FeedEntry(link.url, link.title, link.url, None)
+        for link in parser.links
+    )
 
 
-def _parse_news_feed(data: bytes) -> tuple[_FeedEntry, ...]:
+# 新条目先通过事件时间和标题包含/排除规则。
+def _matches_entry(
+    source: NewsSource,
+    plan: WatchPlan,
+    entry: _FeedEntry,
+) -> bool:
+    title = " ".join(entry.title.casefold().split())
+    phrases = tuple(phrase.casefold() for phrase in source.title_phrases)
+    excluded = tuple(phrase.casefold() for phrase in source.exclude_phrases)
+    if not any(phrase in title for phrase in phrases):
+        return False
+    if any(phrase in title for phrase in excluded):
+        return False
+    if entry.published is None:
+        return True
+    published = entry.published.astimezone(UTC)
+    return plan.start_at <= published <= plan.end_at
+
+
+# 下载后的正文必须包含计划指定的财务确认词。
+def _matches_content(
+    source: NewsSource,
+    analysis_dir: Path,
+    package: DisclosurePackage,
+) -> bool:
+    processed = package.files[0]
+    if processed.processing_status != "processed":
+        return False
+    path = analysis_dir / processed.analysis_path
+    text = " ".join(path.read_text(encoding="utf-8").casefold().split())
+    return all(term.casefold() in text for term in source.content_terms)
+
+
+def _entry_id(entry: _FeedEntry) -> str:
+    return entry.item_id or entry.url
+
+
+# 每个事件、每个新闻源单独保存 seen_ids，避免并发写同一文件。
+def _seen_path(internal_dir: Path, source: NewsSource) -> Path:
+    source_id = hashlib.sha256(source.url.encode("utf-8")).hexdigest()[:16]
+    return internal_dir / "watch" / "news_seen" / f"{source_id}.json"
+
+
+def _load_seen(path: Path, source: NewsSource) -> set[str] | None:
+    if not path.exists():
+        return None
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if payload.get("source_url") != source.url:
+        raise ValueError(f"news state source mismatch: {source.url}")
+    values = payload.get("seen_ids")
+    if not isinstance(values, list) or not all(isinstance(value, str) for value in values):
+        raise TypeError("news state seen_ids must be an array of strings")
+    return set(values)
+
+
+def _save_seen(path: Path, source: NewsSource, seen: set[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".json.tmp")
+    temporary.write_text(
+        json.dumps(
+            {
+                "source_url": source.url,
+                "updated_at": datetime.now(UTC).isoformat(),
+                "seen_ids": sorted(seen),
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    temporary.replace(path)
+
+
+def _parse_news_feed(base_url: str, data: bytes) -> tuple[_FeedEntry, ...]:
     root = ET.fromstring(data)
     items = list(_children(root, "entry"))
     if not items:
@@ -245,15 +359,63 @@ def _parse_news_feed(data: bytes) -> tuple[_FeedEntry, ...]:
             or _child_text(item, "pubDate")
         )
         if url:
+            absolute_url = urljoin(base_url, url)
             entries.append(
                 _FeedEntry(
                     item_id=item_id,
                     title=_child_text(item, "title"),
-                    url=url,
+                    url=absolute_url,
                     published=_parse_date(date_text) if date_text else None,
                 ),
             )
     return tuple(entries)
+
+
+def _parse_q4_json(base_url: str, data: bytes) -> tuple[_FeedEntry, ...]:
+    payload = json.loads(data.decode("utf-8"))
+    if not isinstance(payload, dict):
+        raise TypeError("Q4 press-release response must be an object")
+    items = payload.get("GetPressReleaseListResult")
+    if not isinstance(items, list):
+        raise TypeError("Q4 press-release result must be an array")
+
+    entries: list[_FeedEntry] = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise TypeError("Q4 press-release item must be an object")
+        press_release_id = item.get("PressReleaseId")
+        title = item.get("Headline")
+        url = item.get("LinkToDetailPage")
+        body = item.get("Body")
+        if not isinstance(press_release_id, (int, str)):
+            raise TypeError("Q4 PressReleaseId must be an integer or string")
+        if not isinstance(title, str) or not title.strip():
+            raise TypeError("Q4 Headline must be non-empty text")
+        if not isinstance(url, str) or not url.strip():
+            raise TypeError("Q4 LinkToDetailPage must be non-empty text")
+        if body is not None and not isinstance(body, str):
+            raise TypeError("Q4 Body must be text or null")
+        inline_body = body.encode("utf-8") if body and body.strip() else None
+        entries.append(
+            _FeedEntry(
+                item_id=f"q4:{press_release_id}",
+                title=title.strip(),
+                url=urljoin(base_url, url.strip()),
+                published=None,
+                inline_body=inline_body,
+                body_lookup_url=None if inline_body else _q4_body_url(base_url),
+            ),
+        )
+    return tuple(entries)
+
+
+def _q4_body_url(url: str) -> str:
+    parsed = urlsplit(url)
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    query["bodyType"] = "1"
+    return urlunsplit(
+        (parsed.scheme, parsed.netloc, parsed.path, urlencode(query), parsed.fragment),
+    )
 
 
 def _children(element: ET.Element | None, name: str) -> tuple[ET.Element, ...]:

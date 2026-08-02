@@ -196,7 +196,7 @@ class SecWatcher:
         if not selected:
             raise ValueError(f"no selected SEC documents: {entry.index_url}")
 
-        folder = target.event_dir / "disclosure" / "sec" / "raw"
+        folder = target.internal_dir / "disclosure" / "sec" / "raw"
         folder.mkdir(parents=True, exist_ok=True)
         files: list[DisclosureFile] = []
         for row in selected:
@@ -206,7 +206,7 @@ class SecWatcher:
             path.write_bytes(body.data)
             processed = await asyncio.to_thread(
                 self.processor.process,
-                target.event_dir,
+                target.analysis_dir,
                 path,
                 row.document_type,
                 row.description,

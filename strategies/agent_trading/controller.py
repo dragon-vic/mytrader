@@ -2,24 +2,27 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
+from dataclasses import replace
 from datetime import UTC
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from jsonschema.exceptions import ValidationError
+
 from strategies.agent_trading.agents import AnalysisAgent
 from strategies.agent_trading.agents import CodexRunner
 from strategies.agent_trading.agents import ResearchAgent
 from strategies.agent_trading.agents import ResearchOutcome
+from strategies.agent_trading.contracts import DECISION_VALIDATOR
+from strategies.agent_trading.contracts import RESEARCH_VALIDATOR
 from strategies.agent_trading.event_store import EventStore
 from strategies.agent_trading.lifecycle import BatchPlan
 from strategies.agent_trading.lifecycle import MarketUniverse
+from strategies.agent_trading.lifecycle import load_market_universe
 from strategies.agent_trading.lifecycle import load_schedule
 from strategies.agent_trading.lifecycle import validate_decision
 from strategies.agent_trading.lifecycle import validate_research
-from strategies.agent_trading.market import MarketSnapshotter
-from strategies.agent_trading.market import RestMarketSnapshotter
 from strategies.agent_trading.watch import DisclosurePackage
 from strategies.agent_trading.watch import DisclosureWatcher
 from strategies.agent_trading.watch import WatchPlan
@@ -30,7 +33,11 @@ STRATEGY_ROOT = Path(__file__).resolve().parent
 PROMPTS_DIR = STRATEGY_ROOT / "prompts"
 SCHEMAS_DIR = STRATEGY_ROOT / "schemas"
 SCHEDULE_PATH = STRATEGY_ROOT / "schedules" / "2026-08-03_2026-08-07.json"
+MARKET_UNIVERSE_PATH = SCHEDULE_PATH.with_name(
+    f"{SCHEDULE_PATH.stem}_market_universe.json",
+)
 ANALYSIS_PROMPT = PROMPTS_DIR / "analysis.md"
+RESEARCH_SCHEMA = SCHEMAS_DIR / "research.json"
 DECISION_SCHEMA = SCHEMAS_DIR / "decision.json"
 
 
@@ -43,7 +50,6 @@ class AgentController:
         research_agent: ResearchAgent,
         analysis_agent: AnalysisAgent,
         disclosure_watcher: DisclosureWatcher,
-        market_snapshotter: MarketSnapshotter,
     ) -> None:
         self.host = host
         self.port = port
@@ -51,47 +57,28 @@ class AgentController:
         self.research_agent = research_agent
         self.analysis_agent = analysis_agent
         self.disclosure_watcher = disclosure_watcher
-        self.market_snapshotter = market_snapshotter
-        self.reader: asyncio.StreamReader | None = None
-        self.writer: asyncio.StreamWriter | None = None
-        self.send_lock = asyncio.Lock()
 
-    async def connect(self) -> None:
-        self.reader, self.writer = await asyncio.open_connection(self.host, self.port)
-
-    async def close(self) -> None:
-        if self.writer is None:
-            return
-        self.writer.close()
-        await self.writer.wait_closed()
-        self.reader = None
-        self.writer = None
-
+    # 分析结束时建立一次连接，将单条交易 JSON 发送进 NT 后关闭。
     async def send(self, payload: dict[str, Any]) -> None:
-        if self.writer is None:
-            raise RuntimeError("AgentController is not connected")
-        line = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8") + b"\n"
-        async with self.send_lock:
-            self.writer.write(line)
-            await self.writer.drain()
+        line = (
+            json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+            .encode("utf-8")
+            + b"\n"
+        )
+        _, writer = await asyncio.open_connection(self.host, self.port)
+        try:
+            writer.write(line)
+            await writer.drain()
+        finally:
+            writer.close()
+            await writer.wait_closed()
 
-    async def receive(self) -> dict[str, Any]:
-        if self.reader is None:
-            raise RuntimeError("AgentController is not connected")
-        line = await self.reader.readline()
-        if not line:
-            raise ConnectionError("ExternalJson connection closed")
-        payload = json.loads(line)
-        if not isinstance(payload, dict):
-            raise TypeError("payload must be a JSON object")
-        return payload
-
-    async def wait_until(self, timestamp_ns: int) -> None:
-        delay = (timestamp_ns - time.time_ns()) / 1_000_000_000
+    async def wait_until(self, moment: datetime) -> None:
+        delay = (moment - datetime.now(UTC)).total_seconds()
         if delay > 0:
             await asyncio.sleep(delay)
 
-    # 批次研究在监听前四小时启动；公司最终材料和完整性状态分别落盘。
+    # 预设 watcher 计划先落盘；批次研究在监听前四小时独立启动。
     async def prepare_batch(
         self,
         batch: BatchPlan,
@@ -109,33 +96,54 @@ class AgentController:
                     "batch_id": batch.batch_id,
                     "company": event.company,
                     "ticker": event.ticker,
+                    "scope": event.scope,
                     "research_hints": list(event.research_hints),
                 },
             )
+            self.event_store.save_plan(event.event_id, event.watch_plan.to_dict())
         self.event_store.update_batch(
             batch.batch_id,
             "waiting_for_research",
             research_start_at=batch.research_start_at.isoformat(),
         )
-        await self.wait_until(int(batch.research_start_at.timestamp() * 1_000_000_000))
-        self.event_store.update_batch(batch.batch_id, "researching")
-        outcomes = await self.research_agent.run_batch(
-            batch=batch,
-            batch_dir=self.event_store.batch_paths(batch.batch_id).root,
-            deadline=batch.watch_start_at,
+        await self.wait_until(batch.research_start_at)
+
+        reused: set[str] = set()
+        for event in batch.events:
+            if self._reuse_batch_research(
+                batch.batch_id,
+                event.event_id,
+                market_universe,
+            ):
+                reused.add(event.event_id)
+        pending = tuple(
+            event for event in batch.events if event.event_id not in reused
         )
+        self.event_store.update_batch(
+            batch.batch_id,
+            "researching",
+            reused_research=sorted(reused),
+        )
+        outcomes: dict[str, ResearchOutcome] = {}
+        if pending:
+            outcomes = await self.research_agent.run_batch(
+                batch=replace(batch, events=pending),
+                batch_dir=self.event_store.batch_paths(batch.batch_id).root,
+                deadline=batch.watch_start_at,
+            )
 
         plans: dict[str, WatchPlan] = {}
         statuses: dict[str, str] = {}
         for event in batch.events:
-            outcome = outcomes[event.event_id]
-            plan = self._save_research_outcome(
-                event.event_id,
-                outcome,
-                market_universe,
-            )
-            if plan is not None:
-                plans[event.event_id] = plan
+            ready = event.event_id in reused
+            if not ready:
+                ready = self._save_research_outcome(
+                    event.event_id,
+                    outcomes[event.event_id],
+                    market_universe,
+                )
+            if ready:
+                plans[event.event_id] = event.watch_plan
             state = self.event_store.load(event.event_id)
             statuses[event.event_id] = str(state["state"])
         self.event_store.update_batch(
@@ -145,12 +153,37 @@ class AgentController:
         )
         return plans
 
+    # 到达预研启动点后复核 batch 产物，并整理到分析事件目录。
+    def _reuse_batch_research(
+        self,
+        batch_id: str,
+        event_id: str,
+        market_universe: MarketUniverse,
+    ) -> bool:
+        batch_state = self.event_store.load_batch(batch_id)
+        companies = batch_state.get("companies", {})
+        if not isinstance(companies, dict):
+            raise TypeError(f"batch companies must be a JSON object: {batch_id}")
+        if companies.get(event_id) != "research_ready":
+            return False
+        research_path = (
+            self.event_store.batch_paths(batch_id).work
+            / event_id
+            / "research.json"
+        )
+        research = self._load_object(research_path, "batch research")
+        return self._save_research_outcome(
+            event_id,
+            ResearchOutcome(event_id=event_id, research=research, error=None),
+            market_universe,
+        )
+
     # 静态计划中的批次各自等待 T-4h，互不因其他批次失败而取消。
     async def run_schedule(
         self,
         batches: tuple[BatchPlan, ...],
         market_universe: MarketUniverse,
-    ) -> dict[str, Exception | None]:
+    ) -> None:
         active = tuple(
             batch
             for batch in batches
@@ -164,81 +197,63 @@ class AgentController:
             for batch in active
         }
         results = await asyncio.gather(*tasks.values(), return_exceptions=True)
-        return {
-            batch_id: result if isinstance(result, Exception) else None
-            for batch_id, result in zip(tasks, results, strict=True)
-        }
+        errors = [result for result in results if isinstance(result, Exception)]
+        if errors:
+            raise ExceptionGroup("agent trading batches failed", errors)
 
     def _save_research_outcome(
         self,
         event_id: str,
         outcome: ResearchOutcome,
         market_universe: MarketUniverse,
-    ) -> WatchPlan | None:
-        if outcome.research is None:
+    ) -> bool:
+        if not outcome.ready:
             self.event_store.update(
                 event_id,
                 "research_incomplete",
                 research_complete=False,
-                research_error=outcome.error,
+                research_error=outcome.error or "research_complete is false",
             )
-            return None
+            return False
 
+        assert outcome.research is not None
         full = outcome.research
-        report = full.get("research_report")
-        brief = full.get("analysis_brief")
-        if not isinstance(report, str) or not isinstance(brief, str):
+        try:
+            RESEARCH_VALIDATOR.validate(full)
+            validate_research(event_id, full, market_universe)
+        except ValidationError as exc:
+            error = f"ValidationError: {exc.message}"
+        except (KeyError, TypeError, ValueError) as exc:
+            error = f"{type(exc).__name__}: {exc}"
+        else:
+            error = None
+        if error is not None:
             self.event_store.update(
                 event_id,
                 "research_incomplete",
                 research_complete=False,
-                research_error="research report or analysis brief is missing",
+                research_error=error,
             )
-            return None
+            return False
 
-        structured = {
-            key: value
-            for key, value in full.items()
-            if key not in {"research_report", "analysis_brief"}
-        }
-        self.event_store.save_report(event_id, report)
-        self.event_store.save_brief(event_id, brief)
-        self.event_store.save_research(event_id, structured)
-
-        plan: WatchPlan | None = None
-        local_error: str | None = None
-        try:
-            validate_research(event_id, full, market_universe)
-        except (KeyError, TypeError, ValueError) as exc:
-            local_error = f"{type(exc).__name__}: {exc}"
-        try:
-            watch_payload = full.get("watch_plan")
-            if not isinstance(watch_payload, dict):
-                raise TypeError("research watch_plan must be a JSON object")
-            plan = self.set_watch_plan(event_id, watch_payload)
-        except (KeyError, TypeError, ValueError) as exc:
-            watch_error = f"{type(exc).__name__}: {exc}"
-            local_error = f"{local_error}; {watch_error}" if local_error else watch_error
-
-        complete = outcome.ready and local_error is None
+        # 分析只接收执行所需的候选表，完整报告留在 batch work 目录审计。
+        self.event_store.save_brief(event_id, full["analysis_brief"])
+        self.event_store.save_research(
+            event_id,
+            {
+                "event_id": event_id,
+                "trade_candidates": full["trade_candidates"],
+            },
+        )
         self.event_store.update(
             event_id,
-            "research_ready" if complete else "research_incomplete",
-            research_complete=complete,
-            research_error=local_error or outcome.error,
+            "research_ready",
+            research_complete=True,
+            research_error=None,
             research_path=str(self.event_store.paths(event_id).research),
             analysis_brief_path=str(self.event_store.paths(event_id).analysis_brief),
         )
-        return plan
-
-    def set_watch_plan(self, event_id: str, payload: dict[str, Any]) -> WatchPlan:
-        plan = WatchPlan.from_dict(payload)
-        if plan.event_id != event_id:
-            raise ValueError(
-                f"watch plan event_id mismatch: {plan.event_id} != {event_id}",
-            )
-        self.event_store.save_plan(event_id, plan.to_dict())
-        return plan
+        return True
 
     # 所有公司的监听并发运行；一家公司完成或失败不会停止其余目标。
     async def run_batch(
@@ -249,7 +264,7 @@ class AgentController:
         plans = await self.prepare_batch(batch, market_universe)
         tasks = [
             asyncio.create_task(
-                self.run_event(event_id, market_universe),
+                self.run_event(event_id),
                 name=f"agent-trading-event-{event_id}",
             )
             for event_id in plans
@@ -262,17 +277,12 @@ class AgentController:
     async def run_event(
         self,
         event_id: str,
-        market_universe: MarketUniverse,
     ) -> None:
         try:
             await self.wait_report(event_id)
-            state = self.event_store.load(event_id)
-            if not state.get("research_complete", False):
-                self.event_store.update(event_id, "report_saved_research_incomplete")
-                return
-            await self.capture_market(event_id, market_universe)
-            await self.run_analysis(event_id)
-            await self.send_decision(event_id)
+            decision = await self.run_analysis(event_id)
+            await self.send(decision)
+            self.event_store.update(event_id, "decision_sent")
         except Exception as exc:
             self.event_store.update(
                 event_id,
@@ -289,7 +299,11 @@ class AgentController:
                 f"stored watch plan event_id mismatch: {plan.event_id} != {event_id}",
             )
         self.event_store.update(event_id, "watching_disclosure")
-        package = await self.disclosure_watcher.watch(plan, paths.context)
+        package = await self.disclosure_watcher.watch(
+            plan,
+            paths.analysis_input,
+            paths.internal,
+        )
         self.event_store.update(
             event_id,
             "report_ready",
@@ -299,35 +313,17 @@ class AgentController:
         )
         return package
 
-    async def capture_market(
-        self,
-        event_id: str,
-        market_universe: MarketUniverse,
-    ) -> dict[str, Any]:
-        research = self._load_object(
-            self.event_store.paths(event_id).research,
-            "research",
-        )
-        candidate_ids = [
-            item["instrument_id"]
-            for item in research["trade_candidates"]
-        ]
-        instruments = tuple(market_universe.get(value) for value in candidate_ids)
-        snapshot = await self.market_snapshotter.capture(instruments)
-        self.event_store.save_snapshot(event_id, snapshot)
-        self.event_store.update(event_id, "market_snapshot_ready")
-        return snapshot
-
-    async def run_analysis(self, event_id: str) -> str:
+    async def run_analysis(self, event_id: str) -> dict[str, Any]:
         paths = self.event_store.paths(event_id)
         self.event_store.update(event_id, "analyzing")
-        result = await self.analysis_agent.run(
+        await self.analysis_agent.run(
             ANALYSIS_PROMPT.read_text(encoding="utf-8"),
-            paths.root,
+            paths.analysis_input,
             paths.decision,
             DECISION_SCHEMA,
         )
         decision = self._load_object(paths.decision, "decision")
+        DECISION_VALIDATOR.validate(decision)
         research = self._load_object(paths.research, "research")
         validate_decision(event_id, decision, research)
         self.event_store.update(
@@ -335,20 +331,7 @@ class AgentController:
             "decision_ready",
             decision_path=str(paths.decision),
         )
-        return result
-
-    async def send_decision(self, event_id: str) -> None:
-        payload = self._load_object(
-            self.event_store.paths(event_id).decision,
-            "decision",
-        )
-        await self.send(payload)
-        self.event_store.update(event_id, "decision_sent")
-
-    async def receive_forever(self) -> None:
-        while True:
-            payload = await self.receive()
-            print(json.dumps(payload, ensure_ascii=False), flush=True)
+        return decision
 
     @staticmethod
     def _load_object(path: Path, name: str) -> dict[str, Any]:
@@ -360,12 +343,13 @@ class AgentController:
 
 async def main() -> None:
     runner = CodexRunner()
-    load_schedule(SCHEDULE_PATH)
+    batches = load_schedule(SCHEDULE_PATH)
+    market_universe = load_market_universe(MARKET_UNIVERSE_PATH)
     research_agent = ResearchAgent(runner, PROMPTS_DIR, SCHEMAS_DIR)
     async with DisclosureWatcher(
         user_agent=SEC_USER_AGENT,
         poll_seconds=0.5,
-    ) as watcher, RestMarketSnapshotter() as snapshotter:
+    ) as watcher:
         controller = AgentController(
             host="127.0.0.1",
             port=9003,
@@ -373,13 +357,8 @@ async def main() -> None:
             research_agent=research_agent,
             analysis_agent=AnalysisAgent(runner),
             disclosure_watcher=watcher,
-            market_snapshotter=snapshotter,
         )
-        await controller.connect()
-        try:
-            await controller.receive_forever()
-        finally:
-            await controller.close()
+        await controller.run_schedule(batches, market_universe)
 
 
 if __name__ == "__main__":

@@ -2,19 +2,10 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "type",
-    "version",
-    "event_id",
-    "decision",
-    "trades",
-    "summary",
-    "applied_rules",
-    "rule_deviations"
-  ],
+  "required": ["type", "version", "event_id", "decision", "trades", "summary"],
   "properties": {
     "type": {"const": "trade_decision"},
-    "version": {"const": 1},
+    "version": {"const": 3},
     "event_id": {"type": "string", "minLength": 1},
     "decision": {"type": "string", "enum": ["TRADE", "HOLD"]},
     "trades": {
@@ -23,30 +14,34 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["instrument_id", "side", "confidence", "rule_ids"],
+        "required": [
+          "instrument_id",
+          "signal",
+          "expected_move_pct",
+          "confidence"
+        ],
         "properties": {
           "instrument_id": {"type": "string", "minLength": 1},
-          "side": {"type": "string", "enum": ["BUY", "SELL"]},
-          "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-          "rule_ids": {"type": "array", "items": {"type": "string"}}
+          "signal": {
+            "type": "string",
+            "enum": [
+              "STRONG_BUY",
+              "MEDIUM_BUY",
+              "WEAK_BUY",
+              "WEAK_SELL",
+              "MEDIUM_SELL",
+              "STRONG_SELL"
+            ]
+          },
+          "expected_move_pct": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 100
+          },
+          "confidence": {"type": "number", "minimum": 0, "maximum": 1}
         }
       }
     },
-    "summary": {"type": "string", "minLength": 1},
-    "applied_rules": {"type": "array", "items": {"type": "string"}},
-    "rule_deviations": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["rule_id", "new_fact", "reason", "confidence_impact"],
-        "properties": {
-          "rule_id": {"type": "string", "minLength": 1},
-          "new_fact": {"type": "string", "minLength": 1},
-          "reason": {"type": "string", "minLength": 1},
-          "confidence_impact": {"type": "string", "minLength": 1}
-        }
-      }
-    }
+    "summary": {"type": "string", "minLength": 1}
   }
 }

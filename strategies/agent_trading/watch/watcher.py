@@ -84,7 +84,12 @@ class DisclosureWatcher:
             self.news = None
 
     # SEC filing 或官方新闻稿中，第一个完整处理成功的来源触发分析。
-    async def watch(self, plan: WatchPlan, context_dir: Path) -> DisclosurePackage:
+    async def watch(
+        self,
+        plan: WatchPlan,
+        analysis_dir: Path,
+        internal_dir: Path,
+    ) -> DisclosurePackage:
         if self.sec is None or self.news is None:
             raise RuntimeError("DisclosureWatcher is not started")
         now = datetime.now(UTC)
@@ -94,8 +99,10 @@ class DisclosureWatcher:
         if remaining <= 0:
             raise TimeoutError(f"watch window already ended: {plan.event_id}")
 
-        context_dir = context_dir.resolve()
-        context_dir.mkdir(parents=True, exist_ok=True)
+        analysis_dir = analysis_dir.resolve()
+        internal_dir = internal_dir.resolve()
+        analysis_dir.mkdir(parents=True, exist_ok=True)
+        internal_dir.mkdir(parents=True, exist_ok=True)
         result = asyncio.get_running_loop().create_future()
 
         async def ready(package: DisclosurePackage) -> bool:
@@ -111,20 +118,20 @@ class DisclosureWatcher:
         def news_fail(exc: Exception) -> None:
             LOG.warning("news watch failed event_id=%s error=%s", plan.event_id, exc)
 
-        sec_target = WatchTarget(plan, context_dir, ready, fail)
-        news_target = WatchTarget(plan, context_dir, ready, news_fail)
+        sec_target = WatchTarget(plan, analysis_dir, internal_dir, ready, fail)
+        news_target = WatchTarget(plan, analysis_dir, internal_dir, ready, news_fail)
         package = None
         try:
             self.sec.add(sec_target)
             self.news.add(news_target)
             package = await asyncio.wait_for(result, timeout=remaining)
-            self._write_manifest(context_dir / "report.json", package)
+            self._write_manifest(analysis_dir / "report.json", package)
             return package
         finally:
             await self.sec.remove(plan.event_id)
             await self.news.remove(plan.event_id)
             if package is not None:
-                self._discard_loser(context_dir, package.source)
+                self._discard_loser(analysis_dir, internal_dir, package.source)
 
     @staticmethod
     def _write_manifest(path: Path, package: DisclosurePackage) -> None:
@@ -136,10 +143,11 @@ class DisclosureWatcher:
         temporary.replace(path)
 
     @staticmethod
-    def _discard_loser(context_dir: Path, winner: str) -> None:
-        disclosure_dir = (context_dir / "disclosure").resolve()
+    def _discard_loser(analysis_dir: Path, internal_dir: Path, winner: str) -> None:
         loser = "news_release" if winner == "sec" else "sec"
-        loser_dir = (disclosure_dir / loser).resolve()
-        loser_dir.relative_to(disclosure_dir)
-        if loser_dir.exists():
-            shutil.rmtree(loser_dir)
+        for root in (analysis_dir, internal_dir):
+            disclosure_dir = (root / "disclosure").resolve()
+            loser_dir = (disclosure_dir / loser).resolve()
+            loser_dir.relative_to(disclosure_dir)
+            if loser_dir.exists():
+                shutil.rmtree(loser_dir)

@@ -1,0 +1,45 @@
+{
+  "batch_id": "2026-08-03-amc",
+  "session": "AMC",
+  "watch_start_at": "2026-08-03T20:00:00+00:00",
+  "watch_end_at": "2026-08-03T22:00:00+00:00",
+  "events": [
+    {
+      "event_id": "2026-08-03-pltr",
+      "company": "Palantir Technologies",
+      "ticker": "PLTR",
+      "scope": "core_tech_crypto",
+      "research_hints": [
+        "Evaluate PLTR's own tradable instrument first and reject it if the disclosure-to-price causal case is weak."
+      ],
+      "watch": {
+        "sec": {
+          "cik": "0001321655",
+          "forms": [
+            "8-K",
+            "10-Q",
+            "10-K"
+          ]
+        },
+        "news_release": {
+          "sources": [
+            {
+              "url": "https://investors.palantir.com/feed/PressRelease.svc/GetPressReleaseList?languageId=1&bodyType=0&year=2026&includeTags=true&pressReleaseDateFilter=1",
+              "format": "q4_json",
+              "title_phrases": [
+                "palantir reports q2 2026"
+              ],
+              "exclude_phrases": [
+                "announces date"
+              ],
+              "content_terms": [
+                "palantir",
+                "revenue"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

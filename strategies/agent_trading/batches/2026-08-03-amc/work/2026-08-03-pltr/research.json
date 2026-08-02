@@ -1,0 +1,351 @@
+{
+  "event_id": "2026-08-03-pltr",
+  "as_of": "2026-08-02T10:40:21.0414058Z",
+  "research_report": "# PLTR Q2 2026 pre-research record\n\n## Scope, cutoff, and method\n\nThis guide covers only scheduled event 2026-08-03-pltr, an AMC Q2 2026 earnings disclosure. The hard information cutoff is 2026-08-02T10:40:21.0414058Z. The companion market universe contains one exact, non-index PLTR instrument: PLTRUSDT-PERP.BINANCE. No live price, K-line, liquidity, sizing, watcher, or execution judgment is part of this research.\n\nThe required debate was completed with exactly three independent research agents: financial baselines, products/operations, and skeptical impact criticism. Each received the same ranked question ledger. After all initial memos arrived, every material conflict was quoted in one identical conflict packet and returned to all three. Each agent responded defend/revise/withdraw with falsifiers. The main adjudication below controls the operating policy.\n\n## Ranked research-question ledger and resolution\n\n1. Highest priority — exact baseline and definition integrity. This changes both direction and HOLD decisions. The official Q2 baseline is revenue $1.797-$1.801bn and adjusted operating income (AOI) $1.063-$1.067bn. The Q1-issued FY26 baselines are revenue $7.650-$7.662bn, AOI $4.440-$4.452bn, U.S. commercial revenue above $3.224bn and at least 120% growth, and adjusted FCF $4.2-$4.4bn. [E1]\n2. Highest priority — interaction of actuals, segments, forward guidance, GAAP quality, and cash. A single headline beat or miss is insufficient. Q1 showed total revenue $1.632583bn, U.S. commercial $595m, U.S. government $687m, AOI $983.545m/60%, GAAP operating income $753.998m/46%, and adjusted FCF $924.630m/57%; those are the latest official sequential quality references. [E1]\n3. High priority — exact historical segment comparators. Q2 2025 revenue was $1.003697bn, U.S. commercial $306m, U.S. government $426m, AOI $464.385m/46%, and adjusted FCF $568.769m/57%. These figures define YoY comparisons but are not forecasts. [E3]\n4. High priority — public expectations. Public pages conflict around $1.80-$1.81bn versus $1.89bn revenue and around EPS definitions; one named analyst expected growth above company guidance, while a dated Visible Alpha snapshot also reflected a high commercial-growth narrative. The sources do not form one immutable, definition-complete consensus feed. Therefore neither consensus nor EPS enters any trigger. [E6][E7][E8][E9]\n5. High priority — contract and operating durability. TCV and RDV assume options are exercised and contracts are not terminated; RPO covers non-cancelable unrecognized revenue but omits some short contracts under the practical expedient. Deal counts and customer counts are separate populations. None may be added together or treated as guaranteed revenue. [E1][E2][E5]\n6. High priority — first-package executability. A Q1-style release supplied total and U.S. segment revenue, GAAP/non-GAAP profit, cash flow, TCV/RDV, and next-quarter/FY guidance. RPO, receivables concentration, contract liabilities, and strategic-contract details arrived in the later 10-Q. The operating policy therefore requires the recurring release fields, treats later-only fields as optional, and never instructs the analysis agent to wait. [E1][E2]\n7. Medium priority — AIP and government clues. Product cadence, NGC2 operational validation, marketplace availability, and named deployments show real product activity, but Palantir does not disclose platform-level AIP revenue or bootcamp conversion. Army ceilings are not obligations. These clues set falsifiers and prevent promotional announcements from becoming trade triggers. [E10][E11][E12]\n8. Medium priority — candidate transmission. PLTR's disclosure directly changes the issuer's revenue, profitability, and forward plan, so PLTRUSDT-PERP.BINANCE passes the causal gate. No software, cloud, defense, or semiconductor spillover has a quantified, sign-stable, material transmission path. Binance index/basis mechanics are an NT execution concern, not a reason to invent a different fundamental candidate. [E14]\n\n## Decision baseline and calculations\n\nAll monetary calculations below use billions of U.S. dollars unless stated otherwise.\n\n- Old Q2 revenue midpoint: 1.799; old FY revenue midpoint: 7.656. [E1]\n- Old Q2 AOI midpoint: 1.065; old FY AOI midpoint: 4.446. [E1]\n- Latest sequential segment baselines: U.S. commercial 0.595 and U.S. government 0.687. [E1]\n- Latest GAAP operating-margin baseline: 46%; Q2 guide-implied adjusted operating margin is approximately 59.2% at the guide midpoints. [E1]\n- Old FY adjusted-FCF midpoint: 4.3. [E1]\n\nCalculate the incremental second-half revisions, not a double-counted FY raise:\n\n- delta_h2_revenue = midpoint(new FY revenue guide) - 7.656 - (Q2 actual revenue - 1.799).\n- delta_h2_aoi = midpoint(new FY AOI guide) - 4.446 - (Q2 actual AOI - 1.065).\n\nA value above +0.001 is positive, below -0.001 is negative, and within +/-0.001 is neutral at the disclosed million-dollar precision. If a new guide has no bounded range or changes scope, the corresponding delta is unavailable and the result is HOLD.\n\n## Causal model and hierarchy\n\nPrimary drivers are Q2 total revenue and AOI versus company guidance, followed by incremental H2 revenue/AOI guidance and Q3 guidance. Segment breadth is a confirmation: both U.S. commercial and U.S. government must exceed their Q1 dollar baselines for a positive reading; both falling below those baselines confirms deterioration. This is a momentum test, not a relabeled market expectation. GAAP operating margin and cash conversion are quality vetoes. [E1][E3]\n\nSecondary contract indicators cannot create a trade. If disclosed, U.S. commercial TCV below the Q2 2025 $843m comparator and U.S. commercial RDV below the Q1 2026 $4.92bn comparator together contradict an otherwise positive result. A single decline or absent RPO is neutral. An explicit restatement, collectibility problem, material cancellation, or revenue-recognition issue overrides headline metrics and forces HOLD. [E1][E2][E3][E10]\n\nThe market narrative was already demanding: Q1 combined an above-guide result and another guide raise, while public interpretation still focused on U.S. commercial deceleration; named previews expected another strong result. This raises the novelty standard but does not introduce a valuation, price-reaction, or K-line rule. [E7][E9][E13]\n\n## Debate record and main adjudication\n\nD1 — Consensus. The financial memo initially retained approximately $1.81bn as a rounded benchmark; the critic showed incompatible $1.80/$1.81/$1.89 sources and arithmetic/scope problems. All three revised to exclude consensus and EPS from triggers. Adjudication: exclude them completely from BUY/SELL rules; retain only as evidence that expectations are high. [E6][E7][E8]\n\nD2 — Required fields. The industry memo initially proposed HOLD when customer count, NDR, RPO, or contract liabilities were missing. All three withdrew that position after comparing the Q1 release with the later 10-Q. Adjudication: recurring release fields are mandatory; later-only details are optional unless actually disclosed and contradictory. [E1][E2][E5]\n\nD3 — Forward guidance. All three defended the pass-through adjustment because an FY raise equal to the realized Q2 variance contains no incremental H2 revision. Adjudication: use both revenue and AOI deltas with a $1m neutral band; neither delta can decide alone.\n\nD4 — Segment thresholds. All three withdrew the mechanical $713m/$784m figures derived by carrying Q1 YoY growth into Q2. The remaining proposals were mere YoY non-contraction, Q1 sequential growth, or a 120% quarterly commercial line borrowed from FY guidance. Adjudication: use the official Q1 dollar values $595m/$687m as a symmetric sequential breadth test. This avoids treating either historical growth or an annual target as quarterly consensus. [E1]\n\nD5 — Negative rule. The financial memo allowed a looser double-miss trigger; the critic demanded a long all-fields chain. Adjudication: SELL requires both revenue and AOI misses plus at least one independent forward or segment deterioration condition, and no strong Q3 counter-signal. Any isolated miss is HOLD.\n\nD6 — Contract metrics. All three agreed that TCV/RDV/RPO/deal counts are non-additive, RPO absence is not an automatic HOLD, and contract ceilings are not obligations. Adjudication: these fields may veto an otherwise positive chain only when the defined double contradiction is disclosed; they never upgrade HOLD to BUY or SELL. [E1][E2][E10]\n\nD7 — Accounting quality. The critic withdrew strategic-contract revenue and generalized FCF weakness as central bear theses because Q1 strategic revenue was only $3m and conventional CFO less capex remained strongly positive. Adjudication: require GAAP/non-GAAP reconciliation and cash signs for BUY; later-only concentration and strategic-contract detail are not mandatory. [E1][E2]\n\nD8 — Candidate. All three accepted only PLTRUSDT-PERP.BINANCE and rejected every spillover. The critic's EWMA/order-book concern was reassigned to NT market/execution checks, consistent with the system division of responsibility. [E14]\n\nD9 — Valuation and narrative. High expectations increase the number of mutually confirming new facts required for BUY, but historical price reactions and long-term valuation are not automatic vetoes. [E7][E9][E13]\n\n## Operating conclusions and falsifiers\n\nA positive classification requires the full R3 chain: actual revenue/AOI above upper guidance, both U.S. engines sequentially higher, GAAP and adjusted margins corroborating, both incremental H2 deltas positive, stronger U.S. commercial FY guidance, constructive Q3 guidance, and positive cash quality. Failure of any leg falsifies BUY but does not automatically imply SELL. [E1][E3]\n\nA negative classification requires the R4 composite chain: both current-quarter metrics below lower guidance plus independent segment or forward deterioration and no strong Q3 offset. Failure of any required leg falsifies SELL and returns HOLD. [E1][E3]\n\nTCV, RDV, RPO, contract ceilings, product releases, named customers, and promotional AI language never decide direction alone. Material definition conflict, missing core fields, mixed signs, or any unanticipated fact that cannot be evaluated from the official package maps to HOLD, not additional research or waiting. [E1][E2][E10][E11][E12]\n\n## Candidate and rejected spillovers\n\nRetain only PLTRUSDT-PERP.BINANCE. The direct chain is official PLTR disclosure -> changed issuer revenue/profit/forward fundamentals -> conditional PLTR direction -> exact eligible PLTR perpetual. Risks are high embedded expectations, segment divergence, cancellable contract metrics, GAAP/non-GAAP gaps, and the separate execution-layer basis mechanics. [E1][E14]\n\nReject all other eligible instruments. Product integrations and broad AI demand are non-exclusive; defense awards can complement suppliers or displace budgets; no reviewed source quantified a material, stable short-horizon earnings transmission from PLTR to another eligible issuer. [E10][E11][E12]\n\n## Adversarial completeness pass\n\nEvery high-priority ledger item is either resolved into an exact rule or deliberately removed: consensus/EPS are excluded; segment thresholds are official historical momentum references rather than invented estimates; optional late-filing fields cannot create waiting; contract metrics are definition-gated; accounting anomalies have a veto; mixed combinations default to HOLD; only the direct candidate remains. Product-level AIP conversion and platform revenue remain undisclosed, but no rule depends on them. No material pre-event research task is left for the disclosure-time agent.",
+  "analysis_brief": "PLTR Q2 2026 — first-minute operating guide\n\nUse only the first complete official disclosure package. Do not use public consensus or EPS as a trigger, do not inspect price/K-lines, and do not wait for a call, later filing, or commentary.\n\n1. Extract exact fields\n\n- Package timestamp, reporting period, currency/units, and metric definitions.\n- Q2 total revenue.\n- Q2 U.S. commercial and U.S. government revenue, including official YoY growth.\n- GAAP operating income and margin.\n- Adjusted operating income (AOI), adjusted margin, and the GAAP reconciliation.\n- CFO, capex, adjusted FCF, and its reconciliation.\n- Q3 revenue and AOI guidance ranges.\n- FY26 revenue and AOI guidance ranges.\n- FY26 U.S. commercial revenue amount/growth floor.\n- FY26 adjusted-FCF guidance range.\n- If present only: U.S. commercial TCV, U.S. commercial RDV, deal counts, RPO, customer/NDR, cancellations, collectibility, or restatement facts.\n\n2. Locked baselines, USD billions unless stated\n\n- Q2 revenue: 1.797-1.801; midpoint 1.799.\n- Q2 AOI: 1.063-1.067; midpoint 1.065; guide-midpoint margin about 59.2%.\n- FY revenue: 7.650-7.662; midpoint 7.656.\n- FY AOI: 4.440-4.452; midpoint 4.446.\n- FY U.S. commercial: above 3.224 and at least 120% growth.\n- FY adjusted FCF: 4.2-4.4; midpoint 4.3.\n- Q1 segment/margin references: U.S. commercial 0.595, U.S. government 0.687, GAAP operating margin 46%.\n- Optional booking references: Q2 2025 U.S. commercial TCV 0.843; Q1 2026 U.S. commercial RDV 4.92.\n\nCalculate:\ndelta_h2_revenue = midpoint(new FY revenue guide) - 7.656 - (Q2 revenue - 1.799)\ndelta_h2_aoi = midpoint(new FY AOI guide) - 4.446 - (Q2 AOI - 1.065)\nAbove +0.001 is positive; below -0.001 is negative; otherwise neutral. If the new range is unbounded or not definition-comparable, HOLD.\n\n3. Apply rules in priority order\n\nHOLD veto first:\n- Any mandatory field is missing, inconsistent, or not definition-comparable.\n- The package discloses a restatement, material revenue-recognition/collectibility problem, or material cancellation.\n- An otherwise positive chain has GAAP operating margin below 46%, CFO-capex at or below zero, adjusted FCF at or below zero, or no usable reconciliation.\n- If both optional fields are disclosed and U.S. commercial TCV is below 0.843 while U.S. commercial RDV is below 4.92, veto BUY. Missing optional fields are neutral.\n\nBUY PLTR only if every condition holds:\n- Revenue >1.801.\n- AOI >1.067 and adjusted margin >=59.2%.\n- U.S. commercial >0.595 and U.S. government >0.687.\n- GAAP operating margin >=46%.\n- delta_h2_revenue >0.001 and delta_h2_aoi >0.001.\n- New FY U.S. commercial amount floor >3.224 and stated growth floor >120%.\n- Q3 revenue midpoint >Q2 actual revenue and Q3 implied adjusted margin >=59.2%.\n- New FY adjusted-FCF midpoint >4.3.\n- CFO-capex >0 and adjusted FCF >0.\n- No veto or booking contradiction above.\n\nSELL PLTR only if all base conditions hold:\n- Revenue <1.797 and AOI <1.063.\n- At least one independent deterioration test holds: both U.S. segments are below 0.595/0.687; or both H2 deltas are below -0.001; or a new FY lower bound is below 7.650 revenue / 4.440 AOI / 3.224 U.S. commercial (or its growth floor is below 120%).\n- Q3 does not offset the weakness: Q3 revenue midpoint <=Q2 actual revenue or Q3 implied adjusted margin <59.2%.\n- No disclosed definition/reclassification or clear one-time item makes the comparisons invalid.\n\nAll other combinations are HOLD: one beat/one miss, one strong/one weak segment, pass-through-only FY raise, neutral/opposite H2 deltas, contract headlines without conversion, or any conflict among actuals, guidance, GAAP quality, and cash.\n\n4. Candidate\n\nOnly PLTRUSDT-PERP.BINANCE. BUY/SELL refers to this instrument alone. Do not add software, cloud, defense, semiconductor, or AI spillovers. Instrument availability, basis, price reaction, liquidity, and remaining execution space belong to NT.",
+  "research_complete": true,
+  "decision_rules": [
+    {
+      "id": "R1_CORE_COMPLETENESS_VETO",
+      "priority": 1,
+      "rule": "Return HOLD immediately unless the same first complete official package supplies definition-comparable Q2 total revenue; U.S. commercial and U.S. government revenue; GAAP operating income/margin; adjusted operating income/margin and reconciliation; CFO, capex and adjusted FCF/reconciliation; Q3 revenue/AOI guidance; and FY26 revenue, AOI, U.S. commercial and adjusted-FCF guidance. Do not wait for another source.",
+      "rationale": "These are the recurring release fields needed to execute the composite policy. Q1's release contained them, while RPO, concentration and strategic-contract detail were later-filing fields.",
+      "exceptions": [
+        "Missing TCV, RDV, deal count, customer count, NDR, RPO, contract liabilities, AIP conversion or receivables concentration is neutral rather than a HOLD by itself.",
+        "If a mandatory field changes scope or is presented as an unbounded range that prevents the required midpoint calculation, return HOLD."
+      ],
+      "evidence_ids": [
+        "E1",
+        "E2",
+        "E5"
+      ]
+    },
+    {
+      "id": "R2_QUALITY_AND_ACCOUNTING_VETO",
+      "priority": 2,
+      "rule": "Return HOLD on a disclosed restatement, material revenue-recognition or collectibility problem, material contract cancellation, or an unusable GAAP/non-GAAP reconciliation. Also veto an otherwise positive result if GAAP operating margin is below 46%, CFO minus capex is at or below zero, or adjusted FCF is at or below zero.",
+      "rationale": "Adjusted operating income excludes stock compensation and related payroll taxes, while contract rights and cash timing can make headline growth non-durable. The veto uses only facts available in the official package and does not require later 10-Q detail.",
+      "exceptions": [
+        "SBC exclusions alone do not trigger HOLD when GAAP operating profit, the reconciliation and cash signs corroborate.",
+        "Strategic-commercial-contract revenue, receivables concentration and working-capital detail are not mandatory unless the package itself discloses a material issue."
+      ],
+      "evidence_ids": [
+        "E1",
+        "E2"
+      ]
+    },
+    {
+      "id": "R3_COMPOSITE_POSITIVE_BUY",
+      "priority": 3,
+      "rule": "BUY only PLTRUSDT-PERP.BINANCE when every condition holds: Q2 revenue is above $1.801bn; AOI is above $1.067bn with adjusted margin at least 59.2%; U.S. commercial revenue is above $595m and U.S. government revenue above $687m; GAAP operating margin is at least 46%; delta_h2_revenue and delta_h2_aoi are each above +$1m; the new FY U.S. commercial amount floor is above $3.224bn and its stated growth floor above 120%; Q3 revenue-guide midpoint exceeds Q2 actual revenue and Q3 implied adjusted margin is at least 59.2%; the new FY adjusted-FCF midpoint exceeds $4.3bn; CFO minus capex and adjusted FCF are positive; and no higher-priority or booking veto applies.",
+      "rationale": "The full chain distinguishes a novel, broad and cash-corroborated upward revision from a mere beat of conservative company guidance or a mechanical pass-through raise.",
+      "exceptions": [
+        "Equality with a guidance boundary is not a beat and maps to HOLD unless the complete SELL rule is satisfied.",
+        "Failure of one BUY leg falsifies BUY but does not automatically imply SELL.",
+        "Public consensus, EPS, product announcements and contract ceilings cannot substitute for any condition."
+      ],
+      "evidence_ids": [
+        "E1",
+        "E3",
+        "E4",
+        "E7",
+        "E9",
+        "E13"
+      ]
+    },
+    {
+      "id": "R4_COMPOSITE_NEGATIVE_SELL",
+      "priority": 4,
+      "rule": "SELL only PLTRUSDT-PERP.BINANCE when Q2 revenue is below $1.797bn and AOI below $1.063bn; at least one independent deterioration test also holds (both U.S. commercial and U.S. government revenue are below $595m/$687m, both delta_h2_revenue and delta_h2_aoi are below -$1m, or a new FY lower bound falls below $7.650bn revenue, $4.440bn AOI, or $3.224bn U.S. commercial / 120% growth); and Q3 provides no offset because its revenue midpoint is at or below Q2 actual revenue or its implied adjusted margin is below 59.2%.",
+      "rationale": "A double current-quarter miss plus segment or forward deterioration creates a definition-consistent negative chain without relying on conflicted public consensus.",
+      "exceptions": [
+        "A single revenue or AOI miss is HOLD.",
+        "If a disclosed scope change, reclassification or clear one-time timing item invalidates a required comparison, return HOLD.",
+        "If Q3 and H2 revisions clearly offset the current-quarter weakness, return HOLD."
+      ],
+      "evidence_ids": [
+        "E1",
+        "E3"
+      ]
+    },
+    {
+      "id": "R5_MIXED_DEFAULT_HOLD",
+      "priority": 5,
+      "rule": "Return HOLD for every combination that satisfies neither the complete BUY nor complete SELL rule, including one beat and one miss, one stronger and one weaker U.S. segment, neutral or opposite-sign H2 deltas, a pass-through-only FY raise, conflicting GAAP/cash quality, or unchanged guidance without a new directional signal.",
+      "rationale": "PLTR's high embedded expectations and two-engine revenue mix make isolated headline classification unreliable; unresolved opposition must not be converted into a trade.",
+      "exceptions": [
+        "No exception permits consensus, EPS, historical price reaction or long-term valuation to break a tie.",
+        "A genuinely unforeseen material fact that cannot be adjudicated from the official package remains HOLD."
+      ],
+      "evidence_ids": [
+        "E1",
+        "E6",
+        "E7",
+        "E8",
+        "E9",
+        "E13"
+      ]
+    },
+    {
+      "id": "R6_CONTRACT_METRICS_AUXILIARY",
+      "priority": 6,
+      "rule": "TCV, RDV, RPO, deal counts, customer counts and award ceilings never create BUY or SELL. If both are disclosed and U.S. commercial TCV is below the Q2 2025 $843m comparator while U.S. commercial RDV is below the Q1 2026 $4.92bn comparator, downgrade an otherwise positive result to HOLD. A single decline or an absent RPO is neutral.",
+      "rationale": "TCV/RDV assume options and no termination, RPO has a different non-cancelable scope, and government award ceilings need not be funded. The metrics are confirmations or contradictions, not additive revenue.",
+      "exceptions": [
+        "Use newly disclosed definitions if they differ; if no comparable period exists, do not apply a mechanical threshold.",
+        "Funded obligations or non-cancelable RPO may inform quality only when the official package quantifies them; they still cannot replace the core rules."
+      ],
+      "evidence_ids": [
+        "E1",
+        "E2",
+        "E3",
+        "E5",
+        "E10"
+      ]
+    }
+  ],
+  "trade_candidates": [
+    {
+      "symbol": "PLTR",
+      "instrument_id": "PLTRUSDT-PERP.BINANCE",
+      "relationship": "Direct reporting-company instrument",
+      "impact_thesis": "The official PLTR Q2 disclosure directly updates the issuer's revenue, U.S. commercial/government mix, operating profitability, cash generation and forward guidance. Only the complete composite rules establish a conditional fundamental BUY or SELL; all mixed cases are HOLD.",
+      "relevant_rule_ids": [
+        "R1_CORE_COMPLETENESS_VETO",
+        "R2_QUALITY_AND_ACCOUNTING_VETO",
+        "R3_COMPOSITE_POSITIVE_BUY",
+        "R4_COMPOSITE_NEGATIVE_SELL",
+        "R5_MIXED_DEFAULT_HOLD",
+        "R6_CONTRACT_METRICS_AUXILIARY"
+      ],
+      "risks": [
+        "Public expectations are high but no immutable, definition-complete consensus feed was available, so market-surprise magnitude cannot be measured by this research.",
+        "U.S. commercial and government signals can diverge.",
+        "TCV, RDV and award ceilings contain option, termination and funding uncertainty.",
+        "Adjusted profitability and FCF can diverge from GAAP and conventional cash measures.",
+        "Binance stock-perpetual index/basis, liquidity and post-disclosure execution space are separate NT checks."
+      ]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "E1",
+      "title": "Palantir Q1 2026 earnings release (SEC Exhibit 99.1)",
+      "url": "https://www.sec.gov/Archives/edgar/data/1321655/000132165526000026/a2026q1ex991pressrelease.htm",
+      "published_at": "2026-05-04T16:06:32-04:00",
+      "facts": [
+        "Q1 revenue was $1.632583bn; U.S. commercial was $595m and U.S. government $687m.",
+        "GAAP operating income was $753.998m/46%; adjusted operating income was $983.545m/60%; adjusted FCF was $924.630m/57%.",
+        "Q2 guidance was $1.797-$1.801bn revenue and $1.063-$1.067bn adjusted operating income.",
+        "FY26 guidance was $7.650-$7.662bn revenue, more than $3.224bn U.S. commercial revenue at at least 120% growth, $4.440-$4.452bn adjusted operating income, and $4.2-$4.4bn adjusted FCF.",
+        "TCV and RDV assume option exercise and no termination; most contracts can be terminated."
+      ],
+      "inferences": [
+        "This is the primary definition-consistent baseline and shows which core fields can appear in the first official release.",
+        "Revenue alone is insufficient because the company itself presents segment, profitability, cash and guidance interactions."
+      ],
+      "confidence": "high"
+    },
+    {
+      "id": "E2",
+      "title": "Palantir Q1 2026 Form 10-Q",
+      "url": "https://www.sec.gov/Archives/edgar/data/1321655/000132165526000028/pltr-20260331.htm",
+      "published_at": "2026-05-04T17:59:38-04:00",
+      "facts": [
+        "RPO was approximately $4.5bn, with 39% expected within 12 months; contract liabilities were $929m.",
+        "One customer represented 31% of accounts receivable, while no customer exceeded 10% of Q1 revenue.",
+        "Strategic commercial contracts had $326m total value, $324m cumulative recognized revenue and only $3m recognized in Q1.",
+        "The filing describes termination, collectibility, pilot-conversion and revenue-recognition limitations."
+      ],
+      "inferences": [
+        "RPO, concentration and strategic-contract details arrived after the core release and cannot be mandatory first-minute fields.",
+        "Explicit collectibility or recognition problems are quality vetoes when actually disclosed."
+      ],
+      "confidence": "high"
+    },
+    {
+      "id": "E3",
+      "title": "Palantir Q2 2025 earnings release (SEC Exhibit 99.1)",
+      "url": "https://www.sec.gov/Archives/edgar/data/1321655/000132165525000105/a2025q2ex991pressrelease.htm",
+      "published_at": "2025-08-04T16:07:52-04:00",
+      "facts": [
+        "Q2 2025 revenue was $1.003697bn; U.S. commercial was $306m and U.S. government $426m.",
+        "Adjusted operating income was $464.385m/46% and adjusted FCF $568.769m/57%.",
+        "U.S. commercial TCV was $843m and U.S. commercial RDV $2.79bn."
+      ],
+      "inferences": [
+        "These are the correct YoY comparators and provide a seasonal TCV reference.",
+        "Historical actuals are comparison baselines, not Q2 2026 forecasts."
+      ],
+      "confidence": "high"
+    },
+    {
+      "id": "E4",
+      "title": "Palantir Q4 and FY2025 earnings release (SEC Exhibit 99.1)",
+      "url": "https://www.sec.gov/Archives/edgar/data/1321655/000132165526000004/a2025q4ex991earningsrelease.htm",
+      "published_at": "2026-02-02T16:06:08-05:00",
+      "facts": [
+        "Q4 revenue was $1.406802bn, U.S. commercial $507m, U.S. government $570m, adjusted operating margin 57%, and adjusted FCF margin 56%.",
+        "The original FY26 guide was $7.182-$7.198bn revenue, $4.126-$4.142bn adjusted operating income and $3.925-$4.125bn adjusted FCF."
+      ],
+      "inferences": [
+        "Successive high-growth disclosures raised the novelty standard before Q2.",
+        "Segment, margin and forward-guide interactions matter more than one headline."
+      ],
+      "confidence": "high"
+    },
+    {
+      "id": "E5",
+      "title": "Palantir Q1 2026 business update",
+      "url": "https://investors.palantir.com/files/Palantir%20-%20Q1%202026%20Business%20Update.pdf",
+      "published_at": "2026-05-04",
+      "facts": [
+        "Total customer count was 1,007, U.S. commercial customers 615, net dollar retention 150%, billings $1.75bn and total RPO approximately $4.45bn.",
+        "The presentation separates short-term and long-term RPO and reports customer/deal breadth."
+      ],
+      "inferences": [
+        "Customer, retention and RPO are useful durability context but are presentation-dependent and cannot be mandatory when absent.",
+        "These fields cannot be substituted for disclosed revenue and guidance."
+      ],
+      "confidence": "high"
+    },
+    {
+      "id": "E6",
+      "title": "MarketBeat Palantir Q2 2026 earnings page",
+      "url": "https://www.marketbeat.com/earnings/reports/2026-8-3-palantir-technologies-inc-stock/",
+      "published_at": null,
+      "facts": [
+        "The page displayed expected Q2 revenue around $1.81bn and EPS $0.35 before the cutoff.",
+        "The page did not provide a sufficiently precise immutable snapshot with complete metric definitions."
+      ],
+      "inferences": [
+        "The rounded number is background only and cannot define an automated surprise boundary."
+      ],
+      "confidence": "medium"
+    },
+    {
+      "id": "E7",
+      "title": "Oppenheimer expectations for Palantir ahead of August 3 earnings",
+      "url": "https://www.tipranks.com/news/article/oppenheimer-lays-out-expectations-for-palantir-stock-ahead-of-august-3-earnings",
+      "published_at": "2026-07-27",
+      "facts": [
+        "The named analyst expected Q2 total growth around 84%-85%, U.S. commercial growth of at least 135%, FY total growth above 75%, and FY U.S. commercial growth of at least 125%."
+      ],
+      "inferences": [
+        "At least one public analyst expected performance above company guidance, supporting a higher novelty bar.",
+        "One analyst is not consensus and cannot supply the strategy's numeric trigger."
+      ],
+      "confidence": "medium"
+    },
+    {
+      "id": "E8",
+      "title": "BusinessQuant PLTR estimates snapshot",
+      "url": "https://businessquant.com/stocks/pltr/estimates",
+      "published_at": "2026-07-31T15:59:00Z",
+      "facts": [
+        "The page displayed Q2 revenue consensus around $1.89bn and EPS $0.35.",
+        "Its displayed FY revenue estimate was below already-issued company guidance, indicating stale or mixed estimate populations."
+      ],
+      "inferences": [
+        "The conflict with rounded $1.80-$1.81bn pages makes public consensus unusable without a prelocked feed."
+      ],
+      "confidence": "medium"
+    },
+    {
+      "id": "E9",
+      "title": "S&P Global Market Intelligence: consensus shows Palantir revenue shifting toward commercial",
+      "url": "https://www.spglobal.com/market-intelligence/en/news-insights/research/2026/06/consensus-shows-palantir-s-revenue-shifting-toward-commercial-segment",
+      "published_at": "2026-06-18",
+      "facts": [
+        "The dated Visible Alpha snapshot expected FY revenue around $7.7bn, commercial revenue around $3.9bn and commercial mix near 51%."
+      ],
+      "inferences": [
+        "Commercial durability and mix were already prominent in public expectations.",
+        "The June snapshot may have changed and is not a frozen August 2 trigger."
+      ],
+      "confidence": "medium"
+    },
+    {
+      "id": "E10",
+      "title": "U.S. Army enterprise service agreement with Palantir",
+      "url": "https://www.army.mil/article/287506/u_s_army_awards_enterprise_service_agreement_to_enhance_military_readiness_and_drive_operational_efficiency",
+      "published_at": "2025-07-31",
+      "facts": [
+        "The agreement consolidated procurement with a maximum potential value of $10bn over ten years.",
+        "The Army explicitly stated that the ceiling is not an obligation or commitment."
+      ],
+      "inferences": [
+        "Contract ceilings cannot be treated as bookings, backlog, funded orders or quarterly revenue."
+      ],
+      "confidence": "high"
+    },
+    {
+      "id": "E11",
+      "title": "U.S. Army NGC2 common data baseline moves from prototyping to delivery",
+      "url": "https://www.army.mil/article/293409/army_and_industry_align_on_common_data_baseline_as_next_generation_command_and_control_moves_from_prototyping_to_delivery",
+      "published_at": "2026-06-22",
+      "facts": [
+        "The Army identified Palantir Foundry in an operationally validated edge-to-cloud data mesh as NGC2 moved toward delivery."
+      ],
+      "inferences": [
+        "This supports product relevance in a production-bound government program but does not quantify PLTR contract share or Q2 revenue."
+      ],
+      "confidence": "high"
+    },
+    {
+      "id": "E12",
+      "title": "Palantir Foundry and AIP release notes, June 2026",
+      "url": "https://www.palantir.com/docs/foundry/announcements/2026-06",
+      "published_at": "2026-06",
+      "facts": [
+        "Palantir shipped additional agent, model-connectivity, usage and MCP capabilities, including general availability of Palantir MCP."
+      ],
+      "inferences": [
+        "Product cadence is real but feature availability does not establish adoption, conversion or material revenue.",
+        "No decision rule should infer precise AIP revenue from release notes."
+      ],
+      "confidence": "high"
+    },
+    {
+      "id": "E13",
+      "title": "Kiplinger market report after Palantir Q1 2026 results",
+      "url": "https://www.kiplinger.com/investing/stocks/market-news/nasdaq-sp-500-at-new-highs-on-intel-rally-stock-market-today",
+      "published_at": "2026-05-05T20:12:44Z",
+      "facts": [
+        "The report noted that strong headline results and raised guidance coexisted with attention to U.S. commercial growth deceleration."
+      ],
+      "inferences": [
+        "Apparently strong totals can contain opposing segment signals.",
+        "Historical price attribution remains underidentified and is not used as a trigger."
+      ],
+      "confidence": "medium"
+    },
+    {
+      "id": "E14",
+      "title": "Binance stock perpetual contract guide",
+      "url": "https://academy.binance.com/ur-PK/articles/how-to-trade-stock-perpetual-contracts-on-binance",
+      "published_at": "2026-04-23",
+      "facts": [
+        "The guide describes PLTRUSDT as tracking PLTR and explains 24/7 stock-perpetual and index mechanics.",
+        "Binance stated that equity-perpetual index methodology would use order-book impact-mid and EWMA mechanics from May 16, 2026."
+      ],
+      "inferences": [
+        "PLTRUSDT is the direct issuer-linked instrument, while basis/index quality belongs to later market and execution checks."
+      ],
+      "confidence": "high"
+    },
+    {
+      "id": "E15",
+      "title": "Le Monde: ChapsVision set to replace Palantir for French domestic security",
+      "url": "https://www.lemonde.fr/en/economy/article/2026/07/02/chapsvision-the-little-known-software-company-set-to-replace-us-giant-palantir-for-france-s-domestic-security-agency_6755076_19.html",
+      "published_at": "2026-07-02",
+      "facts": [
+        "France's domestic-security migration toward a domestic provider was linked to sovereignty considerations and expected to take time."
+      ],
+      "inferences": [
+        "Sovereignty can displace international government deployments, but this item alone is not a Q2 directional trigger."
+      ],
+      "confidence": "medium"
+    }
+  ]
+}

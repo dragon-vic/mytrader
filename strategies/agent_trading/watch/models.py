@@ -10,7 +10,7 @@ from typing import Callable
 from urllib.parse import urlsplit
 
 
-SOURCE_FORMATS = {"feed", "html"}
+SOURCE_FORMATS = {"feed", "html", "q4_json"}
 EARNINGS_FORMS = {"8-K", "10-Q", "10-K", "6-K", "20-F", "40-F"}
 
 
@@ -24,8 +24,10 @@ class SecPlan:
 class NewsSource:
     url: str
     format: str
-    last_seen: str
-    title_terms: tuple[str, ...]
+    title_phrases: tuple[str, ...]
+    exclude_phrases: tuple[str, ...]
+    content_terms: tuple[str, ...]
+    user_agent: str | None = None
 
 
 @dataclass(frozen=True)
@@ -36,7 +38,7 @@ class WatchPlan:
     sec: SecPlan
     news_sources: tuple[NewsSource, ...]
 
-    # 将预研 Agent 的受限 JSON 配置转为 Watcher 使用的计划。
+    # 将受限 JSON 配置转为 Watcher 使用的完整计划。
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> WatchPlan:
         _require_keys(
@@ -69,6 +71,25 @@ class WatchPlan:
         plan._validate()
         return plan
 
+    @classmethod
+    def from_watch_dict(
+        cls,
+        event_id: str,
+        start_at: datetime,
+        end_at: datetime,
+        payload: dict[str, Any],
+    ) -> WatchPlan:
+        _require_keys(payload, {"sec", "news_release"}, "watch")
+        return cls.from_dict(
+            {
+                "event_id": event_id,
+                "start_at": start_at.isoformat(),
+                "end_at": end_at.isoformat(),
+                "sec": payload["sec"],
+                "news_release": payload["news_release"],
+            },
+        )
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "event_id": self.event_id,
@@ -80,15 +101,17 @@ class WatchPlan:
             },
             "news_release": {
                 "sources": [
-                    {
-                        "url": source.url,
-                        "format": source.format,
-                        "last_seen": source.last_seen,
-                        "title_terms": list(source.title_terms),
-                    }
+                    _source_dict(source)
                     for source in self.news_sources
                 ],
             },
+        }
+
+    def to_watch_dict(self) -> dict[str, Any]:
+        payload = self.to_dict()
+        return {
+            "sec": payload["sec"],
+            "news_release": payload["news_release"],
         }
 
     def _validate(self) -> None:
@@ -107,8 +130,10 @@ class WatchPlan:
                 raise ValueError(f"news source must use https: {source.url}")
             if source.format not in SOURCE_FORMATS:
                 raise ValueError(f"unsupported news source format: {source.format}")
-            if not source.title_terms:
-                raise ValueError("news source title_terms must not be empty")
+            if not source.title_phrases:
+                raise ValueError("news source title_phrases must not be empty")
+            if not source.content_terms:
+                raise ValueError("news source content_terms must not be empty")
 
 
 @dataclass(frozen=True)
@@ -174,23 +199,54 @@ FailHandler = Callable[[Exception], None]
 @dataclass
 class WatchTarget:
     plan: WatchPlan
-    event_dir: Path
+    analysis_dir: Path
+    internal_dir: Path
     ready: ReadyHandler
     fail: FailHandler
 
 
 def _parse_source(payload: dict[str, Any]) -> NewsSource:
-    _require_keys(
-        payload,
-        {"url", "format", "last_seen", "title_terms"},
-        "news_release.sources[]",
-    )
+    required = {"url", "format", "title_phrases", "exclude_phrases", "content_terms"}
+    actual = set(payload)
+    if not required <= actual or actual - required - {"user_agent"}:
+        raise ValueError(
+            "news_release.sources[] fields must contain "
+            f"{sorted(required)} with optional user_agent, got {sorted(actual)}",
+        )
     return NewsSource(
         url=_require_text(payload["url"], "news source url"),
         format=_require_text(payload["format"], "news source format"),
-        last_seen=_require_text(payload["last_seen"], "news source last_seen"),
-        title_terms=_text_tuple(payload["title_terms"], "news source title_terms"),
+        title_phrases=_text_tuple(
+            payload["title_phrases"],
+            "news source title_phrases",
+        ),
+        exclude_phrases=_text_tuple(
+            payload["exclude_phrases"],
+            "news source exclude_phrases",
+        ),
+        content_terms=_text_tuple(
+            payload["content_terms"],
+            "news source content_terms",
+        ),
+        user_agent=(
+            _require_text(payload["user_agent"], "news source user_agent")
+            if "user_agent" in payload
+            else None
+        ),
     )
+
+
+def _source_dict(source: NewsSource) -> dict[str, Any]:
+    payload = {
+        "url": source.url,
+        "format": source.format,
+        "title_phrases": list(source.title_phrases),
+        "exclude_phrases": list(source.exclude_phrases),
+        "content_terms": list(source.content_terms),
+    }
+    if source.user_agent is not None:
+        payload["user_agent"] = source.user_agent
+    return payload
 
 
 def _parse_time(value: Any, name: str) -> datetime:

@@ -1,0 +1,28 @@
+{
+  "event_id": "2026-08-03-pltr",
+  "source": "synthetic_test",
+  "form": "8-K",
+  "accession": "SIMULATED-2026-Q2",
+  "items": [
+    "2.02",
+    "9.01"
+  ],
+  "origin_url": "simulation://pltr/q2-2026/composite-buy",
+  "published_at": "2026-08-03T20:05:00Z",
+  "detected_ns": 1785787500000000000,
+  "files": [
+    {
+      "document_type": "press-release",
+      "description": "SIMULATION FIXTURE — Palantir Q2 2026 earnings release",
+      "source_url": "simulation://pltr/q2-2026/composite-buy/release",
+      "content_type": "text/markdown; charset=utf-8",
+      "content_format": "text",
+      "size_bytes": 2875,
+      "sha256": "12abaa546b89597aa70a5881e1b475270eb26803c6bb701e813d3e5f74153550",
+      "raw_path": "disclosure/synthetic/processed/q2_2026_simulated_release.md",
+      "analysis_path": "disclosure/synthetic/processed/q2_2026_simulated_release.md",
+      "processing_status": "processed",
+      "processing_error": null
+    }
+  ]
+}

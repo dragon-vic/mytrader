@@ -1,0 +1,38 @@
+{
+  "event_id": "2026-08-03-pltr",
+  "trade_candidates": [
+    {
+      "symbol": "PLTR",
+      "instrument_id": "PLTRUSDT-PERP.BINANCE",
+      "outcomes": {
+        "STRONG_BUY": {
+          "condition": "No HOLD veto applies; Q2 revenue is above $1.801bn; AOI is above $1.067bn with adjusted margin at least 59.2%; U.S. commercial and government revenue exceed $595m and $687m; GAAP operating margin is at least 46%; both H2 deltas exceed +$1m; Q3 revenue midpoint exceeds Q2 actual with implied adjusted margin at least 59.2%; FY U.S. commercial amount and growth floors exceed $3.224bn and 120%; FY adjusted-FCF midpoint exceeds $4.3bn; CFO-capex and adjusted FCF are positive.",
+          "expected_move_pct": 16.0
+        },
+        "MEDIUM_BUY": {
+          "condition": "No HOLD veto applies; Q2 revenue and AOI both exceed their upper guidance bounds; both U.S. segments are at least sequentially stable; at least one H2 delta is above +$1m and neither is below -$1m; Q3 revenue midpoint exceeds Q2 actual; one or more strong-tier secondary confirmations may be neutral.",
+          "expected_move_pct": 10.0
+        },
+        "WEAK_BUY": {
+          "condition": "No HOLD veto applies; either revenue or AOI exceeds its upper guidance bound while the other is not below its lower bound; Q3 and FY guidance are not reduced; neither U.S. segment has a material sequential decline; the result does not meet medium or strong BUY.",
+          "expected_move_pct": 5.0
+        },
+        "HOLD": {
+          "condition": "A mandatory field is missing or definition-incomparable; the package discloses a material restatement, recognition, collectibility, cancellation, reconciliation, GAAP-quality, or cash-conversion veto; current results and guidance are materially mixed; both optional booking metrics contradict an otherwise positive result; or the disclosure is an ordinary no-material-surprise result inside PLTR's no-action band. Missing optional metrics alone are neutral."
+        },
+        "WEAK_SELL": {
+          "condition": "No HOLD veto applies; either revenue or AOI is below its lower guidance bound while the other does not exceed its upper bound; at least one segment or forward indicator is negative; no positive guidance offset exists; the result does not meet medium or strong SELL.",
+          "expected_move_pct": 6.0
+        },
+        "MEDIUM_SELL": {
+          "condition": "No HOLD veto applies; revenue and AOI are both below their lower guidance bounds; at least one independent deterioration signal appears in U.S. segments, H2 deltas, or Q3 guidance; no positive FY or Q3 offset exists; the result does not meet strong SELL.",
+          "expected_move_pct": 12.0
+        },
+        "STRONG_SELL": {
+          "condition": "No HOLD veto applies; revenue is below $1.797bn and AOI below $1.063bn; at least one independent deterioration test also holds in both U.S. segments, both H2 deltas, or a lowered FY floor; Q3 provides no offset because its revenue midpoint is at or below Q2 actual or implied adjusted margin is below 59.2%.",
+          "expected_move_pct": 20.0
+        }
+      }
+    }
+  ]
+}

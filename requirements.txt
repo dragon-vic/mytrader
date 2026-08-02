@@ -11,3 +11,4 @@ nautilus-ibapi>=10.43.2
 ccxt
 websockets
 pypdf==6.14.2
+jsonschema>=4.26.0

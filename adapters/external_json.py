@@ -18,7 +18,6 @@ from adapters.common import LiveContext
 from utils.constants import EXTERNAL_JSON_CLIENT_NAME
 from utils.constants import EXTERNAL_JSON_DEFAULT_HOST
 from utils.constants import EXTERNAL_JSON_DEFAULT_PORT
-from utils.constants import EXTERNAL_JSON_SEND_TOPIC
 
 
 @customdataclass
@@ -37,7 +36,7 @@ class ExternalJsonDataClientConfig(LiveDataClientConfig, frozen=True):
 
 
 class ExternalJsonDataClient(LiveDataClient):
-    """Bidirectional newline-delimited JSON over TCP."""
+    """Receives one JSON object per TCP connection."""
 
     def __init__(self, loop, msgbus, cache, clock, config, name=None):
         super().__init__(
@@ -51,9 +50,7 @@ class ExternalJsonDataClient(LiveDataClient):
         )
         self._config = config
         self._server = None
-        self._writers: set[asyncio.StreamWriter] = set()
         self._subscribed = False
-        self._bus_subscribed = False
 
     async def _connect(self) -> None:
         self._server = await asyncio.start_server(
@@ -61,27 +58,13 @@ class ExternalJsonDataClient(LiveDataClient):
             self._config.host,
             self._config.port,
         )
-        self._msgbus.subscribe(EXTERNAL_JSON_SEND_TOPIC, self._send_json)
-        self._bus_subscribed = True
         self._log.info(f"Listening external JSON on {self._config.host}:{self._config.port}")
 
     async def _disconnect(self) -> None:
-        if self._bus_subscribed:
-            self._msgbus.unsubscribe(EXTERNAL_JSON_SEND_TOPIC, self._send_json)
-            self._bus_subscribed = False
         if self._server is not None:
             self._server.close()
             await self._server.wait_closed()
             self._server = None
-        writers = tuple(self._writers)
-        self._writers.clear()
-        for writer in writers:
-            writer.close()
-        for writer in writers:
-            try:
-                await writer.wait_closed()
-            except (ConnectionError, OSError):
-                pass
 
     async def _subscribe(self, command: SubscribeData) -> None:
         self._subscribed = True
@@ -94,16 +77,13 @@ class ExternalJsonDataClient(LiveDataClient):
     async def _request(self, request: RequestData) -> None:
         self._log.error("ExternalJsonDataClient does not support request_data")
 
-    # 一个 TCP 连接可以连续双向传输多条 JSON。
+    # 外部进程建立短连接，每次只发送一条 JSON。
     async def _handle_client(self, reader, writer) -> None:
-        self._writers.add(writer)
         try:
-            while line := await reader.readline():
-                self._handle_line(line)
+            self._handle_line(await reader.readline())
         except (ConnectionError, OSError) as exc:
             self._log.warning(f"External JSON connection closed: {type(exc).__name__}")
         finally:
-            self._writers.discard(writer)
             writer.close()
             try:
                 await writer.wait_closed()
@@ -129,26 +109,6 @@ class ExternalJsonDataClient(LiveDataClient):
         if self._subscribed:
             self._handle_data(CustomData(data_type=external_json_type(), data=data))
 
-    # NT 组件向该 topic 发布 dict，客户端异步广播给外部连接。
-    def _send_json(self, payload: dict[str, Any]) -> None:
-        if not isinstance(payload, dict):
-            raise TypeError(f"{EXTERNAL_JSON_SEND_TOPIC} requires dict")
-        line = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8") + b"\n"
-        self.create_task(self._broadcast(line), log_msg="external_json_send")
-
-    async def _broadcast(self, line: bytes) -> None:
-        if not self._writers:
-            self._log.warning("Dropped outbound external JSON: no client connected")
-            return
-        for writer in tuple(self._writers):
-            try:
-                writer.write(line)
-                await writer.drain()
-            except (ConnectionError, OSError) as exc:
-                self._writers.discard(writer)
-                writer.close()
-                self._log.warning(f"External JSON send failed: {type(exc).__name__}")
-
 
 class ExternalJsonLiveDataClientFactory(LiveDataClientFactory):
     @staticmethod
@@ -167,7 +127,7 @@ def normalize_client(_cfg: dict[str, Any]) -> None:
     pass
 
 
-# 构建双向外部 JSON live data client 配置。
+# 构建单向外部 JSON live data client 配置。
 def build_data_client(_context: LiveContext, cfg: dict[str, Any]):
     return (
         cfg["client_id"],

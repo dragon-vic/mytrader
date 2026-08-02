@@ -1,6 +1,7 @@
 {
   "schedule_id": "2026-08-03_2026-08-07",
   "timezone": "UTC",
+  "active_scope": "core_tech_crypto",
   "batches": [
     {
       "batch_id": "2026-08-03-bmo",
@@ -12,25 +13,79 @@
           "event_id": "2026-08-03-cnh",
           "company": "CNH Industrial",
           "ticker": "CNH",
+          "scope": "other",
           "research_hints": [
             "Test whether CNH can create a construction or agricultural-equipment read-through for CAT; do not assume the relationship is tradable."
-          ]
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0001567094",
+              "forms": ["8-K", "10-Q", "10-K"]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://investors.cnh.com/rss/PressRelease.aspx",
+                  "format": "feed",
+                  "title_phrases": ["cnh industrial n.v. reports second quarter 2026 results", "cnh reports second quarter 2026 results"],
+                  "exclude_phrases": ["to announce"],
+                  "content_terms": ["cnh", "net sales"]
+                }
+              ]
+            }
+          }
         },
         {
           "event_id": "2026-08-03-srad",
           "company": "Sportradar",
           "ticker": "SRAD",
+          "scope": "core_tech_crypto",
           "research_hints": [
             "Test whether sports-betting data demand and customer economics can create a read-through for DKNG."
-          ]
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0001836470",
+              "forms": ["6-K", "20-F"]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://investors.sportradar.com/rss/news-releases.xml",
+                  "format": "feed",
+                  "title_phrases": ["sportradar reports second quarter 2026 financial results"],
+                  "exclude_phrases": ["to release"],
+                  "content_terms": ["sportradar", "revenue"]
+                }
+              ]
+            }
+          }
         },
         {
           "event_id": "2026-08-03-abtc",
           "company": "American Bitcoin",
           "ticker": "ABTC",
+          "scope": "core_tech_crypto",
           "research_hints": [
             "Test possible Bitcoin-mining, treasury, and crypto-market read-throughs to IREN, MSTR, and COIN."
-          ]
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0001755953",
+              "forms": ["8-K", "10-Q", "10-K"]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://www.abtc.com/news",
+                  "format": "html",
+                  "title_phrases": ["american bitcoin reports second quarter 2026 results"],
+                  "exclude_phrases": ["schedules"],
+                  "content_terms": ["american bitcoin", "revenue"]
+                }
+              ]
+            }
+          }
         }
       ]
     },
@@ -44,9 +99,27 @@
           "event_id": "2026-08-03-pltr",
           "company": "Palantir Technologies",
           "ticker": "PLTR",
+          "scope": "core_tech_crypto",
           "research_hints": [
             "Evaluate PLTR's own tradable instrument first and reject it if the disclosure-to-price causal case is weak."
-          ]
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0001321655",
+              "forms": ["8-K", "10-Q", "10-K"]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://investors.palantir.com/feed/PressRelease.svc/GetPressReleaseList?languageId=1&bodyType=0&year=2026&includeTags=true&pressReleaseDateFilter=1",
+                  "format": "q4_json",
+                  "title_phrases": ["palantir reports q2 2026"],
+                  "exclude_phrases": ["announces date"],
+                  "content_terms": ["palantir", "revenue"]
+                }
+              ]
+            }
+          }
         }
       ]
     },
@@ -60,9 +133,27 @@
           "event_id": "2026-08-04-cat",
           "company": "Caterpillar",
           "ticker": "CAT",
+          "scope": "other",
           "research_hints": [
             "Evaluate CAT's own tradable instrument first and reject it if the disclosure-to-price causal case is weak."
-          ]
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0000018230",
+              "forms": ["8-K", "10-Q", "10-K"]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://investors.caterpillar.com/feed/PressRelease.svc/GetPressReleaseList?languageId=1&bodyType=0&year=2026&includeTags=true&pressReleaseDateFilter=1",
+                  "format": "q4_json",
+                  "title_phrases": ["caterpillar reports second-quarter 2026 results", "caterpillar reports second quarter 2026 results"],
+                  "exclude_phrases": ["to announce"],
+                  "content_terms": ["caterpillar", "sales and revenues"]
+                }
+              ]
+            }
+          }
         }
       ]
     },
@@ -76,33 +167,105 @@
           "event_id": "2026-08-04-spcx",
           "company": "SpaceX",
           "ticker": "SPCX",
+          "scope": "core_tech_crypto",
           "research_hints": [
             "Evaluate SPCX directly and test commercial-space demand or valuation read-throughs to ASTS and RKLB."
-          ]
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0001181412",
+              "forms": ["8-K", "10-Q", "10-K"]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://ir.spacex.com/rss/PressRelease.aspx",
+                  "format": "feed",
+                  "title_phrases": ["spacex posts second quarter 2026 results", "spacex reports second quarter 2026 results"],
+                  "exclude_phrases": ["to post"],
+                  "content_terms": ["spacex", "revenue"]
+                }
+              ]
+            }
+          }
         },
         {
           "event_id": "2026-08-04-amd",
           "company": "Advanced Micro Devices",
           "ticker": "AMD",
+          "scope": "core_tech_crypto",
           "research_hints": [
             "Evaluate AMD directly and test AI-accelerator, data-center, and foundry read-throughs to NVDA and TSM."
-          ]
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0000002488",
+              "forms": ["8-K", "10-Q", "10-K"]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://ir.amd.com/news-events/press-releases/rss",
+                  "format": "feed",
+                  "title_phrases": ["amd reports fiscal second quarter 2026 financial results"],
+                  "exclude_phrases": ["to report"],
+                  "content_terms": ["amd", "revenue"]
+                }
+              ]
+            }
+          }
         },
         {
           "event_id": "2026-08-04-alab",
           "company": "Astera Labs",
           "ticker": "ALAB",
+          "scope": "core_tech_crypto",
           "research_hints": [
             "Evaluate ALAB directly and test data-center connectivity read-throughs to CRDO and MRVL."
-          ]
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0001736297",
+              "forms": ["8-K", "10-Q", "10-K"]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://ir.asteralabs.com/news-events/news-releases",
+                  "format": "html",
+                  "title_phrases": ["astera labs reports second quarter 2026 financial results"],
+                  "exclude_phrases": ["announces conference"],
+                  "content_terms": ["astera labs", "revenue"]
+                }
+              ]
+            }
+          }
         },
         {
           "event_id": "2026-08-04-anet",
           "company": "Arista Networks",
           "ticker": "ANET",
+          "scope": "core_tech_crypto",
           "research_hints": [
             "Test AI-networking and optical-demand read-throughs to AVGO, CIEN, and AAOI."
-          ]
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0001596532",
+              "forms": ["8-K", "10-Q", "10-K"]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://www.arista.com/en/company/news/press-release",
+                  "format": "html",
+                  "title_phrases": ["arista networks, inc. reports second quarter 2026 financial results", "arista networks reports second quarter 2026 financial results"],
+                  "exclude_phrases": ["to announce"],
+                  "content_terms": ["arista networks", "revenue"]
+                }
+              ]
+            }
+          }
         }
       ]
     },
@@ -116,41 +279,131 @@
           "event_id": "2026-08-05-nvo",
           "company": "Novo Nordisk",
           "ticker": "NVO",
+          "scope": "other",
           "research_hints": [
             "Evaluate NVO directly and test obesity and diabetes market-share read-throughs to LLY."
-          ]
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0000353278",
+              "forms": ["6-K", "20-F"]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://www.novonordisk.com/investors/financial-results.html",
+                  "format": "html",
+                  "title_phrases": ["financial report for the first half of 2026", "financial results for the first half of 2026", "financial report for first half 2026"],
+                  "exclude_phrases": [],
+                  "content_terms": ["novo nordisk", "sales"]
+                }
+              ]
+            }
+          }
         },
         {
           "event_id": "2026-08-05-lly",
           "company": "Eli Lilly",
           "ticker": "LLY",
+          "scope": "other",
           "research_hints": [
             "Evaluate LLY directly and test obesity and diabetes market-share read-throughs to NVO."
-          ]
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0000059478",
+              "forms": ["8-K", "10-Q", "10-K"]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://investor.lilly.com/financial-information/quarterly-results",
+                  "format": "html",
+                  "title_phrases": ["q2 2026 financial results", "second-quarter 2026 financial results", "press release"],
+                  "exclude_phrases": [],
+                  "content_terms": ["lilly", "revenue"]
+                }
+              ]
+            }
+          }
         },
         {
           "event_id": "2026-08-05-dis",
           "company": "The Walt Disney Company",
           "ticker": "DIS",
+          "scope": "other",
           "research_hints": [
             "Evaluate DIS directly and test streaming demand, pricing, and profitability read-throughs to NFLX."
-          ]
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0001744489",
+              "forms": ["8-K", "10-Q", "10-K"]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://investors.thewaltdisneycompany.com/rss/PressRelease.aspx",
+                  "format": "feed",
+                  "title_phrases": ["the walt disney company reports third quarter", "the walt disney company reports fiscal third quarter 2026"],
+                  "exclude_phrases": ["to report"],
+                  "content_terms": ["the walt disney company", "revenues"]
+                }
+              ]
+            }
+          }
         },
         {
           "event_id": "2026-08-05-uber",
           "company": "Uber Technologies",
           "ticker": "UBER",
+          "scope": "core_tech_crypto",
           "research_hints": [
             "Evaluate UBER's own tradable instrument first and reject it if the disclosure-to-price causal case is weak."
-          ]
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0001543151",
+              "forms": ["8-K", "10-Q", "10-K"]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://investor.uber.com/rss/PressRelease.aspx",
+                  "format": "feed",
+                  "title_phrases": ["uber announces results for second quarter 2026", "uber reports second quarter 2026 results"],
+                  "exclude_phrases": [],
+                  "content_terms": ["uber", "revenue"]
+                }
+              ]
+            }
+          }
         },
         {
           "event_id": "2026-08-05-crcl",
           "company": "Circle Internet Group",
           "ticker": "CRCL",
+          "scope": "core_tech_crypto",
           "research_hints": [
             "Evaluate CRCL directly and test stablecoin and crypto-payments read-throughs to COIN and PYPL."
-          ]
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0001876042",
+              "forms": ["8-K", "10-Q", "10-K"]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://investor.circle.com/rss/PressRelease.aspx",
+                  "format": "feed",
+                  "title_phrases": ["circle reports second quarter 2026 financial results"],
+                  "exclude_phrases": ["to announce"],
+                  "content_terms": ["circle", "revenue"]
+                }
+              ]
+            }
+          }
         }
       ]
     },
@@ -164,41 +417,132 @@
           "event_id": "2026-08-05-sndk",
           "company": "Sandisk",
           "ticker": "SNDK",
+          "scope": "core_tech_crypto",
           "research_hints": [
             "Evaluate SNDK directly and test NAND pricing and storage-demand read-throughs to WDC and MU."
-          ]
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0002023554",
+              "forms": ["8-K", "10-Q", "10-K"]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://investor.sandisk.com/rss/news-releases.xml",
+                  "format": "feed",
+                  "title_phrases": ["sandisk reports fiscal fourth quarter", "sandisk reports fourth quarter 2026"],
+                  "exclude_phrases": ["to report"],
+                  "content_terms": ["sandisk", "revenue"]
+                }
+              ]
+            }
+          }
         },
         {
           "event_id": "2026-08-05-wdc",
           "company": "Western Digital",
           "ticker": "WDC",
+          "scope": "core_tech_crypto",
           "research_hints": [
             "Evaluate WDC directly and test storage-demand read-throughs to SNDK and MU."
-          ]
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0000106040",
+              "forms": ["8-K", "10-Q", "10-K"]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://investor.wdc.com/rss/news-releases.xml",
+                  "format": "feed",
+                  "title_phrases": ["wd reports fiscal fourth quarter 2026 financial results"],
+                  "exclude_phrases": ["to announce"],
+                  "content_terms": ["western digital", "revenue"],
+                  "user_agent": "curl/8.5.0"
+                }
+              ]
+            }
+          }
         },
         {
           "event_id": "2026-08-05-app",
           "company": "AppLovin",
           "ticker": "APP",
+          "scope": "core_tech_crypto",
           "research_hints": [
             "Evaluate APP's own tradable instrument first and reject it if the disclosure-to-price causal case is weak."
-          ]
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0001751008",
+              "forms": ["8-K", "10-Q", "10-K"]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://investors.applovin.com/rss/PressRelease.aspx",
+                  "format": "feed",
+                  "title_phrases": ["applovin announces second quarter 2026 financial results", "applovin reports second quarter 2026 financial results"],
+                  "exclude_phrases": ["to announce"],
+                  "content_terms": ["applovin", "revenue"]
+                }
+              ]
+            }
+          }
         },
         {
           "event_id": "2026-08-05-flnc",
           "company": "Fluence Energy",
           "ticker": "FLNC",
+          "scope": "core_tech_crypto",
           "research_hints": [
             "Evaluate FLNC directly and test grid-storage demand or pricing read-throughs to TSLA and BE."
-          ]
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0001868941",
+              "forms": ["8-K", "10-Q", "10-K"]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://ir.fluenceenergy.com/rss/news-releases.xml",
+                  "format": "feed",
+                  "title_phrases": ["fluence energy, inc. reports third quarter 2026 results", "fluence reports third quarter 2026 results"],
+                  "exclude_phrases": ["earnings release date", "announces fiscal"],
+                  "content_terms": ["fluence", "revenue"]
+                }
+              ]
+            }
+          }
         },
         {
           "event_id": "2026-08-05-dash",
           "company": "DoorDash",
           "ticker": "DASH",
+          "scope": "core_tech_crypto",
           "research_hints": [
             "Test delivery demand, competitive intensity, and unit-economics read-throughs to UBER."
-          ]
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0001792789",
+              "forms": ["8-K", "10-Q", "10-K"]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://ir.doordash.com/rss/PressRelease.aspx",
+                  "format": "feed",
+                  "title_phrases": ["doordash releases second quarter 2026 financial results", "doordash announces second quarter 2026 results", "doordash reports second quarter 2026 results"],
+                  "exclude_phrases": ["to announce"],
+                  "content_terms": ["doordash", "revenue"]
+                }
+              ]
+            }
+          }
         }
       ]
     },
@@ -212,9 +556,27 @@
           "event_id": "2026-08-06-penn",
           "company": "PENN Entertainment",
           "ticker": "PENN",
+          "scope": "other",
           "research_hints": [
             "Test online sports-betting demand, promotions, and market-share read-throughs to DKNG."
-          ]
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0000921738",
+              "forms": ["8-K", "10-Q", "10-K"]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://investors.pennentertainment.com/press-releases",
+                  "format": "html",
+                  "title_phrases": ["penn entertainment, inc. reports second quarter results", "penn entertainment reports second quarter 2026 results"],
+                  "exclude_phrases": ["to report"],
+                  "content_terms": ["penn entertainment", "revenues"]
+                }
+              ]
+            }
+          }
         }
       ]
     },
@@ -228,25 +590,79 @@
           "event_id": "2026-08-06-dkng",
           "company": "DraftKings",
           "ticker": "DKNG",
+          "scope": "other",
           "research_hints": [
             "Evaluate DKNG's own tradable instrument first and reject it if the disclosure-to-price causal case is weak."
-          ]
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0001883685",
+              "forms": ["8-K", "10-Q", "10-K"]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://ir.aboutdraftkings.com/rss/PressRelease.aspx",
+                  "format": "feed",
+                  "title_phrases": ["draftkings reports second quarter 2026 results"],
+                  "exclude_phrases": ["to release"],
+                  "content_terms": ["draftkings", "revenue"]
+                }
+              ]
+            }
+          }
         },
         {
           "event_id": "2026-08-06-aaoi",
           "company": "Applied Optoelectronics",
           "ticker": "AAOI",
+          "scope": "core_tech_crypto",
           "research_hints": [
             "Evaluate AAOI directly and test optical-networking demand read-throughs to CIEN and LITE."
-          ]
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0001158114",
+              "forms": ["8-K", "10-Q", "10-K"]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://investors.ao-inc.com/rss/news-releases.xml",
+                  "format": "feed",
+                  "title_phrases": ["applied optoelectronics reports second quarter 2026 financial results"],
+                  "exclude_phrases": ["announces date"],
+                  "content_terms": ["applied optoelectronics", "revenue"]
+                }
+              ]
+            }
+          }
         },
         {
           "event_id": "2026-08-06-mara",
           "company": "MARA Holdings",
           "ticker": "MARA",
+          "scope": "core_tech_crypto",
           "research_hints": [
             "Test Bitcoin-mining, treasury, and crypto-market read-throughs to IREN, MSTR, and COIN."
-          ]
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0001507605",
+              "forms": ["8-K", "10-Q", "10-K"]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://ir.mara.com/news-events/press-releases",
+                  "format": "html",
+                  "title_phrases": ["mara announces second quarter 2026 results", "mara reports second quarter 2026 results"],
+                  "exclude_phrases": ["schedules"],
+                  "content_terms": ["mara", "second quarter 2026"]
+                }
+              ]
+            }
+          }
         }
       ]
     },
@@ -260,17 +676,53 @@
           "event_id": "2026-08-07-wen",
           "company": "The Wendy's Company",
           "ticker": "WEN",
+          "scope": "other",
           "research_hints": [
             "Evaluate WEN's own tradable instrument first and reject it if the disclosure-to-price causal case is weak."
-          ]
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0000030697",
+              "forms": ["8-K", "10-Q", "10-K"]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://www.irwendys.com/rss/PressRelease.aspx",
+                  "format": "feed",
+                  "title_phrases": ["the wendy's company reports second quarter 2026 results", "wendy's reports second quarter 2026 results"],
+                  "exclude_phrases": ["to report"],
+                  "content_terms": ["wendy's", "revenues"]
+                }
+              ]
+            }
+          }
         },
         {
           "event_id": "2026-08-07-ttwo",
           "company": "Take-Two Interactive Software",
           "ticker": "TTWO",
+          "scope": "core_tech_crypto",
           "research_hints": [
             "Evaluate TTWO directly and test console and game-demand read-throughs to SONY."
-          ]
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0000946581",
+              "forms": ["8-K", "10-Q", "10-K"]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://www.take2games.com/ir/press-releases",
+                  "format": "html",
+                  "title_phrases": ["take-two interactive software, inc. reports results for fiscal first quarter 2027", "take-two reports fiscal first quarter 2027 results"],
+                  "exclude_phrases": ["to report"],
+                  "content_terms": ["take-two interactive", "net revenue"]
+                }
+              ]
+            }
+          }
         }
       ]
     }

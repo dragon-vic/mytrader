@@ -23,7 +23,7 @@ class DisclosureProcessor:
     # 根据文件内容生成便于 Agent 阅读的副本，原文件始终保持不变。
     def process(
         self,
-        event_dir: Path,
+        analysis_dir: Path,
         raw_path: Path,
         document_type: str,
         description: str,
@@ -32,7 +32,8 @@ class DisclosureProcessor:
     ) -> DisclosureFile:
         data = raw_path.read_bytes()
         content_format = _detect_format(data, content_type, source_url)
-        relative_raw = raw_path.relative_to(event_dir).as_posix()
+        context_dir = analysis_dir.parent
+        relative_raw = (Path("..") / raw_path.relative_to(context_dir)).as_posix()
         common = {
             "document_type": document_type,
             "description": description,
@@ -53,7 +54,8 @@ class DisclosureProcessor:
 
         try:
             suffix, text = _prepare(data, content_format, content_type)
-            output = raw_path.parent.parent / "processed" / f"{raw_path.name}.{suffix}"
+            source = raw_path.parent.parent.name
+            output = analysis_dir / "disclosure" / source / "processed" / f"{raw_path.name}.{suffix}"
             _write_text(output, text)
         except Exception as exc:
             LOG.warning("disclosure preprocessing failed path=%s error=%s", raw_path, exc)
@@ -66,7 +68,7 @@ class DisclosureProcessor:
 
         return DisclosureFile(
             **common,
-            analysis_path=output.relative_to(event_dir).as_posix(),
+            analysis_path=output.relative_to(analysis_dir).as_posix(),
             processing_status="processed",
             processing_error=None,
         )

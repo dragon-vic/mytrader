@@ -1,0 +1,15 @@
+{
+  "type": "trade_decision",
+  "version": 3,
+  "event_id": "2026-08-03-pltr",
+  "decision": "TRADE",
+  "trades": [
+    {
+      "instrument_id": "PLTRUSDT-PERP.BINANCE",
+      "signal": "STRONG_BUY",
+      "expected_move_pct": 16.0,
+      "confidence": 0.96
+    }
+  ],
+  "summary": "Synthetic Q2 results satisfy the broad, cash-corroborated STRONG_BUY condition, including positive H2 revisions and stronger Q3/FY guidance."
+}
