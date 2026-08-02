@@ -174,15 +174,6 @@ class AgentTradingStrategy(Strategy):
                 self.log.error(f"agent_json_rejected error={type(exc).__name__}: {exc}")
 
     def on_stop(self) -> None:
-        for instrument_id in self.instrument_ids:
-            self.unsubscribe_mark_prices(
-                instrument_id,
-                client_id=self.data_client,
-            )
-        self.unsubscribe_data(
-            external_json_type(),
-            client_id=ClientId(EXTERNAL_JSON_CLIENT_NAME),
-        )
         self.log.info(f"agent_trading stopped pending_orders={len(self.pending)}")
 
     def on_order_filled(self, event: OrderFilled) -> None:
