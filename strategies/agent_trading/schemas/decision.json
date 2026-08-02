@@ -4,8 +4,8 @@
   "additionalProperties": false,
   "required": ["type", "version", "event_id", "decision", "trades", "summary"],
   "properties": {
-    "type": {"const": "trade_decision"},
-    "version": {"const": 3},
+    "type": {"type": "string", "const": "trade_decision"},
+    "version": {"type": "integer", "const": 3},
     "event_id": {"type": "string", "minLength": 1},
     "decision": {"type": "string", "enum": ["TRADE", "HOLD"]},
     "trades": {
