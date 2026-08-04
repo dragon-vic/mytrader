@@ -9,14 +9,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
 
 from strategies.agent_trading.agents import AnalysisAgent
 from strategies.agent_trading.agents import CodexRunner
+from strategies.agent_trading.agents import ResearchDigestAgent
+from strategies.agent_trading.agents import load_codex_profiles
 from strategies.agent_trading.agents import ResearchAgent
 from strategies.agent_trading.agents import ResearchOutcome
-from strategies.agent_trading.contracts import DECISION_VALIDATOR
-from strategies.agent_trading.contracts import RESEARCH_VALIDATOR
 from strategies.agent_trading.event_store import EventStore
 from strategies.agent_trading.lifecycle import BatchPlan
 from strategies.agent_trading.lifecycle import MarketUniverse
@@ -28,6 +29,7 @@ from strategies.agent_trading.watch import DisclosurePackage
 from strategies.agent_trading.watch import DisclosureTimeoutError
 from strategies.agent_trading.watch import DisclosureWatcher
 from strategies.agent_trading.watch import WatchPlan
+from utils.config import load_settings
 
 
 SEC_USER_AGENT = "nt_quant-agent-trading/1.0 victorice@yeah.net"
@@ -42,7 +44,19 @@ MARKET_UNIVERSE_PATH = SCHEDULE_PATH.with_name(
 ANALYSIS_PROMPT = PROMPTS_DIR / "analysis.md"
 RESEARCH_SCHEMA = SCHEMAS_DIR / "research.json"
 DECISION_SCHEMA = SCHEMAS_DIR / "decision.json"
+DIGEST_PROMPT = PROMPTS_DIR / "research_digest.md"
 LOG = logging.getLogger(__name__)
+
+
+# 外部 Agent 和 NT 共用的 JSON Schema 校验器集中在 controller，避免重复定义。
+def _validator(name: str) -> Draft202012Validator:
+    schema = json.loads((SCHEMAS_DIR / name).read_text(encoding="utf-8"))
+    Draft202012Validator.check_schema(schema)
+    return Draft202012Validator(schema)
+
+
+RESEARCH_VALIDATOR = _validator("research.json")
+DECISION_VALIDATOR = _validator("decision.json")
 
 
 class AgentController:
@@ -54,6 +68,7 @@ class AgentController:
         research_agent: ResearchAgent,
         analysis_agent: AnalysisAgent,
         disclosure_watcher: DisclosureWatcher,
+        research_digest_agent: ResearchDigestAgent | None = None,
     ) -> None:
         self.host = host
         self.port = port
@@ -61,6 +76,7 @@ class AgentController:
         self.research_agent = research_agent
         self.analysis_agent = analysis_agent
         self.disclosure_watcher = disclosure_watcher
+        self.research_digest_agent = research_digest_agent
 
     # 分析结束时建立一次连接，将单条交易 JSON 发送进 NT 后关闭。
     async def send(self, payload: dict[str, Any]) -> None:
@@ -267,6 +283,17 @@ class AgentController:
     ) -> None:
         try:
             plans = await self.prepare_batch(batch, market_universe)
+            digest_task = None
+            # 只有整批公司的预研都 ready 才发汇总邮件，避免把半成品误当成完整结论。
+            if (
+                self.research_digest_agent is not None
+                and plans
+                and len(plans) == len(batch.events)
+            ):
+                digest_task = asyncio.create_task(
+                    self._run_research_digest(batch, tuple(plans)),
+                    name=f"agent-trading-research-digest-{batch.batch_id}",
+                )
             tasks = [
                 asyncio.create_task(
                     self.run_event(event_id),
@@ -286,6 +313,25 @@ class AgentController:
                 exc,
             )
             raise
+
+    async def _run_research_digest(
+        self,
+        batch: BatchPlan,
+        event_ids: tuple[str, ...],
+    ) -> None:
+        paths = self.event_store.batch_paths(batch.batch_id)
+        try:
+            await self.research_digest_agent.run(
+                paths.root,
+                event_ids,
+            )
+        except Exception as exc:
+            LOG.exception(
+                "research digest failed batch_id=%s error_type=%s error=%r",
+                batch.batch_id,
+                type(exc).__name__,
+                exc,
+            )
 
     async def run_event(
         self,
@@ -365,10 +411,22 @@ class AgentController:
 
 
 async def main() -> None:
+    settings = load_settings("agent_trading", "live")
+    profiles = load_codex_profiles(settings)
     runner = CodexRunner()
     batches = load_schedule(SCHEDULE_PATH)
     market_universe = load_market_universe(MARKET_UNIVERSE_PATH)
-    research_agent = ResearchAgent(runner, PROMPTS_DIR, SCHEMAS_DIR)
+    research_agent = ResearchAgent(
+        runner,
+        PROMPTS_DIR,
+        SCHEMAS_DIR,
+        profile=profiles.research,
+    )
+    research_digest_agent = ResearchDigestAgent(
+        runner,
+        DIGEST_PROMPT,
+        profile=profiles.digest,
+    )
     async with DisclosureWatcher(
         user_agent=SEC_USER_AGENT,
         poll_seconds=0.5,
@@ -378,7 +436,8 @@ async def main() -> None:
             port=9003,
             event_store=EventStore(STRATEGY_ROOT),
             research_agent=research_agent,
-            analysis_agent=AnalysisAgent(runner),
+            analysis_agent=AnalysisAgent(runner, profile=profiles.analysis),
+            research_digest_agent=research_digest_agent,
             disclosure_watcher=watcher,
         )
         await controller.run_schedule(batches, market_universe)

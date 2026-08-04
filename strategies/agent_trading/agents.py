@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
@@ -13,7 +14,73 @@ from strategies.agent_trading.lifecycle import BatchPlan
 
 
 REASONING_EFFORTS = {"minimal", "low", "medium", "high", "xhigh"}
-MODEL = "gpt-5.6-sol"
+DEFAULT_MODEL = "gpt-5.6-sol"
+
+
+@dataclass(frozen=True)
+class CodexProfile:
+    """One agent's Codex model, reasoning and service-tier settings."""
+
+    model: str = DEFAULT_MODEL
+    reasoning_effort: str | None = None
+    service_tier: str | None = None
+    subagent_threads: int | None = None
+
+    @classmethod
+    def from_mapping(
+        cls,
+        value: Mapping[str, Any] | None,
+        location: str,
+    ) -> "CodexProfile":
+        if value is None:
+            return cls()
+        if not isinstance(value, Mapping):
+            raise TypeError(f"{location} must be a mapping")
+        allowed = {"model", "reasoning_effort", "service_tier", "subagent_threads"}
+        unknown = sorted(set(value) - allowed)
+        if unknown:
+            raise ValueError(f"{location} has unsupported keys: {', '.join(unknown)}")
+        model = str(value.get("model", DEFAULT_MODEL)).strip()
+        if not model:
+            raise ValueError(f"{location}.model must not be empty")
+        reasoning_effort = value.get("reasoning_effort")
+        if reasoning_effort is not None:
+            reasoning_effort = str(reasoning_effort)
+            if reasoning_effort not in REASONING_EFFORTS:
+                raise ValueError(
+                    f"{location}.reasoning_effort must be one of "
+                    f"{', '.join(sorted(REASONING_EFFORTS))}",
+                )
+        service_tier = value.get("service_tier")
+        if service_tier is not None:
+            service_tier = str(service_tier).strip()
+            if not service_tier:
+                raise ValueError(f"{location}.service_tier must not be empty")
+        subagent_threads = value.get("subagent_threads")
+        if subagent_threads is not None:
+            subagent_threads = int(subagent_threads)
+            if subagent_threads <= 0:
+                raise ValueError(f"{location}.subagent_threads must be positive")
+        return cls(model, reasoning_effort, service_tier, subagent_threads)
+
+
+@dataclass(frozen=True)
+class CodexProfiles:
+    research: CodexProfile
+    analysis: CodexProfile
+    digest: CodexProfile
+
+
+def load_codex_profiles(settings: Mapping[str, Any]) -> CodexProfiles:
+    """Read per-agent Codex profiles from the loaded strategy settings."""
+    value = settings.get("codex", {})
+    if not isinstance(value, Mapping):
+        raise TypeError("codex must be a mapping")
+    return CodexProfiles(
+        research=CodexProfile.from_mapping(value.get("research"), "codex.research"),
+        analysis=CodexProfile.from_mapping(value.get("analysis"), "codex.analysis"),
+        digest=CodexProfile.from_mapping(value.get("digest"), "codex.digest"),
+    )
 
 
 class CodexRunner:
@@ -28,13 +95,16 @@ class CodexRunner:
         self,
         prompt: str,
         work_dir: Path,
-        output_path: Path,
+        output_path: Path | None,
         schema_path: Path | None = None,
         web_search: bool = False,
+        model: str = DEFAULT_MODEL,
         reasoning_effort: str | None = None,
         service_tier: str | None = None,
         subagent_threads: int | None = None,
     ) -> str:
+        if not model.strip():
+            raise ValueError("Codex model must not be empty")
         if reasoning_effort is not None and reasoning_effort not in REASONING_EFFORTS:
             raise ValueError(f"unsupported Codex reasoning effort: {reasoning_effort}")
         if service_tier is not None and not service_tier.strip():
@@ -42,9 +112,10 @@ class CodexRunner:
         if subagent_threads is not None and subagent_threads <= 0:
             raise ValueError("Codex subagent thread count must be positive")
         work_dir = work_dir.resolve()
-        output_path = output_path.resolve()
-        output_path.relative_to(work_dir)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
+        if output_path is not None:
+            output_path = output_path.resolve()
+            output_path.relative_to(work_dir)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
         started_at = datetime.now(UTC)
         started = time.perf_counter()
 
@@ -55,18 +126,17 @@ class CodexRunner:
             [
                 "exec",
                 "--model",
-                MODEL,
+                model,
                 "--json",
                 "--ephemeral",
                 "--sandbox",
                 # AWS 的受限沙箱无法创建网络命名空间，会在读取本地材料前失败。
                 "danger-full-access",
-                "--output-last-message",
-                str(output_path),
-                "-C",
-                str(work_dir),
             ],
         )
+        if output_path is not None:
+            args.extend(["--output-last-message", str(output_path)])
+        args.extend(["-C", str(work_dir)])
         if schema_path is not None:
             args.extend(["--output-schema", str(schema_path.resolve())])
         if reasoning_effort is not None:
@@ -116,7 +186,9 @@ class CodexRunner:
         if process.returncode != 0:
             detail = _codex_diagnostic(stdout, stderr)
             raise RuntimeError(f"codex exec failed with code {process.returncode}: {detail}")
-        return output_path.read_text(encoding="utf-8")
+        if output_path is not None:
+            return output_path.read_text(encoding="utf-8")
+        return _last_agent_message(stdout)
 
 
 @dataclass(frozen=True)
@@ -136,8 +208,13 @@ class ResearchAgent:
         runner: CodexRunner,
         prompts_dir: Path,
         schemas_dir: Path,
+        profile: CodexProfile | None = None,
     ) -> None:
         self.runner = runner
+        self.profile = profile or CodexProfile(
+            reasoning_effort="xhigh",
+            subagent_threads=3,
+        )
         self.company_prompt = prompts_dir / "research_company.md"
         self.research_schema = schemas_dir / "research.json"
 
@@ -209,8 +286,10 @@ class ResearchAgent:
                             output_path=research_path,
                             schema_path=self.research_schema,
                             web_search=True,
-                            reasoning_effort="xhigh",
-                            subagent_threads=3,
+                            model=self.profile.model,
+                            reasoning_effort=self.profile.reasoning_effort,
+                            service_tier=self.profile.service_tier,
+                            subagent_threads=self.profile.subagent_threads,
                         ),
                         deadline,
                     )
@@ -250,8 +329,16 @@ class ResearchAgent:
 
 
 class AnalysisAgent:
-    def __init__(self, runner: CodexRunner) -> None:
+    def __init__(
+        self,
+        runner: CodexRunner,
+        profile: CodexProfile | None = None,
+    ) -> None:
         self.runner = runner
+        self.profile = profile or CodexProfile(
+            reasoning_effort="medium",
+            service_tier="fast",
+        )
 
     # 分析只读取打包后的输入目录，完成后将结果移到事件 result 目录。
     async def run(
@@ -272,8 +359,10 @@ class AnalysisAgent:
                 output_path=temporary,
                 schema_path=schema_path,
                 web_search=False,
-                reasoning_effort="medium",
-                service_tier="fast",
+                model=self.profile.model,
+                reasoning_effort=self.profile.reasoning_effort,
+                service_tier=self.profile.service_tier,
+                subagent_threads=self.profile.subagent_threads,
             )
         finally:
             if temp_metrics.exists():
@@ -281,6 +370,56 @@ class AnalysisAgent:
                 temp_metrics.replace(_metrics_path(output_path))
         output_path.parent.mkdir(parents=True, exist_ok=True)
         temporary.replace(output_path)
+
+
+class ResearchDigestAgent:
+    """Ask Codex to summarize completed research and send the email itself."""
+
+    def __init__(
+        self,
+        runner: CodexRunner,
+        prompt_path: Path,
+        profile: CodexProfile | None = None,
+    ) -> None:
+        self.runner = runner
+        self.prompt_path = prompt_path
+        self.profile = profile or CodexProfile(reasoning_effort="high")
+
+    async def run(
+        self,
+        batch_dir: Path,
+        event_ids: tuple[str, ...],
+    ) -> None:
+        files = [
+            "context/batch.json",
+            "context/market_universe.json",
+            *[
+                relative
+                for event_id in event_ids
+                for relative in (
+                    f"work/{event_id}/research.json",
+                    f"work/{event_id}/research.metrics.json",
+                )
+            ],
+        ]
+        prompt = self.prompt_path.read_text(encoding="utf-8")
+        prompt += (
+            "\n\nAssigned batch directory: `.`\n"
+            "Read only these files (some optional metrics files may be absent):\n"
+            + "\n".join(f"- `{relative}`" for relative in files)
+            + "\nComplete the email send before returning."
+        )
+        await self.runner.run(
+            prompt=prompt,
+            work_dir=batch_dir,
+            output_path=None,
+            schema_path=None,
+            web_search=False,
+            model=self.profile.model,
+            reasoning_effort=self.profile.reasoning_effort,
+            service_tier=self.profile.service_tier,
+            subagent_threads=self.profile.subagent_threads,
+        )
 
 
 def _codex_diagnostic(stdout: bytes, stderr: bytes) -> str:
@@ -301,14 +440,31 @@ def _codex_diagnostic(stdout: bytes, stderr: bytes) -> str:
     return detail or "no diagnostic output"
 
 
+def _last_agent_message(stdout: bytes) -> str:
+    messages: list[str] = []
+    for line in stdout.decode("utf-8", errors="replace").splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        item = event.get("item") or {}
+        if item.get("type") == "agent_message" and item.get("text"):
+            messages.append(str(item["text"]))
+    if not messages:
+        raise RuntimeError("codex exec returned no agent message")
+    return messages[-1]
+
+
 # 把每次 Codex 调用的耗时和官方 JSONL usage 写到输出旁边。
 def _save_metrics(
-    output_path: Path,
+    output_path: Path | None,
     started_at: datetime,
     elapsed_seconds: float,
     status: str,
     stdout: bytes,
 ) -> None:
+    if output_path is None:
+        return
     turns: list[dict[str, int]] = []
     thread_ids: list[str] = []
     for line in stdout.decode("utf-8", errors="replace").splitlines():

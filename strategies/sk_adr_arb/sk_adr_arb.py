@@ -194,8 +194,8 @@ class SkAdrArbStrategy(Strategy):
         self._check_startup()
         load_dotenv(ROOT / ".env")
         self.telegram = TelegramSender(
-            token=os.environ["TELEGRAM_BOT_TOKEN"],
-            chat_id=os.environ["TELEGRAM_CHAT_ID"],
+            token=os.environ["TELEGRAM_MONIOR_BOT_TOKEN"],
+            chat_id=os.environ["TELEGRAM_MONIOR_CHAT_ID"],
         )
         for instrument_id in self.instrument_ids:
             self.subscribe_mark_prices(instrument_id)

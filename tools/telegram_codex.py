@@ -733,8 +733,8 @@ def main() -> None:
     if not ensure_tmux():
         return
     load_dotenv(ROOT / ".env")
-    token = os.environ["TELEGRAM_BOT_TOKEN"]
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    token = os.environ["TELEGRAM_CODEX_BOT_TOKEN"]
+    chat_id = os.environ.get("TELEGRAM_CODEX_CHAT_ID")
     session_file = Path(os.environ.get("TELEGRAM_CODEX_SESSION_FILE", SESSION_FILE))
     bot = Telegram(token)
     runner = CodexRunner(bot, session_file)

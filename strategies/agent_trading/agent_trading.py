@@ -23,7 +23,7 @@ from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.model.orders import Order
 from nautilus_trader.trading.strategy import Strategy
 
-from strategies.agent_trading.contracts import DECISION_VALIDATOR
+from strategies.agent_trading.controller import DECISION_VALIDATOR
 from strategies.agent_trading.lifecycle import load_market_universe
 from strategies.agent_trading.lifecycle import load_schedule
 from utils.constants import EXTERNAL_JSON_CLIENT_NAME

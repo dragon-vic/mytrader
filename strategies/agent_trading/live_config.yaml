@@ -13,6 +13,25 @@ strategy:
       min_remaining_pct: 2
       max_mark_age_sec: 5
 
+# Codex 外部 Agent 参数；修改后重启 controller 即生效。
+# model 是模型名称，reasoning_effort 是推理强度，service_tier 是速度/服务层级。
+codex:
+  research:
+    model: gpt-5.6-sol
+    reasoning_effort: xhigh
+    service_tier: null
+    subagent_threads: 3
+  analysis:
+    model: gpt-5.6-sol
+    reasoning_effort: medium
+    service_tier: fast
+    subagent_threads: null
+  digest:
+    model: gpt-5.6-sol
+    reasoning_effort: high
+    service_tier: null
+    subagent_threads: null
+
 node:
   logging:
     strategy_log_level: INFO
