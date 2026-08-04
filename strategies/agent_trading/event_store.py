@@ -13,7 +13,7 @@ EVENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
 
 @dataclass(frozen=True)
 class EventPaths:
-    analysis_input: Path
+    context: Path
     internal: Path
     state: Path
     event: Path
@@ -44,21 +44,20 @@ class EventStore:
         root.relative_to(self.root)
         root.mkdir(parents=True, exist_ok=True)
         context = root / "context"
-        analysis_input = context / "analysis_input"
-        internal = context / "internal"
+        internal = root / "internal"
         result = root / "result"
-        analysis_input.mkdir(parents=True, exist_ok=True)
+        context.mkdir(parents=True, exist_ok=True)
         internal.mkdir(exist_ok=True)
         result.mkdir(exist_ok=True)
         return EventPaths(
-            analysis_input=analysis_input,
+            context=context,
             internal=internal,
             state=root / "state.json",
-            event=analysis_input / "event.json",
-            research=analysis_input / "research.json",
-            analysis_brief=analysis_input / "analysis_brief.md",
+            event=context / "event.json",
+            research=context / "research.json",
+            analysis_brief=context / "analysis_brief.md",
             watch_plan=internal / "watch_plan.json",
-            report=analysis_input / "report.json",
+            report=context / "report.json",
             decision=result / "decision.json",
         )
 

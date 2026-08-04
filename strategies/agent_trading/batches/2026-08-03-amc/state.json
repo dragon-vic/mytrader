@@ -1,12 +1,16 @@
 {
   "batch_id": "2026-08-03-amc",
   "state": "research_finished",
-  "updated_ns": 1785668461215000000,
+  "updated_ns": 1785772800112034790,
   "companies": {
     "2026-08-03-pltr": "research_ready"
   },
   "research_mode": "in_dialogue_manual",
   "as_of": "2026-08-02T10:40:21.0414058Z",
   "watcher_started": false,
-  "analysis_started": false
+  "analysis_started": false,
+  "research_start_at": "2026-08-03T16:00:00+00:00",
+  "reused_research": [
+    "2026-08-03-pltr"
+  ]
 }

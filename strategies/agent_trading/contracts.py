@@ -6,7 +6,7 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 
 
-SCHEMAS_DIR = Path(__file__).resolve().parent / "schemas"
+SCHEMAS_DIR = Path(__file__).resolve().parent / "resources" / "schemas"
 
 
 # 从唯一的 JSON Schema 构建外部流程与 NT 共用的校验器。

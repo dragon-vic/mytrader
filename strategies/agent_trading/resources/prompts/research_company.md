@@ -2,6 +2,15 @@
 
 Research one scheduled earnings event and return the schema-conforming operating package used at disclosure time. The assigned `event_id` and hard `as_of` cutoff are appended to this prompt.
 
+## Runtime environment
+
+- Production runs on AWS Ubuntu. The repository root is `/home/ubuntu/pycharm_nt`.
+- Strategy prompts, schemas, and schedules are maintained under `/home/ubuntu/pycharm_nt/strategies/agent_trading/resources/`; your task scope is still limited to the assigned batch inputs below.
+- The project Python executable is `/home/ubuntu/miniconda/envs/nt/bin/python`; the Codex executable is `/home/ubuntu/.local/bin/codex`.
+- This task runs with model `gpt-5.6-sol`, `xhigh` reasoning, web search enabled, and exactly three research subagent threads.
+- The host and schedule clock use UTC. Interpret US market sessions in `America/New_York`, and compare absolute instants by their explicit offset or UTC value.
+- Your assigned working directory is this batch directory under `strategies/agent_trading/batches/<batch_id>`. Runtime access does not expand the task scope: do not inspect repository code, credentials, live processes, or unrelated files.
+
 ## Scope
 
 - Read only `context/batch.json` and `context/market_universe.json` on the initial run. On a continuation, also read only the prior research path appended to the task.

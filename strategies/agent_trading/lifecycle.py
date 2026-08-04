@@ -9,7 +9,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
-from strategies.agent_trading.watch.models import WatchPlan
+from strategies.agent_trading.watch.watch_data_models import WatchPlan
 
 
 SESSIONS = {"BMO", "AMC"}

@@ -17,11 +17,11 @@ from urllib.parse import urlsplit
 
 import aiohttp
 
-from strategies.agent_trading.watch.models import DisclosureFile
-from strategies.agent_trading.watch.models import DisclosurePackage
-from strategies.agent_trading.watch.models import WatchPlan
-from strategies.agent_trading.watch.models import WatchTarget
-from strategies.agent_trading.watch.processor import DisclosureProcessor
+from strategies.agent_trading.watch.watch_data_models import DisclosureFile
+from strategies.agent_trading.watch.watch_data_models import DisclosurePackage
+from strategies.agent_trading.watch.watch_data_models import WatchPlan
+from strategies.agent_trading.watch.watch_data_models import WatchTarget
+from strategies.agent_trading.watch.disclosure_preprocessor import DisclosureProcessor
 
 
 SEC_FEED_URL = (
@@ -31,6 +31,16 @@ SEC_FEED_URL = (
 CIK_PATTERN = re.compile(r"\((\d{10})\)")
 ACCESSION_PREFIX = "urn:tag:sec.gov,2008:accession-number="
 LOG = logging.getLogger(__name__)
+MAX_RETRY_SECONDS = 10.0
+RETRY_ERRORS = (
+    aiohttp.ClientError,
+    TimeoutError,
+    UnicodeDecodeError,
+    KeyError,
+    TypeError,
+    ValueError,
+    ET.ParseError,
+)
 
 
 @dataclass(frozen=True)
@@ -79,6 +89,7 @@ class SecWatcher:
         self.downloads: dict[tuple[str, str], asyncio.Task] = {}
         self.changed = asyncio.Event()
         self.closed = False
+        self.timeout_failures = 0
         self.limiter = _RateLimiter(requests_per_second=8)
         self.task = asyncio.create_task(self._run(), name="agent-trading-sec-watcher")
 
@@ -112,41 +123,115 @@ class SecWatcher:
             await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _run(self) -> None:
-        try:
-            while not self.closed:
-                busy = {key[0] for key in self.downloads}
-                if not any(event_id not in busy for event_id in self.targets):
-                    await self.changed.wait()
-                    self.changed.clear()
-                    continue
-                try:
-                    body = await self._get(self.feed_url)
-                except aiohttp.ClientError as exc:
-                    LOG.warning("SEC polling failed: %s", exc)
-                else:
-                    await self._process(_parse_sec_feed(body.data))
-                try:
-                    await asyncio.wait_for(self.changed.wait(), self.poll_seconds)
-                except TimeoutError:
-                    pass
+        retry_seconds = self.poll_seconds
+        while not self.closed:
+            busy = {key[0] for key in self.downloads}
+            if not any(event_id not in busy for event_id in self.targets):
+                await self.changed.wait()
                 self.changed.clear()
-        except Exception as exc:
-            for target in tuple(self.targets.values()):
-                target.fail(exc)
-            self.targets.clear()
-            raise
+                continue
+            try:
+                body = await self._get(self.feed_url)
+                await self._process(_parse_sec_feed(body.data))
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self._health(exc)
+                limited = isinstance(exc, aiohttp.ClientResponseError) and exc.status == 429
+                delay = retry_seconds if limited else self.poll_seconds
+                if limited:
+                    retry_after = exc.headers.get("Retry-After")
+                    if retry_after:
+                        try:
+                            delay = max(
+                                self.poll_seconds,
+                                min(float(retry_after), MAX_RETRY_SECONDS),
+                            )
+                        except (TypeError, ValueError):
+                            pass
+                log = LOG.warning if isinstance(exc, RETRY_ERRORS) else LOG.exception
+                log(
+                    "SEC polling failed url=%s error_type=%s error=%r "
+                    "retry_in=%.1fs",
+                    self.feed_url,
+                    type(exc).__name__,
+                    exc,
+                    delay,
+                )
+                await self._wait(delay)
+                retry_seconds = min(delay * 2, MAX_RETRY_SECONDS) if limited else self.poll_seconds
+                continue
+            self._health(None)
+            retry_seconds = self.poll_seconds
+            await self._wait(self.poll_seconds)
+
+    async def _wait(self, seconds: float) -> None:
+        try:
+            await asyncio.wait_for(self.changed.wait(), seconds)
+        except TimeoutError:
+            pass
+        self.changed.clear()
+
+    def _health(self, exc: Exception | None) -> None:
+        for event_id, target in tuple(self.targets.items()):
+            self._target_health(event_id, target, exc)
+
+    def _target_health(
+        self,
+        event_id: str,
+        target: WatchTarget,
+        exc: Exception | None,
+    ) -> bool:
+        try:
+            target.health("sec", exc)
+            return True
+        except Exception as health_exc:
+            LOG.exception(
+                "SEC health callback failed event_id=%s error_type=%s error=%r",
+                event_id,
+                type(health_exc).__name__,
+                health_exc,
+            )
+            self.targets.pop(event_id, None)
+            self._fail(event_id, target, health_exc)
+            return False
+
+    @staticmethod
+    def _fail(event_id: str, target: WatchTarget, exc: Exception) -> None:
+        try:
+            target.fail(exc)
+        except Exception as fail_exc:
+            LOG.exception(
+                "SEC failure callback failed event_id=%s error_type=%s error=%r",
+                event_id,
+                type(fail_exc).__name__,
+                fail_exc,
+            )
 
     async def _process(self, entries: tuple[_SecEntry, ...]) -> None:
         for entry in entries:
             for event_id, target in tuple(self.targets.items()):
-                key = (event_id, entry.accession)
-                if key in self.seen or not _sec_matches(entry, target.plan):
+                try:
+                    key = (event_id, entry.accession)
+                    if key in self.seen or not _sec_matches(entry, target.plan):
+                        continue
+                    self.seen.add(key)
+                    self.downloads[key] = asyncio.create_task(
+                        self._finish(key, target, entry),
+                        name=f"agent-trading-sec-download-{event_id}",
+                    )
+                except Exception as exc:
+                    LOG.exception(
+                        "SEC target failed event_id=%s accession=%s "
+                        "error_type=%s error=%r",
+                        event_id,
+                        entry.accession,
+                        type(exc).__name__,
+                        exc,
+                    )
+                    self.targets.pop(event_id, None)
+                    self._fail(event_id, target, exc)
                     continue
-                self.seen.add(key)
-                self.downloads[key] = asyncio.create_task(
-                    self._finish(key, target, entry),
-                    name=f"agent-trading-sec-download-{event_id}",
-                )
 
     # 下载和预处理独立运行，不能阻塞共享 SEC feed 的下一次轮询。
     async def _finish(
@@ -159,19 +244,44 @@ class SecWatcher:
             package = await self._download(target, entry)
             if package is None:
                 return
+            if not self._target_health(target.plan.event_id, target, None):
+                return
             if await target.ready(package):
                 self.targets.pop(target.plan.event_id, None)
         except asyncio.CancelledError:
             raise
-        except aiohttp.ClientError as exc:
+        except (aiohttp.ClientError, TimeoutError) as exc:
             self.seen.discard(key)
+            self._target_health(target.plan.event_id, target, exc)
             LOG.warning(
-                "SEC document download failed accession=%s error=%s",
+                "SEC document download failed accession=%s url=%s "
+                "error_type=%s error=%r",
                 entry.accession,
+                entry.index_url,
+                type(exc).__name__,
+                exc,
+            )
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            # 单份外部申报异常不能终止整个事件，新闻稿来源仍可继续触发分析。
+            self._target_health(target.plan.event_id, target, exc)
+            LOG.exception(
+                "SEC document processing failed accession=%s url=%s "
+                "error_type=%s error=%r",
+                entry.accession,
+                entry.index_url,
+                type(exc).__name__,
                 exc,
             )
         except Exception as exc:
-            target.fail(exc)
+            self._target_health(target.plan.event_id, target, exc)
+            LOG.exception(
+                "SEC event failed event_id=%s accession=%s error_type=%s error=%r",
+                target.plan.event_id,
+                entry.accession,
+                type(exc).__name__,
+                exc,
+            )
+            self._fail(target.plan.event_id, target, exc)
         finally:
             self.downloads.pop(key, None)
             self.changed.set()
@@ -206,7 +316,7 @@ class SecWatcher:
             path.write_bytes(body.data)
             processed = await asyncio.to_thread(
                 self.processor.process,
-                target.analysis_dir,
+                target.context_dir,
                 path,
                 row.document_type,
                 row.description,
@@ -232,13 +342,34 @@ class SecWatcher:
 
     async def _get(self, url: str) -> _HttpBody:
         await self.limiter.wait()
-        async with self.session.get(url) as response:
-            response.raise_for_status()
-            return _HttpBody(
-                data=await response.read(),
-                content_type=response.headers.get("Content-Type", ""),
-                url=str(response.url),
-            )
+        try:
+            async with self.session.get(url) as response:
+                response.raise_for_status()
+                body = _HttpBody(
+                    data=await response.read(),
+                    content_type=response.headers.get("Content-Type", ""),
+                    url=str(response.url),
+                )
+        except TimeoutError:
+            self.timeout_failures += 1
+            if self.timeout_failures >= 2:
+                self._clear_dns(url)
+                self.timeout_failures = 0
+            raise
+        self.timeout_failures = 0
+        return body
+
+    def _clear_dns(self, url: str) -> None:
+        connector = self.session.connector
+        if not isinstance(connector, aiohttp.TCPConnector):
+            return
+        parsed = urlsplit(url)
+        host = parsed.hostname
+        if host is None:
+            return
+        port = parsed.port or 443
+        connector.clear_dns_cache(host, port)
+        LOG.warning("SEC DNS cache cleared host=%s port=%s", host, port)
 
 
 class _RateLimiter:

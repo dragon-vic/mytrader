@@ -182,7 +182,6 @@ class DisclosurePackage:
                     "content_format": item.content_format,
                     "size_bytes": item.size_bytes,
                     "sha256": item.sha256,
-                    "raw_path": item.raw_path,
                     "analysis_path": item.analysis_path,
                     "processing_status": item.processing_status,
                     "processing_error": item.processing_error,
@@ -194,15 +193,17 @@ class DisclosurePackage:
 
 ReadyHandler = Callable[[DisclosurePackage], Awaitable[bool]]
 FailHandler = Callable[[Exception], None]
+HealthHandler = Callable[[str, Exception | None], None]
 
 
 @dataclass
 class WatchTarget:
     plan: WatchPlan
-    analysis_dir: Path
+    context_dir: Path
     internal_dir: Path
     ready: ReadyHandler
     fail: FailHandler
+    health: HealthHandler
 
 
 def _parse_source(payload: dict[str, Any]) -> NewsSource:

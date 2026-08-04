@@ -22,14 +22,23 @@ from urllib.parse import urlunsplit
 
 import aiohttp
 
-from strategies.agent_trading.watch.models import DisclosurePackage
-from strategies.agent_trading.watch.models import NewsSource
-from strategies.agent_trading.watch.models import WatchPlan
-from strategies.agent_trading.watch.models import WatchTarget
-from strategies.agent_trading.watch.processor import DisclosureProcessor
+from strategies.agent_trading.watch.watch_data_models import DisclosurePackage
+from strategies.agent_trading.watch.watch_data_models import NewsSource
+from strategies.agent_trading.watch.watch_data_models import WatchPlan
+from strategies.agent_trading.watch.watch_data_models import WatchTarget
+from strategies.agent_trading.watch.disclosure_preprocessor import DisclosureProcessor
 
 
 LOG = logging.getLogger(__name__)
+MAX_RETRY_SECONDS = 10.0
+RETRY_ERRORS = (
+    aiohttp.ClientError,
+    TimeoutError,
+    UnicodeDecodeError,
+    TypeError,
+    ValueError,
+    ET.ParseError,
+)
 
 
 @dataclass(frozen=True)
@@ -99,20 +108,23 @@ class NewsReleaseWatcher:
     # 每个新闻源独立维护已见条目，重启后继续去重。
     async def _run(self, target: WatchTarget, source: NewsSource) -> None:
         state_path = _seen_path(target.internal_dir, source)
-        seen = _load_seen(state_path, source)
-        try:
-            while True:
-                try:
-                    listing = await self._get(source.url, source.user_agent)
-                    entries = _parse_news(source, listing.data)
-                    if not entries:
-                        raise ValueError(f"news listing has no entries: {source.url}")
-                    if seen is None:
-                        seen = {_entry_id(entry) for entry in entries}
-                        _save_seen(state_path, source, seen)
-                        await asyncio.sleep(self.poll_seconds)
-                        continue
-
+        source_key = f"news_release:{source.url}"
+        seen: set[str] | None = None
+        loaded = False
+        retry_seconds = self.poll_seconds
+        while True:
+            try:
+                if not loaded:
+                    seen = _load_seen(state_path, source)
+                    loaded = True
+                listing = await self._get(source.url, source.user_agent)
+                entries = _parse_news(source, listing.data)
+                if not entries:
+                    raise ValueError(f"news listing has no entries: {source.url}")
+                if seen is None:
+                    seen = {_entry_id(entry) for entry in entries}
+                    _save_seen(state_path, source, seen)
+                else:
                     changed = False
                     for entry in entries:
                         entry_id = _entry_id(entry)
@@ -125,22 +137,60 @@ class NewsReleaseWatcher:
                         package = await self._download(target, source, entry)
                         seen.add(entry_id)
                         changed = True
-                        if not _matches_content(source, target.analysis_dir, package):
+                        if not _matches_content(source, target.context_dir, package):
                             continue
                         _save_seen(state_path, source, seen)
+                        self._health(target, source_key, None)
                         if await target.ready(package):
                             return
                     if changed:
                         _save_seen(state_path, source, seen)
-                except (aiohttp.ClientError, TimeoutError) as exc:
-                    LOG.warning("news polling failed url=%s error=%s", source.url, exc)
-                    await asyncio.sleep(self.poll_seconds)
-                    continue
-                await asyncio.sleep(self.poll_seconds)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            target.fail(exc)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self._health(target, source_key, exc)
+                limited = isinstance(exc, aiohttp.ClientResponseError) and exc.status == 429
+                delay = retry_seconds if limited else self.poll_seconds
+                if limited:
+                    retry_after = exc.headers.get("Retry-After")
+                    if retry_after:
+                        try:
+                            delay = max(
+                                self.poll_seconds,
+                                min(float(retry_after), MAX_RETRY_SECONDS),
+                            )
+                        except (TypeError, ValueError):
+                            pass
+                log = LOG.warning if isinstance(exc, RETRY_ERRORS) else LOG.exception
+                log(
+                    "news polling failed event_id=%s url=%s error_type=%s "
+                    "error=%r retry_in=%.1fs",
+                    target.plan.event_id,
+                    source.url,
+                    type(exc).__name__,
+                    exc,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+                retry_seconds = min(delay * 2, MAX_RETRY_SECONDS) if limited else self.poll_seconds
+                continue
+            self._health(target, source_key, None)
+            retry_seconds = self.poll_seconds
+            await asyncio.sleep(self.poll_seconds)
+
+    @staticmethod
+    def _health(target: WatchTarget, source: str, exc: Exception | None) -> None:
+        try:
+            target.health(source, exc)
+        except Exception as health_exc:
+            LOG.exception(
+                "news health callback failed event_id=%s url=%s "
+                "error_type=%s error=%r",
+                target.plan.event_id,
+                source.removeprefix("news_release:"),
+                type(health_exc).__name__,
+                health_exc,
+            )
 
     async def _download(
         self,
@@ -176,13 +226,17 @@ class NewsReleaseWatcher:
         path.write_bytes(body.data)
         processed = await asyncio.to_thread(
             self.processor.process,
-            target.analysis_dir,
+            target.context_dir,
             path,
             "NEWS_RELEASE",
             entry.title,
             body.url,
             body.content_type,
         )
+        if processed.processing_status == "failed":
+            raise ValueError(
+                f"news release preprocessing failed: {processed.source_url}",
+            )
         return DisclosurePackage(
             event_id=target.plan.event_id,
             source="news_release",
@@ -292,13 +346,13 @@ def _matches_entry(
 # 下载后的正文必须包含计划指定的财务确认词。
 def _matches_content(
     source: NewsSource,
-    analysis_dir: Path,
+    context_dir: Path,
     package: DisclosurePackage,
 ) -> bool:
     processed = package.files[0]
     if processed.processing_status != "processed":
         return False
-    path = analysis_dir / processed.analysis_path
+    path = context_dir / processed.analysis_path
     text = " ".join(path.read_text(encoding="utf-8").casefold().split())
     return all(term.casefold() in text for term in source.content_terms)
 

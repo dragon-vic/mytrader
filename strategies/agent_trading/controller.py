@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from dataclasses import replace
 from datetime import UTC
 from datetime import datetime
@@ -24,21 +25,24 @@ from strategies.agent_trading.lifecycle import load_schedule
 from strategies.agent_trading.lifecycle import validate_decision
 from strategies.agent_trading.lifecycle import validate_research
 from strategies.agent_trading.watch import DisclosurePackage
+from strategies.agent_trading.watch import DisclosureTimeoutError
 from strategies.agent_trading.watch import DisclosureWatcher
 from strategies.agent_trading.watch import WatchPlan
 
 
 SEC_USER_AGENT = "nt_quant-agent-trading/1.0 victorice@yeah.net"
 STRATEGY_ROOT = Path(__file__).resolve().parent
-PROMPTS_DIR = STRATEGY_ROOT / "prompts"
-SCHEMAS_DIR = STRATEGY_ROOT / "schemas"
-SCHEDULE_PATH = STRATEGY_ROOT / "schedules" / "2026-08-03_2026-08-07.json"
+RESOURCES_DIR = STRATEGY_ROOT / "resources"
+PROMPTS_DIR = RESOURCES_DIR / "prompts"
+SCHEMAS_DIR = RESOURCES_DIR / "schemas"
+SCHEDULE_PATH = RESOURCES_DIR / "schedules" / "2026-08-03_2026-08-07.json"
 MARKET_UNIVERSE_PATH = SCHEDULE_PATH.with_name(
     f"{SCHEDULE_PATH.stem}_market_universe.json",
 )
 ANALYSIS_PROMPT = PROMPTS_DIR / "analysis.md"
 RESEARCH_SCHEMA = SCHEMAS_DIR / "research.json"
 DECISION_SCHEMA = SCHEMAS_DIR / "decision.json"
+LOG = logging.getLogger(__name__)
 
 
 class AgentController:
@@ -261,18 +265,27 @@ class AgentController:
         batch: BatchPlan,
         market_universe: MarketUniverse,
     ) -> None:
-        plans = await self.prepare_batch(batch, market_universe)
-        tasks = [
-            asyncio.create_task(
-                self.run_event(event_id),
-                name=f"agent-trading-event-{event_id}",
+        try:
+            plans = await self.prepare_batch(batch, market_universe)
+            tasks = [
+                asyncio.create_task(
+                    self.run_event(event_id),
+                    name=f"agent-trading-event-{event_id}",
+                )
+                for event_id in plans
+            ]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            errors = [result for result in results if isinstance(result, Exception)]
+            if errors:
+                raise ExceptionGroup("agent trading events failed", errors)
+        except Exception as exc:
+            LOG.exception(
+                "agent trading batch failed batch_id=%s error_type=%s error=%r",
+                batch.batch_id,
+                type(exc).__name__,
+                exc,
             )
-            for event_id in plans
-        ]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        errors = [result for result in results if isinstance(result, Exception)]
-        if errors:
-            raise ExceptionGroup("agent trading events failed", errors)
+            raise
 
     async def run_event(
         self,
@@ -284,10 +297,20 @@ class AgentController:
             await self.send(decision)
             self.event_store.update(event_id, "decision_sent")
         except Exception as exc:
+            LOG.exception(
+                "agent trading event failed event_id=%s error_type=%s error=%r",
+                event_id,
+                type(exc).__name__,
+                exc,
+            )
+            details: dict[str, Any] = {}
+            if isinstance(exc, DisclosureTimeoutError):
+                details["source_status"] = exc.source_status
             self.event_store.update(
                 event_id,
                 "failed",
                 error=f"{type(exc).__name__}: {exc}",
+                **details,
             )
             raise
 
@@ -301,7 +324,7 @@ class AgentController:
         self.event_store.update(event_id, "watching_disclosure")
         package = await self.disclosure_watcher.watch(
             plan,
-            paths.analysis_input,
+            paths.context,
             paths.internal,
         )
         self.event_store.update(
@@ -318,7 +341,7 @@ class AgentController:
         self.event_store.update(event_id, "analyzing")
         await self.analysis_agent.run(
             ANALYSIS_PROMPT.read_text(encoding="utf-8"),
-            paths.analysis_input,
+            paths.context,
             paths.decision,
             DECISION_SCHEMA,
         )
