@@ -1,0 +1,16 @@
+{
+  "event_id": "2026-08-03-srad",
+  "state": "decision_ready",
+  "updated_ns": 1785771969128005228,
+  "research_complete": true,
+  "research_error": null,
+  "research_path": "research_output/research.json",
+  "analysis_brief_path": "analysis_input/analysis_brief.md",
+  "error": null,
+  "catch_up": true,
+  "report_path": "analysis_input/report.json",
+  "report_source": "sec",
+  "report_detected_ns": 1785771879058953500,
+  "catch_up_accession": "0001104659-26-089457",
+  "decision_path": "analysis_output/decision.json"
+}

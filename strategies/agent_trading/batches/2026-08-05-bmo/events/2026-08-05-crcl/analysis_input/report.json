@@ -1,0 +1,39 @@
+{
+  "event_id": "2026-08-05-crcl",
+  "source": "sec",
+  "form": "8-K",
+  "accession": "0001876042-26-000246",
+  "items": [
+    "2.02",
+    "9.01"
+  ],
+  "origin_url": "https://www.sec.gov/Archives/edgar/data/1876042/000187604226000246/0001876042-26-000246-index.htm",
+  "published_at": "2026-08-05T06:12:18-04:00",
+  "detected_ns": 1785924767309551024,
+  "files": [
+    {
+      "document_type": "8-K",
+      "description": "8-K",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/1876042/000187604226000246/crcl-20260805.htm",
+      "content_type": "text/html",
+      "content_format": "html",
+      "size_bytes": 23407,
+      "sha256": "d06f9a6577b3f2baae79f12014229d9f67059db1fa420e4d93237aafa40f4455",
+      "analysis_path": "disclosure/sec/processed/crcl-20260805.htm.md",
+      "processing_status": "processed",
+      "processing_error": null
+    },
+    {
+      "document_type": "EX-99.1",
+      "description": "EX-99.1",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/1876042/000187604226000246/augustepr-circle_q22026f.htm",
+      "content_type": "text/html",
+      "content_format": "html",
+      "size_bytes": 42942,
+      "sha256": "13bcaef72087b7fbc1e90c551a01f3a778341fb64303159ea3db476361ac90b2",
+      "analysis_path": "disclosure/sec/processed/augustepr-circle_q22026f.htm.md",
+      "processing_status": "processed",
+      "processing_error": null
+    }
+  ]
+}

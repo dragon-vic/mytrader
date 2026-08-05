@@ -1,0 +1,33 @@
+{
+  "event_id": "2026-08-04-spcx",
+  "status": "timeout",
+  "started_at": "2026-08-04T16:00:00.060243+00:00",
+  "finished_at": "2026-08-04T20:30:26.049490+00:00",
+  "elapsed_seconds": 16225.989,
+  "attempts": 1,
+  "usage": {
+    "input_tokens": 0,
+    "cached_input_tokens": 0,
+    "output_tokens": 0,
+    "reasoning_output_tokens": 0,
+    "total_tokens": 0
+  },
+  "runs": [
+    {
+      "output_path": "/home/ubuntu/pycharm_nt/strategies/agent_trading/batches/2026-08-04-amc/work/2026-08-04-spcx/research.json",
+      "status": "cancelled",
+      "started_at": "2026-08-04T16:00:00.064050+00:00",
+      "finished_at": "2026-08-04T20:30:26.045399+00:00",
+      "elapsed_seconds": 16225.981,
+      "thread_ids": [],
+      "turns": [],
+      "usage": {
+        "input_tokens": 0,
+        "cached_input_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_output_tokens": 0,
+        "total_tokens": 0
+      }
+    }
+  ]
+}

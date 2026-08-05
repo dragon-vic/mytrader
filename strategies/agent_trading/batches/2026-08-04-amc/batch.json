@@ -1,0 +1,158 @@
+{
+  "batch_id": "2026-08-04-amc",
+  "session": "AMC",
+  "watch_start_at": "2026-08-04T20:00:00+00:00",
+  "watch_end_at": "2026-08-04T22:00:00+00:00",
+  "events": [
+    {
+      "event_id": "2026-08-04-spcx",
+      "company": "SpaceX",
+      "ticker": "SPCX",
+      "scope": "core_tech_crypto",
+      "research_hints": [
+        "Evaluate SPCX directly and test commercial-space demand or valuation read-throughs to ASTS and RKLB."
+      ],
+      "watch": {
+        "sec": {
+          "cik": "0001181412",
+          "forms": [
+            "8-K",
+            "10-Q",
+            "10-K"
+          ]
+        },
+        "news_release": {
+          "sources": [
+            {
+              "url": "https://ir.spacex.com/rss/PressRelease.aspx",
+              "format": "feed",
+              "title_phrases": [
+                "spacex posts second quarter 2026 results",
+                "spacex reports second quarter 2026 results"
+              ],
+              "exclude_phrases": [
+                "to post"
+              ],
+              "content_terms": [
+                "spacex",
+                "revenue"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "event_id": "2026-08-04-amd",
+      "company": "Advanced Micro Devices",
+      "ticker": "AMD",
+      "scope": "core_tech_crypto",
+      "research_hints": [
+        "Evaluate AMD directly and test AI-accelerator, data-center, and foundry read-throughs to NVDA and TSM."
+      ],
+      "watch": {
+        "sec": {
+          "cik": "0000002488",
+          "forms": [
+            "8-K",
+            "10-Q",
+            "10-K"
+          ]
+        },
+        "news_release": {
+          "sources": [
+            {
+              "url": "https://ir.amd.com/news-events/press-releases/rss",
+              "format": "feed",
+              "title_phrases": [
+                "amd reports fiscal second quarter 2026 financial results"
+              ],
+              "exclude_phrases": [
+                "to report"
+              ],
+              "content_terms": [
+                "amd",
+                "revenue"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "event_id": "2026-08-04-alab",
+      "company": "Astera Labs",
+      "ticker": "ALAB",
+      "scope": "core_tech_crypto",
+      "research_hints": [
+        "Evaluate ALAB directly and test data-center connectivity read-throughs to CRDO and MRVL."
+      ],
+      "watch": {
+        "sec": {
+          "cik": "0001736297",
+          "forms": [
+            "8-K",
+            "10-Q",
+            "10-K"
+          ]
+        },
+        "news_release": {
+          "sources": [
+            {
+              "url": "https://ir.asteralabs.com/news-events/news-releases",
+              "format": "html",
+              "title_phrases": [
+                "astera labs reports second quarter 2026 financial results"
+              ],
+              "exclude_phrases": [
+                "announces conference"
+              ],
+              "content_terms": [
+                "astera labs",
+                "revenue"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "event_id": "2026-08-04-anet",
+      "company": "Arista Networks",
+      "ticker": "ANET",
+      "scope": "core_tech_crypto",
+      "research_hints": [
+        "Test AI-networking and optical-demand read-throughs to AVGO, CIEN, and AAOI."
+      ],
+      "watch": {
+        "sec": {
+          "cik": "0001596532",
+          "forms": [
+            "8-K",
+            "10-Q",
+            "10-K"
+          ]
+        },
+        "news_release": {
+          "sources": [
+            {
+              "url": "https://www.arista.com/en/company/news/press-release",
+              "format": "html",
+              "title_phrases": [
+                "arista networks, inc. reports second quarter 2026 financial results",
+                "arista networks reports second quarter 2026 financial results"
+              ],
+              "exclude_phrases": [
+                "to announce"
+              ],
+              "content_terms": [
+                "arista networks",
+                "revenue"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

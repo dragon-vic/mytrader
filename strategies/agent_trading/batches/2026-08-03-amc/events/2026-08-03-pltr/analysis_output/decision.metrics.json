@@ -1,0 +1,25 @@
+{
+  "output_path": "/home/ubuntu/pycharm_nt/strategies/agent_trading/events/2026-08-03-pltr/context/analysis_input/.decision.output.json",
+  "status": "completed",
+  "started_at": "2026-08-03T20:06:44.467831+00:00",
+  "finished_at": "2026-08-03T20:07:09.253872+00:00",
+  "elapsed_seconds": 24.784,
+  "thread_ids": [
+    "019fc93c-6872-7ee0-89a2-2a268090a692"
+  ],
+  "turns": [
+    {
+      "input_tokens": 91912,
+      "cached_input_tokens": 67584,
+      "output_tokens": 1040,
+      "reasoning_output_tokens": 445
+    }
+  ],
+  "usage": {
+    "input_tokens": 91912,
+    "cached_input_tokens": 67584,
+    "output_tokens": 1040,
+    "reasoning_output_tokens": 445,
+    "total_tokens": 92952
+  }
+}

@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import shutil
 from datetime import UTC
 from datetime import datetime
 from pathlib import Path
@@ -14,9 +13,11 @@ from strategies.agent_trading.watch.watch_data_models import DisclosurePackage
 from strategies.agent_trading.watch.watch_data_models import WatchPlan
 from strategies.agent_trading.watch.watch_data_models import WatchTarget
 from strategies.agent_trading.watch.news_release_watcher import NewsReleaseWatcher
+from strategies.agent_trading.watch.rtpr_websocket_watcher import RtprWebSocketWatcher
 from strategies.agent_trading.watch.disclosure_preprocessor import DisclosureProcessor
 from strategies.agent_trading.watch.sec_filing_watcher import SEC_FEED_URL
 from strategies.agent_trading.watch.sec_filing_watcher import SecWatcher
+from strategies.agent_trading.watch.watch_trace import WatchTrace
 
 
 LOG = logging.getLogger(__name__)
@@ -45,6 +46,7 @@ class DisclosureWatcher:
         self.session: aiohttp.ClientSession | None = None
         self.sec: SecWatcher | None = None
         self.news: NewsReleaseWatcher | None = None
+        self.rtpr: RtprWebSocketWatcher | None = None
 
     async def __aenter__(self) -> DisclosureWatcher:
         await self.start()
@@ -60,7 +62,11 @@ class DisclosureWatcher:
         # 本地 Windows Python 的 aiodns 不兼容 WSL DNS 代理，统一使用系统解析。
         connector = aiohttp.TCPConnector(resolver=aiohttp.ThreadedResolver())
         self.session = aiohttp.ClientSession(
-            headers={"User-Agent": self.user_agent},
+            headers={
+                "User-Agent": self.user_agent,
+                "Cache-Control": "no-cache, no-store, max-age=0",
+                "Pragma": "no-cache",
+            },
             timeout=timeout,
             connector=connector,
         )
@@ -76,11 +82,22 @@ class DisclosureWatcher:
             poll_seconds=self.poll_seconds,
             processor=processor,
         )
+        self.rtpr = RtprWebSocketWatcher(
+            session=self.session,
+            processor=processor,
+        )
+        self.rtpr.start()
 
     async def close(self) -> None:
-        if self.session is None or self.sec is None or self.news is None:
+        if (
+            self.session is None
+            or self.sec is None
+            or self.news is None
+            or self.rtpr is None
+        ):
             return
         try:
+            await self.rtpr.close()
             await self.news.close()
             await self.sec.close()
         finally:
@@ -88,13 +105,14 @@ class DisclosureWatcher:
             self.session = None
             self.sec = None
             self.news = None
+            self.rtpr = None
 
     # SEC filing 或官方新闻稿中，第一个完整处理成功的来源触发分析。
     async def watch(
         self,
         plan: WatchPlan,
-        context_dir: Path,
-        internal_dir: Path,
+        analysis_input_dir: Path,
+        watch_dir: Path,
     ) -> DisclosurePackage:
         if self.sec is None or self.news is None:
             raise RuntimeError("DisclosureWatcher is not started")
@@ -105,13 +123,21 @@ class DisclosureWatcher:
         if remaining <= 0:
             raise TimeoutError(f"watch window already ended: {plan.event_id}")
 
-        context_dir = context_dir.resolve()
-        internal_dir = internal_dir.resolve()
-        context_dir.mkdir(parents=True, exist_ok=True)
-        internal_dir.mkdir(parents=True, exist_ok=True)
+        analysis_input_dir = analysis_input_dir.resolve()
+        watch_dir = watch_dir.resolve()
+        analysis_input_dir.mkdir(parents=True, exist_ok=True)
+        watch_dir.mkdir(parents=True, exist_ok=True)
+        trace = WatchTrace(plan.event_id, watch_dir)
+        trace.record(
+            "watch",
+            "started",
+            start_at=plan.start_at.isoformat(),
+            end_at=plan.end_at.isoformat(),
+        )
         result = asyncio.get_running_loop().create_future()
         source_status = {
             "sec": self._source_status(),
+            "rtpr": self._source_status(),
             **{
                 f"news_release:{source.url}": self._source_status()
                 for source in plan.news_sources
@@ -147,32 +173,57 @@ class DisclosureWatcher:
                 exc,
             )
 
-        sec_target = WatchTarget(plan, context_dir, internal_dir, ready, fail, health)
+        def rtpr_fail(exc: Exception) -> None:
+            LOG.warning(
+                "RTPR watch failed event_id=%s error_type=%s error=%r",
+                plan.event_id,
+                type(exc).__name__,
+                exc,
+            )
+
+        sec_target = WatchTarget(plan, analysis_input_dir, watch_dir, ready, fail, health, trace)
         news_target = WatchTarget(
             plan,
-            context_dir,
-            internal_dir,
+            analysis_input_dir,
+            watch_dir,
             ready,
             news_fail,
             health,
+            trace,
         )
+        ticker = self._event_ticker(analysis_input_dir / "event.json")
         package = None
         try:
             self.sec.add(sec_target)
             self.news.add(news_target)
+            self.rtpr.add(
+                WatchTarget(plan, analysis_input_dir, watch_dir, ready, rtpr_fail, health, trace),
+                ticker,
+            )
             try:
                 package = await asyncio.wait_for(result, timeout=remaining)
             except TimeoutError as exc:
                 if result.done() and not result.cancelled():
                     raise
                 raise DisclosureTimeoutError(plan.event_id, source_status) from exc
-            self._write_manifest(context_dir / "report.json", package)
+            self._write_manifest(analysis_input_dir / "report.json", package)
+            trace.record(package.source, "winner", origin_url=package.origin_url)
             return package
+        except Exception as exc:
+            trace.record("watch", "failed", error=f"{type(exc).__name__}: {exc}")
+            raise
         finally:
             await self.sec.remove(plan.event_id)
             await self.news.remove(plan.event_id)
-            if package is not None:
-                self._discard_loser(context_dir, internal_dir, package.source)
+            await self.rtpr.remove(plan.event_id)
+            trace.write_summary(
+                {
+                    "event_id": plan.event_id,
+                    "finished_at": datetime.now(UTC).isoformat(),
+                    "winner": package.source if package is not None else None,
+                    "source_status": source_status,
+                },
+            )
 
     @staticmethod
     def _source_status() -> dict:
@@ -193,11 +244,10 @@ class DisclosureWatcher:
         temporary.replace(path)
 
     @staticmethod
-    def _discard_loser(context_dir: Path, internal_dir: Path, winner: str) -> None:
-        loser = "news_release" if winner == "sec" else "sec"
-        for root in (context_dir, internal_dir):
-            disclosure_dir = (root / "disclosure").resolve()
-            loser_dir = (disclosure_dir / loser).resolve()
-            loser_dir.relative_to(disclosure_dir)
-            if loser_dir.exists():
-                shutil.rmtree(loser_dir)
+    def _event_ticker(path: Path) -> str:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        metadata = payload.get("metadata")
+        ticker = metadata.get("ticker") if isinstance(metadata, dict) else None
+        if not isinstance(ticker, str) or not ticker.strip():
+            raise ValueError(f"event metadata ticker is missing: {path}")
+        return ticker.strip()

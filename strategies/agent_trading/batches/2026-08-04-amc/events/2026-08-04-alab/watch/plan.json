@@ -1,0 +1,31 @@
+{
+  "event_id": "2026-08-04-alab",
+  "start_at": "2026-08-04T20:00:00+00:00",
+  "end_at": "2026-08-04T22:00:00+00:00",
+  "sec": {
+    "cik": "0001736297",
+    "forms": [
+      "8-K",
+      "10-Q",
+      "10-K"
+    ]
+  },
+  "news_release": {
+    "sources": [
+      {
+        "url": "https://ir.asteralabs.com/news-events/news-releases",
+        "format": "html",
+        "title_phrases": [
+          "astera labs reports second quarter 2026 financial results"
+        ],
+        "exclude_phrases": [
+          "announces conference"
+        ],
+        "content_terms": [
+          "astera labs",
+          "revenue"
+        ]
+      }
+    ]
+  }
+}

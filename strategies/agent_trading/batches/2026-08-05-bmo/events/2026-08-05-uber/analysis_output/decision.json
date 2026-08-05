@@ -1,0 +1,1 @@
+{"type":"trade_decision","version":3,"event_id":"2026-08-05-uber","decision":"TRADE","trades":[{"instrument_id":"UBERUSDT-PERP.BINANCE","signal":"WEAK_BUY","expected_move_pct":4.0,"confidence":0.96}],"summary":"Q2 bookings produced D=+1; EPS and EBITDA produced P=0; Q3 guidance produced O=+1. With no veto or material corporate overlay, F=+2, matching WEAK_BUY."}

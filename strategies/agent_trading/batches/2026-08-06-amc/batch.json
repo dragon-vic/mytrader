@@ -1,0 +1,83 @@
+{
+  "batch_id": "2026-08-06-amc",
+  "session": "AMC",
+  "watch_start_at": "2026-08-06T20:00:00+00:00",
+  "watch_end_at": "2026-08-06T22:00:00+00:00",
+  "events": [
+    {
+      "event_id": "2026-08-06-aaoi",
+      "company": "Applied Optoelectronics",
+      "ticker": "AAOI",
+      "scope": "core_tech_crypto",
+      "research_hints": [
+        "Evaluate AAOI directly and test optical-networking demand read-throughs to CIEN and LITE."
+      ],
+      "watch": {
+        "sec": {
+          "cik": "0001158114",
+          "forms": [
+            "8-K",
+            "10-Q",
+            "10-K"
+          ]
+        },
+        "news_release": {
+          "sources": [
+            {
+              "url": "https://investors.ao-inc.com/rss/news-releases.xml",
+              "format": "feed",
+              "title_phrases": [
+                "applied optoelectronics reports second quarter 2026 financial results"
+              ],
+              "exclude_phrases": [
+                "announces date"
+              ],
+              "content_terms": [
+                "applied optoelectronics",
+                "revenue"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "event_id": "2026-08-06-mara",
+      "company": "MARA Holdings",
+      "ticker": "MARA",
+      "scope": "core_tech_crypto",
+      "research_hints": [
+        "Test Bitcoin-mining, treasury, and crypto-market read-throughs to IREN, MSTR, and COIN."
+      ],
+      "watch": {
+        "sec": {
+          "cik": "0001507605",
+          "forms": [
+            "8-K",
+            "10-Q",
+            "10-K"
+          ]
+        },
+        "news_release": {
+          "sources": [
+            {
+              "url": "https://ir.mara.com/news-events/press-releases",
+              "format": "html",
+              "title_phrases": [
+                "mara announces second quarter 2026 results",
+                "mara reports second quarter 2026 results"
+              ],
+              "exclude_phrases": [
+                "schedules"
+              ],
+              "content_terms": [
+                "mara",
+                "second quarter 2026"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

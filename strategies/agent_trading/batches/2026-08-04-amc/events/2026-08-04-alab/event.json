@@ -1,0 +1,12 @@
+{
+  "event_id": "2026-08-04-alab",
+  "metadata": {
+    "batch_id": "2026-08-04-amc",
+    "company": "Astera Labs",
+    "ticker": "ALAB",
+    "scope": "core_tech_crypto",
+    "research_hints": [
+      "Evaluate ALAB directly and test data-center connectivity read-throughs to CRDO and MRVL."
+    ]
+  }
+}

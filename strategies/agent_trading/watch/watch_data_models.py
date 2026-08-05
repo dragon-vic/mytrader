@@ -9,6 +9,8 @@ from typing import Awaitable
 from typing import Callable
 from urllib.parse import urlsplit
 
+from strategies.agent_trading.watch.watch_trace import WatchTrace
+
 
 SOURCE_FORMATS = {"feed", "html", "q4_json"}
 EARNINGS_FORMS = {"8-K", "10-Q", "10-K", "6-K", "20-F", "40-F"}
@@ -182,6 +184,7 @@ class DisclosurePackage:
                     "content_format": item.content_format,
                     "size_bytes": item.size_bytes,
                     "sha256": item.sha256,
+                    "raw_path": item.raw_path,
                     "analysis_path": item.analysis_path,
                     "processing_status": item.processing_status,
                     "processing_error": item.processing_error,
@@ -199,11 +202,12 @@ HealthHandler = Callable[[str, Exception | None], None]
 @dataclass
 class WatchTarget:
     plan: WatchPlan
-    context_dir: Path
-    internal_dir: Path
+    analysis_input_dir: Path
+    watch_dir: Path
     ready: ReadyHandler
     fail: FailHandler
     health: HealthHandler
+    trace: WatchTrace
 
 
 def _parse_source(payload: dict[str, Any]) -> NewsSource:

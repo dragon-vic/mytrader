@@ -1,0 +1,31 @@
+{
+  "event_id": "2026-08-04-amd",
+  "start_at": "2026-08-04T20:00:00+00:00",
+  "end_at": "2026-08-04T22:00:00+00:00",
+  "sec": {
+    "cik": "0000002488",
+    "forms": [
+      "8-K",
+      "10-Q",
+      "10-K"
+    ]
+  },
+  "news_release": {
+    "sources": [
+      {
+        "url": "https://ir.amd.com/news-events/press-releases/rss",
+        "format": "feed",
+        "title_phrases": [
+          "amd reports fiscal second quarter 2026 financial results"
+        ],
+        "exclude_phrases": [
+          "to report"
+        ],
+        "content_terms": [
+          "amd",
+          "revenue"
+        ]
+      }
+    ]
+  }
+}

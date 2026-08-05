@@ -1,0 +1,12 @@
+{
+  "event_id": "2026-08-05-uber",
+  "metadata": {
+    "batch_id": "2026-08-05-bmo",
+    "company": "Uber Technologies",
+    "ticker": "UBER",
+    "scope": "core_tech_crypto",
+    "research_hints": [
+      "Evaluate UBER's own tradable instrument first and reject it if the disclosure-to-price causal case is weak."
+    ]
+  }
+}

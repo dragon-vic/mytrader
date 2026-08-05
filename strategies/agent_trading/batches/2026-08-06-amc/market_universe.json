@@ -1,0 +1,943 @@
+{
+  "as_of": "2026-08-02T10:37:36.960282+00:00",
+  "instruments": [
+    {
+      "symbol": "AAOI",
+      "instrument_id": "AAOIUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "AAOIUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "AAPL",
+      "instrument_id": "AAPLUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "AAPLUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "ADBE",
+      "instrument_id": "ADBEUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "ADBEUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "ALAB",
+      "instrument_id": "ALABUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "ALABUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "ALUMINIUM",
+      "instrument_id": "xyz:ALUMINIUM-USD-PERP.HYPERLIQUID",
+      "venue": "HYPERLIQUID",
+      "market_symbol": "xyz:ALUMINIUM",
+      "is_index": false
+    },
+    {
+      "symbol": "AMAT",
+      "instrument_id": "AMATUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "AMATUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "AMD",
+      "instrument_id": "AMDUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "AMDUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "AMZN",
+      "instrument_id": "AMZNUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "AMZNUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "ANTHROPIC",
+      "instrument_id": "ANTHROPICUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "ANTHROPICUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "APP",
+      "instrument_id": "APPUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "APPUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "ARM",
+      "instrument_id": "ARMUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "ARMUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "ASML",
+      "instrument_id": "ASMLUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "ASMLUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "ASTS",
+      "instrument_id": "ASTSUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "ASTSUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "AVGO",
+      "instrument_id": "AVGOUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "AVGOUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "AXTI",
+      "instrument_id": "AXTIUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "AXTIUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "BABA",
+      "instrument_id": "BABAUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "BABAUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "BB",
+      "instrument_id": "xyz:BB-USD-PERP.HYPERLIQUID",
+      "venue": "HYPERLIQUID",
+      "market_symbol": "xyz:BB",
+      "is_index": false
+    },
+    {
+      "symbol": "BBX",
+      "instrument_id": "BBXUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "BBXUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "BE",
+      "instrument_id": "BEUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "BEUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "BIRD",
+      "instrument_id": "xyz:BIRD-USD-PERP.HYPERLIQUID",
+      "venue": "HYPERLIQUID",
+      "market_symbol": "xyz:BIRD",
+      "is_index": false
+    },
+    {
+      "symbol": "BMNR",
+      "instrument_id": "BMNRUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "BMNRUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "BNC",
+      "instrument_id": "BNCUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "BNCUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "BRKB",
+      "instrument_id": "BRKBUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "BRKBUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "BX",
+      "instrument_id": "BXUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "BXUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "BZ",
+      "instrument_id": "BZUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "BZUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "CAR",
+      "instrument_id": "cash:CAR-USD-PERP.HYPERLIQUID",
+      "venue": "HYPERLIQUID",
+      "market_symbol": "cash:CAR",
+      "is_index": false
+    },
+    {
+      "symbol": "CAT",
+      "instrument_id": "CATUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "CATUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "CIEN",
+      "instrument_id": "CIENUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "CIENUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "CL",
+      "instrument_id": "CLUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "CLUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "COHR",
+      "instrument_id": "COHRUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "COHRUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "COIN",
+      "instrument_id": "COINUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "COINUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "COPPER",
+      "instrument_id": "COPPERUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "COPPERUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "CORN",
+      "instrument_id": "xyz:CORN-USD-PERP.HYPERLIQUID",
+      "venue": "HYPERLIQUID",
+      "market_symbol": "xyz:CORN",
+      "is_index": false
+    },
+    {
+      "symbol": "COST",
+      "instrument_id": "COSTUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "COSTUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "CRCL",
+      "instrument_id": "CRCLUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "CRCLUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "CRDO",
+      "instrument_id": "CRDOUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "CRDOUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "CRM",
+      "instrument_id": "CRMUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "CRMUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "CRWD",
+      "instrument_id": "CRWDUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "CRWDUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "CRWV",
+      "instrument_id": "CRWVUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "CRWVUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "CSCO",
+      "instrument_id": "CSCOUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "CSCOUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "CXMT",
+      "instrument_id": "xyz:CXMT-USD-PERP.HYPERLIQUID",
+      "venue": "HYPERLIQUID",
+      "market_symbol": "xyz:CXMT",
+      "is_index": false
+    },
+    {
+      "symbol": "DELL",
+      "instrument_id": "DELLUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "DELLUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "DIS",
+      "instrument_id": "DISUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "DISUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "DKNG",
+      "instrument_id": "DKNGUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "DKNGUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "EBAY",
+      "instrument_id": "EBAYUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "EBAYUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "FLEX",
+      "instrument_id": "FLEXUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "FLEXUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "FLNC",
+      "instrument_id": "FLNCUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "FLNCUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "FWDI",
+      "instrument_id": "FWDIUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "FWDIUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "GEV",
+      "instrument_id": "GEVUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "GEVUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "GIGADEV",
+      "instrument_id": "xyz:GIGADEV-USD-PERP.HYPERLIQUID",
+      "venue": "HYPERLIQUID",
+      "market_symbol": "xyz:GIGADEV",
+      "is_index": false
+    },
+    {
+      "symbol": "GLW",
+      "instrument_id": "GLWUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "GLWUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "GME",
+      "instrument_id": "GMEUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "GMEUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "GOOGL",
+      "instrument_id": "GOOGLUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "GOOGLUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "GS",
+      "instrument_id": "GSUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "GSUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "HD",
+      "instrument_id": "HDUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "HDUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "HIMS",
+      "instrument_id": "HIMSUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "HIMSUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "HK0700",
+      "instrument_id": "HK0700USDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "HK0700USDT",
+      "is_index": false
+    },
+    {
+      "symbol": "HK1810",
+      "instrument_id": "HK1810USDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "HK1810USDT",
+      "is_index": false
+    },
+    {
+      "symbol": "HOOD",
+      "instrument_id": "HOODUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "HOODUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "HPE",
+      "instrument_id": "HPEUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "HPEUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "HYUNDAI",
+      "instrument_id": "HYUNDAIUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "HYUNDAIUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "IBIDEN",
+      "instrument_id": "xyz:IBIDEN-USD-PERP.HYPERLIQUID",
+      "venue": "HYPERLIQUID",
+      "market_symbol": "xyz:IBIDEN",
+      "is_index": false
+    },
+    {
+      "symbol": "IBM",
+      "instrument_id": "IBMUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "IBMUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "INTC",
+      "instrument_id": "INTCUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "INTCUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "IREN",
+      "instrument_id": "IRENUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "IRENUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "JPM",
+      "instrument_id": "JPMUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "JPMUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "KIOXIA",
+      "instrument_id": "xyz:KIOXIA-USD-PERP.HYPERLIQUID",
+      "venue": "HYPERLIQUID",
+      "market_symbol": "xyz:KIOXIA",
+      "is_index": false
+    },
+    {
+      "symbol": "KLAC",
+      "instrument_id": "KLACUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "KLACUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "LITE",
+      "instrument_id": "LITEUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "LITEUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "LLY",
+      "instrument_id": "LLYUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "LLYUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "LRCX",
+      "instrument_id": "LRCXUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "LRCXUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "META",
+      "instrument_id": "METAUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "METAUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "MINIMAX",
+      "instrument_id": "MINIMAXUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "MINIMAXUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "MRVL",
+      "instrument_id": "MRVLUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "MRVLUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "MSFT",
+      "instrument_id": "MSFTUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "MSFTUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "MSTR",
+      "instrument_id": "MSTRUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "MSTRUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "MU",
+      "instrument_id": "MUUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "MUUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "NATGAS",
+      "instrument_id": "NATGASUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "NATGASUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "NBIS",
+      "instrument_id": "NBISUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "NBISUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "NET",
+      "instrument_id": "para:NET-USD-PERP.HYPERLIQUID",
+      "venue": "HYPERLIQUID",
+      "market_symbol": "para:NET",
+      "is_index": false
+    },
+    {
+      "symbol": "NFLX",
+      "instrument_id": "NFLXUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "NFLXUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "NOK",
+      "instrument_id": "NOKUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "NOKUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "NOW",
+      "instrument_id": "NOWUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "NOWUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "NVDA",
+      "instrument_id": "NVDAUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "NVDAUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "NVO",
+      "instrument_id": "NVOUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "NVOUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "ONDS",
+      "instrument_id": "ONDSUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "ONDSUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "OPENAI",
+      "instrument_id": "OPENAIUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "OPENAIUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "ORCL",
+      "instrument_id": "ORCLUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "ORCLUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "PANW",
+      "instrument_id": "PANWUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "PANWUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "PAYP",
+      "instrument_id": "PAYPUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "PAYPUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "PENG",
+      "instrument_id": "PENGUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "PENGUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "PLTR",
+      "instrument_id": "PLTRUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "PLTRUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "POPMART",
+      "instrument_id": "POPMARTUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "POPMARTUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "PURRDAT",
+      "instrument_id": "xyz:PURRDAT-USD-PERP.HYPERLIQUID",
+      "venue": "HYPERLIQUID",
+      "market_symbol": "xyz:PURRDAT",
+      "is_index": false
+    },
+    {
+      "symbol": "PYPL",
+      "instrument_id": "PYPLUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "PYPLUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "QCOM",
+      "instrument_id": "QCOMUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "QCOMUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "QNTX",
+      "instrument_id": "QNTXUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "QNTXUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "RIVN",
+      "instrument_id": "RIVNUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "RIVNUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "RKLB",
+      "instrument_id": "RKLBUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "RKLBUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "RTX",
+      "instrument_id": "km:RTX-USD-PERP.HYPERLIQUID",
+      "venue": "HYPERLIQUID",
+      "market_symbol": "km:RTX",
+      "is_index": false
+    },
+    {
+      "symbol": "SAMSUNG",
+      "instrument_id": "SAMSUNGUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "SAMSUNGUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "SKHYNIX",
+      "instrument_id": "SKHYNIXUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "SKHYNIXUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "SMCI",
+      "instrument_id": "SMCIUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "SMCIUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "SNDK",
+      "instrument_id": "SNDKUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "SNDKUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "SNOW",
+      "instrument_id": "SNOWUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "SNOWUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "SOFI",
+      "instrument_id": "SOFIUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "SOFIUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "SOFTBANK",
+      "instrument_id": "xyz:SOFTBANK-USD-PERP.HYPERLIQUID",
+      "venue": "HYPERLIQUID",
+      "market_symbol": "xyz:SOFTBANK",
+      "is_index": false
+    },
+    {
+      "symbol": "SONY",
+      "instrument_id": "SONYUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "SONYUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "SPCX",
+      "instrument_id": "SPCXUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "SPCXUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "STRC",
+      "instrument_id": "STRCUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "STRCUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "STX",
+      "instrument_id": "para:STX-USD-PERP.HYPERLIQUID",
+      "venue": "HYPERLIQUID",
+      "market_symbol": "para:STX",
+      "is_index": false
+    },
+    {
+      "symbol": "TENCENT",
+      "instrument_id": "TENCENTUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "TENCENTUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "TER",
+      "instrument_id": "TERUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "TERUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "TSLA",
+      "instrument_id": "TSLAUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "TSLAUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "TSM",
+      "instrument_id": "TSMUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "TSMUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "TTF",
+      "instrument_id": "xyz:TTF-USD-PERP.HYPERLIQUID",
+      "venue": "HYPERLIQUID",
+      "market_symbol": "xyz:TTF",
+      "is_index": false
+    },
+    {
+      "symbol": "TTWO",
+      "instrument_id": "TTWOUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "TTWOUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "TXN",
+      "instrument_id": "TXNUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "TXNUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "UBER",
+      "instrument_id": "UBERUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "UBERUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "URANIUM",
+      "instrument_id": "xyz:URANIUM-USD-PERP.HYPERLIQUID",
+      "venue": "HYPERLIQUID",
+      "market_symbol": "xyz:URANIUM",
+      "is_index": false
+    },
+    {
+      "symbol": "USAR",
+      "instrument_id": "USARUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "USARUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "V",
+      "instrument_id": "VUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "VUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "VRT",
+      "instrument_id": "VRTUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "VRTUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "VST",
+      "instrument_id": "para:VST-USD-PERP.HYPERLIQUID",
+      "venue": "HYPERLIQUID",
+      "market_symbol": "para:VST",
+      "is_index": false
+    },
+    {
+      "symbol": "WDC",
+      "instrument_id": "WDCUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "WDCUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "WEN",
+      "instrument_id": "WENUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "WENUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "WHEAT",
+      "instrument_id": "xyz:WHEAT-USD-PERP.HYPERLIQUID",
+      "venue": "HYPERLIQUID",
+      "market_symbol": "xyz:WHEAT",
+      "is_index": false
+    },
+    {
+      "symbol": "WMT",
+      "instrument_id": "WMTUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "WMTUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "XAG",
+      "instrument_id": "XAGUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "XAGUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "XAU",
+      "instrument_id": "XAUUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "XAUUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "XPD",
+      "instrument_id": "XPDUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "XPDUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "XPT",
+      "instrument_id": "XPTUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "XPTUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "ZHIPU",
+      "instrument_id": "ZHIPUUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "ZHIPUUSDT",
+      "is_index": false
+    },
+    {
+      "symbol": "ZM",
+      "instrument_id": "ZMUSDT-PERP.BINANCE",
+      "venue": "BINANCE",
+      "market_symbol": "ZMUSDT",
+      "is_index": false
+    }
+  ]
+}

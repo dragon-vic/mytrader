@@ -1,0 +1,200 @@
+{
+  "batch_id": "2026-08-05-amc",
+  "session": "AMC",
+  "watch_start_at": "2026-08-05T20:00:00+00:00",
+  "watch_end_at": "2026-08-05T22:00:00+00:00",
+  "events": [
+    {
+      "event_id": "2026-08-05-sndk",
+      "company": "Sandisk",
+      "ticker": "SNDK",
+      "scope": "core_tech_crypto",
+      "research_hints": [
+        "Evaluate SNDK directly and test NAND pricing and storage-demand read-throughs to WDC and MU."
+      ],
+      "watch": {
+        "sec": {
+          "cik": "0002023554",
+          "forms": [
+            "8-K",
+            "10-Q",
+            "10-K"
+          ]
+        },
+        "news_release": {
+          "sources": [
+            {
+              "url": "https://investor.sandisk.com/rss/news-releases.xml",
+              "format": "feed",
+              "title_phrases": [
+                "sandisk reports fiscal fourth quarter",
+                "sandisk reports fourth quarter 2026"
+              ],
+              "exclude_phrases": [
+                "to report"
+              ],
+              "content_terms": [
+                "sandisk",
+                "revenue"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "event_id": "2026-08-05-wdc",
+      "company": "Western Digital",
+      "ticker": "WDC",
+      "scope": "core_tech_crypto",
+      "research_hints": [
+        "Evaluate WDC directly and test storage-demand read-throughs to SNDK and MU."
+      ],
+      "watch": {
+        "sec": {
+          "cik": "0000106040",
+          "forms": [
+            "8-K",
+            "10-Q",
+            "10-K"
+          ]
+        },
+        "news_release": {
+          "sources": [
+            {
+              "url": "https://investor.wdc.com/rss/news-releases.xml",
+              "format": "feed",
+              "title_phrases": [
+                "wd reports fiscal fourth quarter 2026 financial results"
+              ],
+              "exclude_phrases": [
+                "to announce"
+              ],
+              "content_terms": [
+                "western digital",
+                "revenue"
+              ],
+              "user_agent": "curl/8.5.0"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "event_id": "2026-08-05-app",
+      "company": "AppLovin",
+      "ticker": "APP",
+      "scope": "core_tech_crypto",
+      "research_hints": [
+        "Evaluate APP's own tradable instrument first and reject it if the disclosure-to-price causal case is weak."
+      ],
+      "watch": {
+        "sec": {
+          "cik": "0001751008",
+          "forms": [
+            "8-K",
+            "10-Q",
+            "10-K"
+          ]
+        },
+        "news_release": {
+          "sources": [
+            {
+              "url": "https://investors.applovin.com/rss/PressRelease.aspx",
+              "format": "feed",
+              "title_phrases": [
+                "applovin announces second quarter 2026 financial results",
+                "applovin reports second quarter 2026 financial results"
+              ],
+              "exclude_phrases": [
+                "to announce"
+              ],
+              "content_terms": [
+                "applovin",
+                "revenue"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "event_id": "2026-08-05-flnc",
+      "company": "Fluence Energy",
+      "ticker": "FLNC",
+      "scope": "core_tech_crypto",
+      "research_hints": [
+        "Evaluate FLNC directly and test grid-storage demand or pricing read-throughs to TSLA and BE."
+      ],
+      "watch": {
+        "sec": {
+          "cik": "0001868941",
+          "forms": [
+            "8-K",
+            "10-Q",
+            "10-K"
+          ]
+        },
+        "news_release": {
+          "sources": [
+            {
+              "url": "https://ir.fluenceenergy.com/rss/news-releases.xml",
+              "format": "feed",
+              "title_phrases": [
+                "fluence energy, inc. reports third quarter 2026 results",
+                "fluence reports third quarter 2026 results"
+              ],
+              "exclude_phrases": [
+                "earnings release date",
+                "announces fiscal"
+              ],
+              "content_terms": [
+                "fluence",
+                "revenue"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "event_id": "2026-08-05-dash",
+      "company": "DoorDash",
+      "ticker": "DASH",
+      "scope": "core_tech_crypto",
+      "research_hints": [
+        "Test delivery demand, competitive intensity, and unit-economics read-throughs to UBER."
+      ],
+      "watch": {
+        "sec": {
+          "cik": "0001792789",
+          "forms": [
+            "8-K",
+            "10-Q",
+            "10-K"
+          ]
+        },
+        "news_release": {
+          "sources": [
+            {
+              "url": "https://ir.doordash.com/rss/PressRelease.aspx",
+              "format": "feed",
+              "title_phrases": [
+                "doordash releases second quarter 2026 financial results",
+                "doordash announces second quarter 2026 results",
+                "doordash reports second quarter 2026 results"
+              ],
+              "exclude_phrases": [
+                "to announce"
+              ],
+              "content_terms": [
+                "doordash",
+                "revenue"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

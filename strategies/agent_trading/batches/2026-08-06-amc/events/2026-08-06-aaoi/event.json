@@ -1,0 +1,12 @@
+{
+  "event_id": "2026-08-06-aaoi",
+  "metadata": {
+    "batch_id": "2026-08-06-amc",
+    "company": "Applied Optoelectronics",
+    "ticker": "AAOI",
+    "scope": "core_tech_crypto",
+    "research_hints": [
+      "Evaluate AAOI directly and test optical-networking demand read-throughs to CIEN and LITE."
+    ]
+  }
+}

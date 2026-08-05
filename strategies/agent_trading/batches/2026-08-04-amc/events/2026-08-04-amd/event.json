@@ -1,0 +1,12 @@
+{
+  "event_id": "2026-08-04-amd",
+  "metadata": {
+    "batch_id": "2026-08-04-amc",
+    "company": "Advanced Micro Devices",
+    "ticker": "AMD",
+    "scope": "core_tech_crypto",
+    "research_hints": [
+      "Evaluate AMD directly and test AI-accelerator, data-center, and foundry read-throughs to NVDA and TSM."
+    ]
+  }
+}

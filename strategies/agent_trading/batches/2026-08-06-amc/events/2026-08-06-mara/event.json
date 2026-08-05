@@ -1,0 +1,12 @@
+{
+  "event_id": "2026-08-06-mara",
+  "metadata": {
+    "batch_id": "2026-08-06-amc",
+    "company": "MARA Holdings",
+    "ticker": "MARA",
+    "scope": "core_tech_crypto",
+    "research_hints": [
+      "Test Bitcoin-mining, treasury, and crypto-market read-throughs to IREN, MSTR, and COIN."
+    ]
+  }
+}

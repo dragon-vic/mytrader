@@ -1,0 +1,12 @@
+{
+  "event_id": "2026-08-03-srad",
+  "metadata": {
+    "batch_id": "2026-08-03-bmo",
+    "company": "Sportradar",
+    "ticker": "SRAD",
+    "scope": "core_tech_crypto",
+    "research_hints": [
+      "Test whether sports-betting data demand and customer economics can create a read-through for DKNG."
+    ]
+  }
+}

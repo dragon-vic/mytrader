@@ -1,0 +1,25 @@
+{
+  "output_path": "/home/ubuntu/pycharm_nt/strategies/agent_trading/events/2026-08-05-crcl/context/.decision.output.json",
+  "status": "completed",
+  "started_at": "2026-08-05T10:12:47.829972+00:00",
+  "finished_at": "2026-08-05T10:13:14.300164+00:00",
+  "elapsed_seconds": 26.469,
+  "thread_ids": [
+    "019fd169-54ab-7c01-9c4e-9d78c7b4a816"
+  ],
+  "turns": [
+    {
+      "input_tokens": 93472,
+      "cached_input_tokens": 55552,
+      "output_tokens": 1071,
+      "reasoning_output_tokens": 561
+    }
+  ],
+  "usage": {
+    "input_tokens": 93472,
+    "cached_input_tokens": 55552,
+    "output_tokens": 1071,
+    "reasoning_output_tokens": 561,
+    "total_tokens": 94543
+  }
+}

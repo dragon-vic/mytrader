@@ -1,0 +1,33 @@
+{
+  "event_id": "2026-08-05-flnc",
+  "start_at": "2026-08-05T20:00:00+00:00",
+  "end_at": "2026-08-05T22:00:00+00:00",
+  "sec": {
+    "cik": "0001868941",
+    "forms": [
+      "8-K",
+      "10-Q",
+      "10-K"
+    ]
+  },
+  "news_release": {
+    "sources": [
+      {
+        "url": "https://ir.fluenceenergy.com/rss/news-releases.xml",
+        "format": "feed",
+        "title_phrases": [
+          "fluence energy, inc. reports third quarter 2026 results",
+          "fluence reports third quarter 2026 results"
+        ],
+        "exclude_phrases": [
+          "earnings release date",
+          "announces fiscal"
+        ],
+        "content_terms": [
+          "fluence",
+          "revenue"
+        ]
+      }
+    ]
+  }
+}

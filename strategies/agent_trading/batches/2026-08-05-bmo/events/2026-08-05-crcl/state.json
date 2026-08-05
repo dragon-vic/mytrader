@@ -1,0 +1,13 @@
+{
+  "event_id": "2026-08-05-crcl",
+  "state": "decision_sent",
+  "updated_ns": 1785924794302565560,
+  "research_complete": true,
+  "research_error": null,
+  "research_path": "research_output/research.json",
+  "analysis_brief_path": "analysis_input/analysis_brief.md",
+  "report_path": "analysis_input/report.json",
+  "report_source": "sec",
+  "report_detected_ns": 1785924767309551024,
+  "decision_path": "analysis_output/decision.json"
+}

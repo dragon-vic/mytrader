@@ -1,0 +1,31 @@
+{
+  "event_id": "2026-08-06-aaoi",
+  "start_at": "2026-08-06T20:00:00+00:00",
+  "end_at": "2026-08-06T22:00:00+00:00",
+  "sec": {
+    "cik": "0001158114",
+    "forms": [
+      "8-K",
+      "10-Q",
+      "10-K"
+    ]
+  },
+  "news_release": {
+    "sources": [
+      {
+        "url": "https://investors.ao-inc.com/rss/news-releases.xml",
+        "format": "feed",
+        "title_phrases": [
+          "applied optoelectronics reports second quarter 2026 financial results"
+        ],
+        "exclude_phrases": [
+          "announces date"
+        ],
+        "content_terms": [
+          "applied optoelectronics",
+          "revenue"
+        ]
+      }
+    ]
+  }
+}

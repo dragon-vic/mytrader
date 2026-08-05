@@ -1,0 +1,32 @@
+{
+  "event_id": "2026-08-05-app",
+  "start_at": "2026-08-05T20:00:00+00:00",
+  "end_at": "2026-08-05T22:00:00+00:00",
+  "sec": {
+    "cik": "0001751008",
+    "forms": [
+      "8-K",
+      "10-Q",
+      "10-K"
+    ]
+  },
+  "news_release": {
+    "sources": [
+      {
+        "url": "https://investors.applovin.com/rss/PressRelease.aspx",
+        "format": "feed",
+        "title_phrases": [
+          "applovin announces second quarter 2026 financial results",
+          "applovin reports second quarter 2026 financial results"
+        ],
+        "exclude_phrases": [
+          "to announce"
+        ],
+        "content_terms": [
+          "applovin",
+          "revenue"
+        ]
+      }
+    ]
+  }
+}

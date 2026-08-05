@@ -1,0 +1,7 @@
+{
+  "event_id": "2026-08-04-alab",
+  "state": "research_incomplete",
+  "updated_ns": 1785875426188963057,
+  "research_complete": false,
+  "research_error": "research deadline reached before research_complete became true"
+}

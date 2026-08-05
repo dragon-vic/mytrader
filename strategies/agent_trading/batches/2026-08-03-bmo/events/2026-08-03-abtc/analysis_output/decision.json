@@ -1,0 +1,1 @@
+{"type":"trade_decision","version":3,"event_id":"2026-08-03-abtc","decision":"HOLD","trades":[],"summary":"No instrument survived the causal-transmission and exact-instrument calibration gates; there are no trade candidates to evaluate."}

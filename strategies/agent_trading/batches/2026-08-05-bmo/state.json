@@ -1,0 +1,14 @@
+{
+  "batch_id": "2026-08-05-bmo",
+  "state": "research_finished",
+  "updated_ns": 1785920561405752341,
+  "research_start_at": "2026-08-05T01:00:00+00:00",
+  "reused_research": [
+    "2026-08-05-crcl",
+    "2026-08-05-uber"
+  ],
+  "companies": {
+    "2026-08-05-uber": "research_ready",
+    "2026-08-05-crcl": "research_ready"
+  }
+}

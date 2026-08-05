@@ -1,0 +1,38 @@
+{
+  "event_id": "2026-08-03-pltr",
+  "trade_candidates": [
+    {
+      "symbol": "PLTR",
+      "instrument_id": "PLTRUSDT-PERP.BINANCE",
+      "outcomes": {
+        "STRONG_BUY": {
+          "condition": "No hard HOLD or extreme core conflict applies; the locked score T from analysis_brief is at least +8; none of the four core drivers R, O, H, and F is negative; and both forward drivers H and F are positive.",
+          "expected_move_pct": 16.0
+        },
+        "MEDIUM_BUY": {
+          "condition": "No hard HOLD or extreme core conflict applies; STRONG_BUY is not met; T is at least +5; at least two of the four core drivers R, O, H, and F are positive; and at least one forward driver H or F is positive.",
+          "expected_move_pct": 10.0
+        },
+        "WEAK_BUY": {
+          "condition": "No hard HOLD or extreme core conflict applies; neither stronger BUY tier is met; T is at least +2; at least one core driver is positive; and either H or F is positive or both current-result drivers R and O equal +2.",
+          "expected_move_pct": 6.0
+        },
+        "HOLD": {
+          "condition": "A hard HOLD or extreme core conflict defined in analysis_brief applies; T is between -1 and +1 inclusive; current and forward core drivers materially oppose each other without meeting a directional condition; or none of the six directional outcome conditions is met. An ordinary habitual company-guide beat with only pass-through or neutral forward revisions is HOLD."
+        },
+        "WEAK_SELL": {
+          "condition": "No hard HOLD or extreme core conflict applies; neither stronger SELL tier is met; T is at most -2; at least one core driver is negative; and either H or F is negative or both current-result drivers R and O are negative.",
+          "expected_move_pct": 6.0
+        },
+        "MEDIUM_SELL": {
+          "condition": "No hard HOLD or extreme core conflict applies; STRONG_SELL is not met; T is at most -5; at least two of the four core drivers R, O, H, and F are negative; and at least one forward driver H or F is negative.",
+          "expected_move_pct": 11.0
+        },
+        "STRONG_SELL": {
+          "condition": "No hard HOLD or extreme core conflict applies; the locked score T from analysis_brief is at most -8; none of the four core drivers R, O, H, and F is positive; and both forward drivers H and F are negative.",
+          "expected_move_pct": 18.0
+        }
+      }
+    }
+  ]
+}

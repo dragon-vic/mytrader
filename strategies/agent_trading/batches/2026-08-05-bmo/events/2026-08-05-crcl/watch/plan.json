@@ -1,0 +1,31 @@
+{
+  "event_id": "2026-08-05-crcl",
+  "start_at": "2026-08-05T05:00:00+00:00",
+  "end_at": "2026-08-05T13:30:00+00:00",
+  "sec": {
+    "cik": "0001876042",
+    "forms": [
+      "8-K",
+      "10-Q",
+      "10-K"
+    ]
+  },
+  "news_release": {
+    "sources": [
+      {
+        "url": "https://investor.circle.com/rss/PressRelease.aspx",
+        "format": "feed",
+        "title_phrases": [
+          "circle reports second quarter 2026 financial results"
+        ],
+        "exclude_phrases": [
+          "to announce"
+        ],
+        "content_terms": [
+          "circle",
+          "revenue"
+        ]
+      }
+    ]
+  }
+}

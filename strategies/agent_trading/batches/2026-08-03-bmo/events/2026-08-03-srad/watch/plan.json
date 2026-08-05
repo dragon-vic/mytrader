@@ -1,0 +1,30 @@
+{
+  "event_id": "2026-08-03-srad",
+  "start_at": "2026-08-03T10:00:00+00:00",
+  "end_at": "2026-08-03T13:30:00+00:00",
+  "sec": {
+    "cik": "0001836470",
+    "forms": [
+      "6-K",
+      "20-F"
+    ]
+  },
+  "news_release": {
+    "sources": [
+      {
+        "url": "https://investors.sportradar.com/rss/news-releases.xml",
+        "format": "feed",
+        "title_phrases": [
+          "sportradar reports second quarter 2026 financial results"
+        ],
+        "exclude_phrases": [
+          "to release"
+        ],
+        "content_terms": [
+          "sportradar",
+          "revenue"
+        ]
+      }
+    ]
+  }
+}

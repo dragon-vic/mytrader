@@ -1,0 +1,12 @@
+{
+  "event_id": "2026-08-03-abtc",
+  "metadata": {
+    "batch_id": "2026-08-03-bmo",
+    "company": "American Bitcoin",
+    "ticker": "ABTC",
+    "scope": "core_tech_crypto",
+    "research_hints": [
+      "Test possible Bitcoin-mining, treasury, and crypto-market read-throughs to IREN, MSTR, and COIN."
+    ]
+  }
+}

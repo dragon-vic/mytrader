@@ -1,0 +1,12 @@
+{
+  "event_id": "2026-08-05-flnc",
+  "metadata": {
+    "batch_id": "2026-08-05-amc",
+    "company": "Fluence Energy",
+    "ticker": "FLNC",
+    "scope": "core_tech_crypto",
+    "research_hints": [
+      "Evaluate FLNC directly and test grid-storage demand or pricing read-throughs to TSLA and BE."
+    ]
+  }
+}

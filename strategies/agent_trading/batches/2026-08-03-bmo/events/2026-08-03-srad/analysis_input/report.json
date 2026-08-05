@@ -1,0 +1,36 @@
+{
+  "event_id": "2026-08-03-srad",
+  "source": "sec",
+  "form": "6-K",
+  "accession": "0001104659-26-089457",
+  "items": [],
+  "origin_url": "https://www.sec.gov/Archives/edgar/data/1836470/000110465926089457/0001104659-26-089457-index.htm",
+  "published_at": "2026-08-03T07:20:16-04:00",
+  "detected_ns": 1785771879058953500,
+  "files": [
+    {
+      "document_type": "6-K",
+      "description": "FORM 6-K",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/1836470/000110465926089457/tm2621599d1_6k.htm",
+      "content_type": "text/html",
+      "content_format": "html",
+      "size_bytes": 10513,
+      "sha256": "d65a2aca78613be9ce58ebfd5a087a941304a810376eb6c8b89dac5ac48e15e7",
+      "analysis_path": "disclosure/sec/processed/tm2621599d1_6k.htm.md",
+      "processing_status": "processed",
+      "processing_error": null
+    },
+    {
+      "document_type": "EX-99.1",
+      "description": "EXHIBIT 99.1",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/1836470/000110465926089457/tm2621599d1_ex99-1.htm",
+      "content_type": "text/html",
+      "content_format": "html",
+      "size_bytes": 365279,
+      "sha256": "eb5f42a80d0c51c5c8b0f08f0724b12cfc6f82a2ea956968146e2ef2342c6a99",
+      "analysis_path": "disclosure/sec/processed/tm2621599d1_ex99-1.htm.md",
+      "processing_status": "processed",
+      "processing_error": null
+    }
+  ]
+}

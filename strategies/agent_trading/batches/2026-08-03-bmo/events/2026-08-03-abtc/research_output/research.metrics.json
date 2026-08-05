@@ -1,0 +1,42 @@
+{
+  "event_id": "2026-08-03-abtc",
+  "status": "completed",
+  "started_at": "2026-08-03T06:00:00.123443+00:00",
+  "finished_at": "2026-08-03T06:14:00.823969+00:00",
+  "elapsed_seconds": 840.7,
+  "attempts": 1,
+  "usage": {
+    "input_tokens": 4497360,
+    "cached_input_tokens": 4124672,
+    "output_tokens": 17284,
+    "reasoning_output_tokens": 8947,
+    "total_tokens": 4514644
+  },
+  "runs": [
+    {
+      "output_path": "/home/ubuntu/pycharm_nt/strategies/agent_trading/batches/2026-08-03-bmo/work/2026-08-03-abtc/research.json",
+      "status": "completed",
+      "started_at": "2026-08-03T06:00:00.123880+00:00",
+      "finished_at": "2026-08-03T06:14:00.823351+00:00",
+      "elapsed_seconds": 840.697,
+      "thread_ids": [
+        "019fc635-3c05-7423-b1f0-61b07da4ad58"
+      ],
+      "turns": [
+        {
+          "input_tokens": 4497360,
+          "cached_input_tokens": 4124672,
+          "output_tokens": 17284,
+          "reasoning_output_tokens": 8947
+        }
+      ],
+      "usage": {
+        "input_tokens": 4497360,
+        "cached_input_tokens": 4124672,
+        "output_tokens": 17284,
+        "reasoning_output_tokens": 8947,
+        "total_tokens": 4514644
+      }
+    }
+  ]
+}

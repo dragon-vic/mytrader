@@ -1,0 +1,12 @@
+{
+  "event_id": "2026-08-03-pltr",
+  "metadata": {
+    "batch_id": "2026-08-03-amc",
+    "company": "Palantir Technologies",
+    "ticker": "PLTR",
+    "scope": "core_tech_crypto",
+    "research_hints": [
+      "Evaluate PLTR's own tradable instrument first and reject it if the disclosure-to-price causal case is weak."
+    ]
+  }
+}

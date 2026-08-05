@@ -1,0 +1,25 @@
+{
+  "output_path": "/home/ubuntu/pycharm_nt/strategies/agent_trading/events/2026-08-03-srad/context/analysis_input/.decision.output.json",
+  "status": "completed",
+  "started_at": "2026-08-03T15:45:55.921278+00:00",
+  "finished_at": "2026-08-03T15:46:09.124774+00:00",
+  "elapsed_seconds": 13.203,
+  "thread_ids": [
+    "019fc84d-9e71-79e1-ad04-ad722dfb17d8"
+  ],
+  "turns": [
+    {
+      "input_tokens": 28244,
+      "cached_input_tokens": 13056,
+      "output_tokens": 296,
+      "reasoning_output_tokens": 105
+    }
+  ],
+  "usage": {
+    "input_tokens": 28244,
+    "cached_input_tokens": 13056,
+    "output_tokens": 296,
+    "reasoning_output_tokens": 105,
+    "total_tokens": 28540
+  }
+}

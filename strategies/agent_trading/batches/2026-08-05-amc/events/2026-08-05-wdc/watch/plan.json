@@ -1,0 +1,32 @@
+{
+  "event_id": "2026-08-05-wdc",
+  "start_at": "2026-08-05T20:00:00+00:00",
+  "end_at": "2026-08-05T22:00:00+00:00",
+  "sec": {
+    "cik": "0000106040",
+    "forms": [
+      "8-K",
+      "10-Q",
+      "10-K"
+    ]
+  },
+  "news_release": {
+    "sources": [
+      {
+        "url": "https://investor.wdc.com/rss/news-releases.xml",
+        "format": "feed",
+        "title_phrases": [
+          "wd reports fiscal fourth quarter 2026 financial results"
+        ],
+        "exclude_phrases": [
+          "to announce"
+        ],
+        "content_terms": [
+          "western digital",
+          "revenue"
+        ],
+        "user_agent": "curl/8.5.0"
+      }
+    ]
+  }
+}

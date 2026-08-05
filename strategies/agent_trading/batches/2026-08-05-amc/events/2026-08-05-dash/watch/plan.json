@@ -1,0 +1,33 @@
+{
+  "event_id": "2026-08-05-dash",
+  "start_at": "2026-08-05T20:00:00+00:00",
+  "end_at": "2026-08-05T22:00:00+00:00",
+  "sec": {
+    "cik": "0001792789",
+    "forms": [
+      "8-K",
+      "10-Q",
+      "10-K"
+    ]
+  },
+  "news_release": {
+    "sources": [
+      {
+        "url": "https://ir.doordash.com/rss/PressRelease.aspx",
+        "format": "feed",
+        "title_phrases": [
+          "doordash releases second quarter 2026 financial results",
+          "doordash announces second quarter 2026 results",
+          "doordash reports second quarter 2026 results"
+        ],
+        "exclude_phrases": [
+          "to announce"
+        ],
+        "content_terms": [
+          "doordash",
+          "revenue"
+        ]
+      }
+    ]
+  }
+}

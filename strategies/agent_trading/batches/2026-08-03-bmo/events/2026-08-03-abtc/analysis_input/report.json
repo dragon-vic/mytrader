@@ -1,0 +1,39 @@
+{
+  "event_id": "2026-08-03-abtc",
+  "source": "sec",
+  "form": "8-K",
+  "accession": "0001193125-26-329509",
+  "items": [
+    "2.02",
+    "9.01"
+  ],
+  "origin_url": "https://www.sec.gov/Archives/edgar/data/1755953/000119312526329509/0001193125-26-329509-index.htm",
+  "published_at": "2026-08-03T06:35:14-04:00",
+  "detected_ns": 1785771879386603233,
+  "files": [
+    {
+      "document_type": "8-K",
+      "description": "8-K",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/1755953/000119312526329509/abtc-20260803.htm",
+      "content_type": "text/html",
+      "content_format": "html",
+      "size_bytes": 47914,
+      "sha256": "4130db541a0d707c8e10b89524379b403406ee39ee9e7d4dab81edbd52d9eb7b",
+      "analysis_path": "disclosure/sec/processed/abtc-20260803.htm.md",
+      "processing_status": "processed",
+      "processing_error": null
+    },
+    {
+      "document_type": "EX-99.1",
+      "description": "EX-99.1",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/1755953/000119312526329509/abtc-ex99_1.htm",
+      "content_type": "text/html",
+      "content_format": "html",
+      "size_bytes": 135829,
+      "sha256": "facb256e36f374789931325161ce95f73edd1d003e722b53b45dfb1cb11a564e",
+      "analysis_path": "disclosure/sec/processed/abtc-ex99_1.htm.md",
+      "processing_status": "processed",
+      "processing_error": null
+    }
+  ]
+}

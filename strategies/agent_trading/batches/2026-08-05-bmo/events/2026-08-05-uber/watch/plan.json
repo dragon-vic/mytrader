@@ -1,0 +1,30 @@
+{
+  "event_id": "2026-08-05-uber",
+  "start_at": "2026-08-05T05:00:00+00:00",
+  "end_at": "2026-08-05T13:30:00+00:00",
+  "sec": {
+    "cik": "0001543151",
+    "forms": [
+      "8-K",
+      "10-Q",
+      "10-K"
+    ]
+  },
+  "news_release": {
+    "sources": [
+      {
+        "url": "https://investor.uber.com/rss/PressRelease.aspx",
+        "format": "feed",
+        "title_phrases": [
+          "uber announces results for second quarter 2026",
+          "uber reports second quarter 2026 results"
+        ],
+        "exclude_phrases": [],
+        "content_terms": [
+          "uber",
+          "revenue"
+        ]
+      }
+    ]
+  }
+}

@@ -21,6 +21,8 @@ from strategies.agent_trading.watch.watch_data_models import DisclosureFile
 from strategies.agent_trading.watch.watch_data_models import DisclosurePackage
 from strategies.agent_trading.watch.watch_data_models import WatchPlan
 from strategies.agent_trading.watch.watch_data_models import WatchTarget
+from strategies.agent_trading.watch.watch_trace import cache_metadata
+from strategies.agent_trading.watch.watch_trace import fresh_url
 from strategies.agent_trading.watch.disclosure_preprocessor import DisclosureProcessor
 
 
@@ -48,6 +50,7 @@ class _HttpBody:
     data: bytes
     content_type: str
     url: str
+    cache: dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -131,11 +134,27 @@ class SecWatcher:
                 self.changed.clear()
                 continue
             try:
-                body = await self._get(self.feed_url)
+                started = time.perf_counter()
+                body = await self._get(fresh_url(self.feed_url))
+                for target in tuple(self.targets.values()):
+                    target.trace.record(
+                        "sec",
+                        "poll_response",
+                        duration_ms=round((time.perf_counter() - started) * 1000, 3),
+                        url=body.url,
+                        size_bytes=len(body.data),
+                        cache=body.cache,
+                    )
                 await self._process(_parse_sec_feed(body.data))
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
+                for target in tuple(self.targets.values()):
+                    target.trace.record(
+                        "sec",
+                        "poll_failed",
+                        error=f"{type(exc).__name__}: {exc}",
+                    )
                 self._health(exc)
                 limited = isinstance(exc, aiohttp.ClientResponseError) and exc.status == 429
                 delay = retry_seconds if limited else self.poll_seconds
@@ -292,6 +311,7 @@ class SecWatcher:
         entry: _SecEntry,
     ) -> DisclosurePackage | None:
         detected_ns = time.time_ns()
+        target.trace.record("sec", "disclosure_detected", accession=entry.accession)
         index = await self._get(entry.index_url)
         filing = _parse_filing_index(index.data)
         if not _is_earnings_filing(entry.form, filing.items):
@@ -306,7 +326,7 @@ class SecWatcher:
         if not selected:
             raise ValueError(f"no selected SEC documents: {entry.index_url}")
 
-        folder = target.internal_dir / "disclosure" / "sec" / "raw"
+        folder = target.watch_dir / "raw" / "sec"
         folder.mkdir(parents=True, exist_ok=True)
         files: list[DisclosureFile] = []
         for row in selected:
@@ -316,8 +336,9 @@ class SecWatcher:
             path.write_bytes(body.data)
             processed = await asyncio.to_thread(
                 self.processor.process,
-                target.context_dir,
+                target.analysis_input_dir,
                 path,
+                "sec",
                 row.document_type,
                 row.description,
                 body.url,
@@ -328,6 +349,12 @@ class SecWatcher:
                     f"SEC document preprocessing failed: {processed.source_url}",
                 )
             files.append(processed)
+        target.trace.record(
+            "sec",
+            "disclosure_processed",
+            accession=entry.accession,
+            file_count=len(files),
+        )
         return DisclosurePackage(
             event_id=target.plan.event_id,
             source="sec",
@@ -349,6 +376,7 @@ class SecWatcher:
                     data=await response.read(),
                     content_type=response.headers.get("Content-Type", ""),
                     url=str(response.url),
+                    cache=cache_metadata(response.headers),
                 )
         except TimeoutError:
             self.timeout_failures += 1

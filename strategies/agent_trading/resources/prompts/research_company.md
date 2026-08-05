@@ -13,7 +13,7 @@ Research one scheduled earnings event and return the schema-conforming operating
 
 ## Scope
 
-- Read only `context/batch.json` and `context/market_universe.json` on the initial run. On a continuation, also read only the prior research path appended to the task.
+- Read only `batch.json` and `market_universe.json` on the initial run. On a continuation, also read only the prior research path appended to the task.
 - Find the assigned event in the already-filtered batch. Do not discover, add, remove, or reschedule events. Treat `research_hints` as unverified leads.
 - Browse broadly, but use no information published after `as_of`. Record absolute timestamps and interpret US sessions in `America/New_York`.
 - Do not research or modify watcher configuration. Do not inspect live prices, K-lines, liquidity, or post-disclosure movement. Do not size or place trades.
@@ -41,7 +41,20 @@ Design conditions as a clear decision ladder:
 
 Every condition must be executable from the first complete official package. Lock metric definitions, periods, units, baselines, formulas, interactions, missing-field behavior, and falsifiers now. Do not predict reported values or assign outcome probabilities.
 
-Select at most three non-index instruments from `context/market_universe.json`. Use only candidates with a defensible causal path from the disclosure. For the same symbol choose Binance when available, otherwise Hyperliquid, and copy the exact `instrument_id`. Do not provide fallbacks or generic sector/index trades.
+Select at most three non-index instruments from `market_universe.json`. Use only candidates with a defensible causal path from the disclosure. For the same symbol choose Binance when available, otherwise Hyperliquid, and copy the exact `instrument_id`. Do not provide fallbacks or generic sector/index trades.
+
+## Event-driven focus for the analysis agent
+
+Do not label information as simply "core" or "non-core". In addition to the locked quantitative fields, identify a short, event-specific list of facts that could change the near-term relative repricing of the issuer or a retained candidate. Consider only categories that can plausibly matter for this event, such as policy or regulation, contracts/orders/customers, pricing or competition, product launch/adoption, supply chain or key partners, M&A/capital allocation, financing or litigation, and other clearly material corporate facts.
+
+For each focus item, state in `analysis_brief`:
+
+- exactly what to look for in the first complete package (a number, sentence, table, section, or disclosed change);
+- why it could change the short-horizon direction or strength, including the sign only when it is genuinely clear;
+- what evidence would confirm, weaken, or falsify the thesis;
+- whether it is a confirmation, a possible override, or a reason to keep the quantitative result at `HOLD`.
+
+Keep this list short and specific. Do not turn generic company background, a later call, or an unquantified theme into a trading rule. The list is an observation and prioritization guide for the analysis agent; it does not add candidates, percentages, or a second outcome table. A qualitative fact may revise the base outcome only when its causal impact is material and directionally clear from the first complete package.
 
 ## Price-impact calibration
 
@@ -71,7 +84,7 @@ Prefer primary and close-to-primary sources. Resolve metric conflicts by timesta
 ## Output fields
 
 - `research_report`: concise auditable record of decisive baselines, causal model, historical reaction calibration, contrary evidence, and debate adjudication. Cite source ids. Do not repeat the final outcome table verbatim.
-- `analysis_brief`: first-minute Markdown containing only the exact fields to extract, locked baselines/definitions, calculations, comparison order, and which missing facts make classification impossible. Do not repeat candidates, percentages, or the seven outcome conditions.
+- `analysis_brief`: first-minute Markdown containing the exact fields to extract, locked baselines/definitions, calculations, comparison order, missing facts that make classification impossible, and a short `Event-driven focus` section using the instructions above. Do not repeat candidates, percentages, or the seven outcome conditions.
 - `trade_candidates`: only the market identifiers and their single authoritative `outcomes` tables. Put the causal thesis in `research_report`.
 - `sources`: only `id`, `title`, `url`, and `published_at`. Put facts and inferences in `research_report`, not duplicate arrays here. Omit unused sources.
 

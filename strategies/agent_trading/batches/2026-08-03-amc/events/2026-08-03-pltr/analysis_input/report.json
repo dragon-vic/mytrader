@@ -1,0 +1,24 @@
+{
+  "event_id": "2026-08-03-pltr",
+  "source": "news_release",
+  "form": null,
+  "accession": null,
+  "items": [],
+  "origin_url": "https://investors.palantir.com/news-details/2026/Palantir-Reports-Q2-2026-U-S--Comm-Revenue-Growth-of-149-YY-and-Revenue-Growth-of-93-YY-Raises-FY-2026-Revenue-Guidance-to-82-YY-Growth-and-U-S--Comm-Revenue-Guidance-to-134-YY-Crushing-Consensus-Expectations/default.aspx",
+  "published_at": null,
+  "detected_ns": 1785787603984821103,
+  "files": [
+    {
+      "document_type": "NEWS_RELEASE",
+      "description": "Palantir Reports Q2 2026 U.S. Comm Revenue Growth of 149% Y/Y and Revenue Growth of 93% Y/Y; Raises FY 2026 Revenue Guidance to 82% Y/Y Growth and U.S. Comm Revenue Guidance to 134% Y/Y, Crushing Consensus Expectations",
+      "source_url": "https://investors.palantir.com/news-details/2026/Palantir-Reports-Q2-2026-U-S--Comm-Revenue-Growth-of-149-YY-and-Revenue-Growth-of-93-YY-Raises-FY-2026-Revenue-Guidance-to-82-YY-Growth-and-U-S--Comm-Revenue-Guidance-to-134-YY-Crushing-Consensus-Expectations/default.aspx",
+      "content_type": "text/html; charset=utf-8",
+      "content_format": "html",
+      "size_bytes": 187229,
+      "sha256": "c4ea2fa240669c9e381a6e4da849e85e29912a643711ae6e99689215cb8f0903",
+      "analysis_path": "disclosure/news_release/processed/default.aspx.md",
+      "processing_status": "processed",
+      "processing_error": null
+    }
+  ]
+}

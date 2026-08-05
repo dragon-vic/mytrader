@@ -1,0 +1,25 @@
+{
+  "output_path": "/home/ubuntu/pycharm_nt/strategies/agent_trading/events/2026-08-05-uber/context/.decision.output.json",
+  "status": "completed",
+  "started_at": "2026-08-05T10:56:10.334817+00:00",
+  "finished_at": "2026-08-05T10:56:51.195125+00:00",
+  "elapsed_seconds": 40.86,
+  "thread_ids": [
+    "019fd191-0df3-7f53-b20f-7e75e82c81b0"
+  ],
+  "turns": [
+    {
+      "input_tokens": 192999,
+      "cached_input_tokens": 156928,
+      "output_tokens": 1731,
+      "reasoning_output_tokens": 721
+    }
+  ],
+  "usage": {
+    "input_tokens": 192999,
+    "cached_input_tokens": 156928,
+    "output_tokens": 1731,
+    "reasoning_output_tokens": 721,
+    "total_tokens": 194730
+  }
+}

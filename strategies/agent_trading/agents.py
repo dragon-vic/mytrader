@@ -253,7 +253,7 @@ class ResearchAgent:
         as_of: datetime,
         deadline: datetime,
     ) -> ResearchOutcome:
-        work = batch_dir / "work" / event_id
+        work = batch_dir / "events" / event_id / "research_output"
         work.mkdir(parents=True, exist_ok=True)
         started_at = datetime.now(UTC)
         started = time.perf_counter()
@@ -271,7 +271,7 @@ class ResearchAgent:
             attempt = 0
             while True:
                 prompt = base_prompt
-                if attempt:
+                if attempt or research_path.exists():
                     prompt += (
                         "\n\nThis is a continuation of unfinished pre-research, not a new task."
                         f"\nRead the latest research at `{research_path.relative_to(batch_dir).as_posix()}`."
@@ -340,7 +340,7 @@ class AnalysisAgent:
             service_tier="fast",
         )
 
-    # 分析只读取打包后的输入目录，完成后将结果移到事件 result 目录。
+    # 分析只读取打包后的输入目录，完成后将结果移到analysis_output。
     async def run(
         self,
         prompt: str,
@@ -391,14 +391,14 @@ class ResearchDigestAgent:
         event_ids: tuple[str, ...],
     ) -> None:
         files = [
-            "context/batch.json",
-            "context/market_universe.json",
+            "batch.json",
+            "market_universe.json",
             *[
                 relative
                 for event_id in event_ids
                 for relative in (
-                    f"work/{event_id}/research.json",
-                    f"work/{event_id}/research.metrics.json",
+                    f"events/{event_id}/research_output/research.json",
+                    f"events/{event_id}/research_output/research.metrics.json",
                 )
             ],
         ]

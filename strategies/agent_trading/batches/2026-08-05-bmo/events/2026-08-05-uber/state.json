@@ -1,0 +1,13 @@
+{
+  "event_id": "2026-08-05-uber",
+  "state": "decision_sent",
+  "updated_ns": 1785927411197519914,
+  "research_complete": true,
+  "research_error": null,
+  "research_path": "research_output/research.json",
+  "analysis_brief_path": "analysis_input/analysis_brief.md",
+  "report_path": "analysis_input/report.json",
+  "report_source": "news_release",
+  "report_detected_ns": 1785927369611592285,
+  "decision_path": "analysis_output/decision.json"
+}

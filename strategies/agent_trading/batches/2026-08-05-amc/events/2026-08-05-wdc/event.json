@@ -1,0 +1,12 @@
+{
+  "event_id": "2026-08-05-wdc",
+  "metadata": {
+    "batch_id": "2026-08-05-amc",
+    "company": "Western Digital",
+    "ticker": "WDC",
+    "scope": "core_tech_crypto",
+    "research_hints": [
+      "Evaluate WDC directly and test storage-demand read-throughs to SNDK and MU."
+    ]
+  }
+}

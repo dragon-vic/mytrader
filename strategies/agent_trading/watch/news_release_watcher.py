@@ -27,6 +27,8 @@ from strategies.agent_trading.watch.watch_data_models import NewsSource
 from strategies.agent_trading.watch.watch_data_models import WatchPlan
 from strategies.agent_trading.watch.watch_data_models import WatchTarget
 from strategies.agent_trading.watch.disclosure_preprocessor import DisclosureProcessor
+from strategies.agent_trading.watch.watch_trace import cache_metadata
+from strategies.agent_trading.watch.watch_trace import fresh_url
 
 
 LOG = logging.getLogger(__name__)
@@ -46,6 +48,7 @@ class _HttpBody:
     data: bytes
     content_type: str
     url: str
+    cache: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -107,7 +110,7 @@ class NewsReleaseWatcher:
 
     # 每个新闻源独立维护已见条目，重启后继续去重。
     async def _run(self, target: WatchTarget, source: NewsSource) -> None:
-        state_path = _seen_path(target.internal_dir, source)
+        state_path = _seen_path(target.watch_dir, source)
         source_key = f"news_release:{source.url}"
         seen: set[str] | None = None
         loaded = False
@@ -117,7 +120,17 @@ class NewsReleaseWatcher:
                 if not loaded:
                     seen = _load_seen(state_path, source)
                     loaded = True
-                listing = await self._get(source.url, source.user_agent)
+                started = time.perf_counter()
+                listing = await self._get(fresh_url(source.url), source.user_agent)
+                target.trace.record(
+                    "news_release",
+                    "poll_response",
+                    duration_ms=round((time.perf_counter() - started) * 1000, 3),
+                    configured_url=source.url,
+                    url=listing.url,
+                    size_bytes=len(listing.data),
+                    cache=listing.cache or {},
+                )
                 entries = _parse_news(source, listing.data)
                 if not entries:
                     raise ValueError(f"news listing has no entries: {source.url}")
@@ -137,7 +150,7 @@ class NewsReleaseWatcher:
                         package = await self._download(target, source, entry)
                         seen.add(entry_id)
                         changed = True
-                        if not _matches_content(source, target.context_dir, package):
+                        if not _matches_content(source, target.analysis_input_dir, package):
                             continue
                         _save_seen(state_path, source, seen)
                         self._health(target, source_key, None)
@@ -148,6 +161,12 @@ class NewsReleaseWatcher:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
+                target.trace.record(
+                    "news_release",
+                    "poll_failed",
+                    configured_url=source.url,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
                 self._health(target, source_key, exc)
                 limited = isinstance(exc, aiohttp.ClientResponseError) and exc.status == 429
                 delay = retry_seconds if limited else self.poll_seconds
@@ -199,6 +218,12 @@ class NewsReleaseWatcher:
         entry: _FeedEntry,
     ) -> DisclosurePackage:
         detected_ns = time.time_ns()
+        target.trace.record(
+            "news_release",
+            "disclosure_detected",
+            configured_url=source.url,
+            article_url=entry.url,
+        )
         if entry.inline_body is not None:
             body = _HttpBody(entry.inline_body, "text/html; charset=utf-8", entry.url)
         elif entry.body_lookup_url is not None:
@@ -220,14 +245,15 @@ class NewsReleaseWatcher:
             )
         else:
             body = await self._get(entry.url, source.user_agent)
-        folder = target.internal_dir / "disclosure" / "news_release" / "raw"
+        folder = target.watch_dir / "raw" / "news_release"
         folder.mkdir(parents=True, exist_ok=True)
         path = folder / _file_name(body.url, "release.html")
         path.write_bytes(body.data)
         processed = await asyncio.to_thread(
             self.processor.process,
-            target.context_dir,
+            target.analysis_input_dir,
             path,
+            "news_release",
             "NEWS_RELEASE",
             entry.title,
             body.url,
@@ -237,6 +263,12 @@ class NewsReleaseWatcher:
             raise ValueError(
                 f"news release preprocessing failed: {processed.source_url}",
             )
+        target.trace.record(
+            "news_release",
+            "disclosure_processed",
+            article_url=body.url,
+            size_bytes=len(body.data),
+        )
         return DisclosurePackage(
             event_id=target.plan.event_id,
             source="news_release",
@@ -260,6 +292,7 @@ class NewsReleaseWatcher:
                 data=await response.read(),
                 content_type=response.headers.get("Content-Type", ""),
                 url=str(response.url),
+                cache=cache_metadata(response.headers),
             )
 
 
@@ -362,9 +395,9 @@ def _entry_id(entry: _FeedEntry) -> str:
 
 
 # 每个事件、每个新闻源单独保存 seen_ids，避免并发写同一文件。
-def _seen_path(internal_dir: Path, source: NewsSource) -> Path:
+def _seen_path(watch_dir: Path, source: NewsSource) -> Path:
     source_id = hashlib.sha256(source.url.encode("utf-8")).hexdigest()[:16]
-    return internal_dir / "watch" / "news_seen" / f"{source_id}.json"
+    return watch_dir / "seen" / f"{source_id}.json"
 
 
 def _load_seen(path: Path, source: NewsSource) -> set[str] | None:

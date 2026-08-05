@@ -14,6 +14,7 @@ from strategies.agent_trading.watch.watch_data_models import WatchPlan
 
 SESSIONS = {"BMO", "AMC"}
 VENUES = {"BINANCE", "HYPERLIQUID"}
+RESEARCH_MINUTES_PER_EVENT = 40
 TRADE_SIGNALS = {
     "STRONG_BUY",
     "MEDIUM_BUY",
@@ -43,8 +44,12 @@ class BatchPlan:
     events: tuple[EventSpec, ...]
 
     @property
+    def research_duration(self) -> timedelta:
+        return timedelta(minutes=RESEARCH_MINUTES_PER_EVENT * len(self.events))
+
+    @property
     def research_start_at(self) -> datetime:
-        return self.watch_start_at - timedelta(hours=4)
+        return self.watch_start_at - self.research_duration
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> BatchPlan:

@@ -6,7 +6,7 @@ Make one fast decision from the completed official disclosure package. Apply the
 
 ## Inputs
 
-Your working directory is this event's `context` directory. Read only:
+Your working directory is this event's `analysis_input` directory. Read only:
 
 - `event.json`: event identity
 - `analysis_brief.md`: fields to extract and locked calculations
@@ -18,9 +18,9 @@ Resolve all paths relative to the working directory. Read only disclosure files 
 
 ## Decision procedure
 
-1. Use `analysis_brief.md` to extract only the required fields and perform its locked calculations. Do not summarize the disclosure or analyze optional facts unless the brief requires them.
+1. Use `analysis_brief.md` to extract the required fields and perform its locked calculations. If it contains an `Event-driven focus` section, inspect those items first in the processed disclosure and record only facts that are actually present. Do not summarize the disclosure or analyze unrelated optional facts.
 2. For each candidate, apply its single `research.json.trade_candidates[].outcomes` table exactly to produce the base outcome. Evaluate matching directional conditions from strong to medium to weak. Use the predefined `HOLD` condition when no directional outcome applies.
-3. Check for a clearly material disclosed fact that the brief and outcome table did not anticipate. Do not automatically choose `HOLD`. If its causal impact is clear, use it to revise the base direction or strength, including reversing direction when warranted. Map the revised view to one existing directional outcome. Use `HOLD` only when the material fact makes direction genuinely indeterminate, and explain any revision briefly in `summary`.
+3. Check the `Event-driven focus` items and any other clearly material fact that the brief and outcome table did not anticipate. Do not automatically choose `HOLD`. If the fact has a material, evidence-backed causal impact and a clear direction, use it to revise the base direction or strength, including reversing direction when warranted. Map the revised view to one existing directional outcome. If the fact is qualitative but its sign or magnitude is unclear, treat it as mixed evidence and use `HOLD` only when the overall direction is genuinely indeterminate. Explain any revision briefly in `summary`.
 4. Select at most one final outcome per candidate. Omit candidates classified as `HOLD` from `trades`. A realistic modest result that meets a weak condition is a trade; do not choose `HOLD` merely because medium or strong failed.
 5. Copy the final outcome key unchanged into `signal` and its `expected_move_pct` unchanged into the trade. Never invent, estimate, interpolate, round, or adjust the percentage for price movement already observed.
 6. Set `confidence` directly from the completeness, definition match, and clarity of any material-fact revision. Do not separately research or calibrate it. It does not change signal strength or percentage.

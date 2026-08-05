@@ -1,0 +1,32 @@
+{
+  "event_id": "2026-08-04-anet",
+  "start_at": "2026-08-04T20:00:00+00:00",
+  "end_at": "2026-08-04T22:00:00+00:00",
+  "sec": {
+    "cik": "0001596532",
+    "forms": [
+      "8-K",
+      "10-Q",
+      "10-K"
+    ]
+  },
+  "news_release": {
+    "sources": [
+      {
+        "url": "https://www.arista.com/en/company/news/press-release",
+        "format": "html",
+        "title_phrases": [
+          "arista networks, inc. reports second quarter 2026 financial results",
+          "arista networks reports second quarter 2026 financial results"
+        ],
+        "exclude_phrases": [
+          "to announce"
+        ],
+        "content_terms": [
+          "arista networks",
+          "revenue"
+        ]
+      }
+    ]
+  }
+}

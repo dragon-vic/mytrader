@@ -1,0 +1,32 @@
+{
+  "event_id": "2026-08-06-mara",
+  "start_at": "2026-08-06T20:00:00+00:00",
+  "end_at": "2026-08-06T22:00:00+00:00",
+  "sec": {
+    "cik": "0001507605",
+    "forms": [
+      "8-K",
+      "10-Q",
+      "10-K"
+    ]
+  },
+  "news_release": {
+    "sources": [
+      {
+        "url": "https://ir.mara.com/news-events/press-releases",
+        "format": "html",
+        "title_phrases": [
+          "mara announces second quarter 2026 results",
+          "mara reports second quarter 2026 results"
+        ],
+        "exclude_phrases": [
+          "schedules"
+        ],
+        "content_terms": [
+          "mara",
+          "second quarter 2026"
+        ]
+      }
+    ]
+  }
+}

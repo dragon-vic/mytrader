@@ -46,6 +46,7 @@ RESEARCH_SCHEMA = SCHEMAS_DIR / "research.json"
 DECISION_SCHEMA = SCHEMAS_DIR / "decision.json"
 DIGEST_PROMPT = PROMPTS_DIR / "research_digest.md"
 LOG = logging.getLogger(__name__)
+FINISHED_EVENT_STATES = {"decision_ready", "decision_sent"}
 
 
 # 外部 Agent 和 NT 共用的 JSON Schema 校验器集中在 controller，避免重复定义。
@@ -98,19 +99,21 @@ class AgentController:
         if delay > 0:
             await asyncio.sleep(delay)
 
-    # 预设 watcher 计划先落盘；批次研究在监听前四小时独立启动。
+    # batch真正启动时才创建目录；已有event配置保持不变，只补新增event。
     async def prepare_batch(
         self,
         batch: BatchPlan,
         market_universe: MarketUniverse,
-    ) -> dict[str, WatchPlan]:
-        self.event_store.create_batch(
+    ) -> tuple[BatchPlan, dict[str, WatchPlan]]:
+        stored_batch = self.event_store.create_batch(
             batch.batch_id,
             batch.to_dict(),
             market_universe.to_dict(),
         )
+        batch = BatchPlan.from_dict(stored_batch)
         for event in batch.events:
-            self.event_store.create(
+            self.event_store.create_event(
+                batch.batch_id,
                 event.event_id,
                 {
                     "batch_id": batch.batch_id,
@@ -119,15 +122,8 @@ class AgentController:
                     "scope": event.scope,
                     "research_hints": list(event.research_hints),
                 },
+                event.watch_plan.to_dict(),
             )
-            self.event_store.save_plan(event.event_id, event.watch_plan.to_dict())
-        self.event_store.update_batch(
-            batch.batch_id,
-            "waiting_for_research",
-            research_start_at=batch.research_start_at.isoformat(),
-        )
-        await self.wait_until(batch.research_start_at)
-
         reused: set[str] = set()
         for event in batch.events:
             if self._reuse_batch_research(
@@ -153,25 +149,24 @@ class AgentController:
             )
 
         plans: dict[str, WatchPlan] = {}
-        statuses: dict[str, str] = {}
         for event in batch.events:
             ready = event.event_id in reused
             if not ready:
                 ready = self._save_research_outcome(
+                    batch.batch_id,
                     event.event_id,
                     outcomes[event.event_id],
                     market_universe,
                 )
-            if ready:
+            state = self.event_store.load(batch.batch_id, event.event_id)
+            if ready and state["state"] not in FINISHED_EVENT_STATES:
                 plans[event.event_id] = event.watch_plan
-            state = self.event_store.load(event.event_id)
-            statuses[event.event_id] = str(state["state"])
         self.event_store.update_batch(
             batch.batch_id,
             "research_finished",
-            companies=statuses,
+            ready_events=sorted(plans),
         )
-        return plans
+        return batch, plans
 
     # 到达预研启动点后复核 batch 产物，并整理到分析事件目录。
     def _reuse_batch_research(
@@ -180,25 +175,22 @@ class AgentController:
         event_id: str,
         market_universe: MarketUniverse,
     ) -> bool:
-        batch_state = self.event_store.load_batch(batch_id)
-        companies = batch_state.get("companies", {})
-        if not isinstance(companies, dict):
-            raise TypeError(f"batch companies must be a JSON object: {batch_id}")
-        if companies.get(event_id) != "research_ready":
+        paths = self.event_store.event_paths(batch_id, event_id)
+        if not paths.research.exists():
             return False
-        research_path = (
-            self.event_store.batch_paths(batch_id).work
-            / event_id
-            / "research.json"
-        )
-        research = self._load_object(research_path, "batch research")
+        research = self._load_object(paths.research, "event research")
+        if research.get("research_complete") is not True:
+            return False
+        state = self.event_store.load(batch_id, event_id)
         return self._save_research_outcome(
+            batch_id,
             event_id,
             ResearchOutcome(event_id=event_id, research=research, error=None),
             market_universe,
+            preserve_state=state.get("research_complete") is True,
         )
 
-    # 静态计划中的批次各自等待 T-4h，互不因其他批次失败而取消。
+    # 静态计划中的批次按财报数量动态等待，互不因其他批次失败而取消。
     async def run_schedule(
         self,
         batches: tuple[BatchPlan, ...],
@@ -223,12 +215,15 @@ class AgentController:
 
     def _save_research_outcome(
         self,
+        batch_id: str,
         event_id: str,
         outcome: ResearchOutcome,
         market_universe: MarketUniverse,
+        preserve_state: bool = False,
     ) -> bool:
         if not outcome.ready:
             self.event_store.update(
+                batch_id,
                 event_id,
                 "research_incomplete",
                 research_complete=False,
@@ -249,6 +244,7 @@ class AgentController:
             error = None
         if error is not None:
             self.event_store.update(
+                batch_id,
                 event_id,
                 "research_incomplete",
                 research_complete=False,
@@ -256,23 +252,28 @@ class AgentController:
             )
             return False
 
-        # 分析只接收执行所需的候选表，完整报告留在 batch work 目录审计。
-        self.event_store.save_brief(event_id, full["analysis_brief"])
-        self.event_store.save_research(
+        # 完整预研留在event中审计，分析目录只接收执行所需材料。
+        paths = self.event_store.save_analysis_input(
+            batch_id,
             event_id,
             {
                 "event_id": event_id,
                 "trade_candidates": full["trade_candidates"],
             },
+            full["analysis_brief"],
         )
-        self.event_store.update(
-            event_id,
-            "research_ready",
-            research_complete=True,
-            research_error=None,
-            research_path=str(self.event_store.paths(event_id).research),
-            analysis_brief_path=str(self.event_store.paths(event_id).analysis_brief),
-        )
+        if not preserve_state:
+            self.event_store.update(
+                batch_id,
+                event_id,
+                "research_ready",
+                research_complete=True,
+                research_error=None,
+                research_path=paths.research.relative_to(paths.root).as_posix(),
+                analysis_brief_path=(
+                    paths.analysis_brief.relative_to(paths.root).as_posix()
+                ),
+            )
         return True
 
     # 所有公司的监听并发运行；一家公司完成或失败不会停止其余目标。
@@ -282,7 +283,8 @@ class AgentController:
         market_universe: MarketUniverse,
     ) -> None:
         try:
-            plans = await self.prepare_batch(batch, market_universe)
+            await self.wait_until(batch.research_start_at)
+            batch, plans = await self.prepare_batch(batch, market_universe)
             digest_task = None
             # 只有整批公司的预研都 ready 才发汇总邮件，避免把半成品误当成完整结论。
             if (
@@ -296,7 +298,7 @@ class AgentController:
                 )
             tasks = [
                 asyncio.create_task(
-                    self.run_event(event_id),
+                    self.run_event(batch.batch_id, event_id),
                     name=f"agent-trading-event-{event_id}",
                 )
                 for event_id in plans
@@ -335,13 +337,14 @@ class AgentController:
 
     async def run_event(
         self,
+        batch_id: str,
         event_id: str,
     ) -> None:
         try:
-            await self.wait_report(event_id)
-            decision = await self.run_analysis(event_id)
+            await self.wait_report(batch_id, event_id)
+            decision = await self.run_analysis(batch_id, event_id)
             await self.send(decision)
-            self.event_store.update(event_id, "decision_sent")
+            self.event_store.update(batch_id, event_id, "decision_sent")
         except Exception as exc:
             LOG.exception(
                 "agent trading event failed event_id=%s error_type=%s error=%r",
@@ -353,6 +356,7 @@ class AgentController:
             if isinstance(exc, DisclosureTimeoutError):
                 details["source_status"] = exc.source_status
             self.event_store.update(
+                batch_id,
                 event_id,
                 "failed",
                 error=f"{type(exc).__name__}: {exc}",
@@ -360,45 +364,53 @@ class AgentController:
             )
             raise
 
-    async def wait_report(self, event_id: str) -> DisclosurePackage:
-        paths = self.event_store.paths(event_id)
-        plan = WatchPlan.from_dict(self.event_store.load_plan(event_id))
+    async def wait_report(
+        self,
+        batch_id: str,
+        event_id: str,
+    ) -> DisclosurePackage:
+        paths = self.event_store.event_paths(batch_id, event_id)
+        plan = WatchPlan.from_dict(
+            self._load_object(paths.watch_plan, "watch plan"),
+        )
         if plan.event_id != event_id:
             raise ValueError(
                 f"stored watch plan event_id mismatch: {plan.event_id} != {event_id}",
             )
-        self.event_store.update(event_id, "watching_disclosure")
+        self.event_store.update(batch_id, event_id, "watching_disclosure")
         package = await self.disclosure_watcher.watch(
             plan,
-            paths.context,
-            paths.internal,
+            paths.analysis_input,
+            paths.watch,
         )
         self.event_store.update(
+            batch_id,
             event_id,
             "report_ready",
-            report_path=str(paths.report),
+            report_path=paths.report.relative_to(paths.root).as_posix(),
             report_source=package.source,
             report_detected_ns=package.detected_ns,
         )
         return package
 
-    async def run_analysis(self, event_id: str) -> dict[str, Any]:
-        paths = self.event_store.paths(event_id)
-        self.event_store.update(event_id, "analyzing")
+    async def run_analysis(self, batch_id: str, event_id: str) -> dict[str, Any]:
+        paths = self.event_store.event_paths(batch_id, event_id)
+        self.event_store.update(batch_id, event_id, "analyzing")
         await self.analysis_agent.run(
             ANALYSIS_PROMPT.read_text(encoding="utf-8"),
-            paths.context,
+            paths.analysis_input,
             paths.decision,
             DECISION_SCHEMA,
         )
         decision = self._load_object(paths.decision, "decision")
         DECISION_VALIDATOR.validate(decision)
-        research = self._load_object(paths.research, "research")
+        research = self._load_object(paths.analysis_research, "research")
         validate_decision(event_id, decision, research)
         self.event_store.update(
+            batch_id,
             event_id,
             "decision_ready",
-            decision_path=str(paths.decision),
+            decision_path=paths.decision.relative_to(paths.root).as_posix(),
         )
         return decision
 

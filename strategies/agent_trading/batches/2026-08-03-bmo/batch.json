@@ -1,0 +1,81 @@
+{
+  "batch_id": "2026-08-03-bmo",
+  "session": "BMO",
+  "watch_start_at": "2026-08-03T10:00:00+00:00",
+  "watch_end_at": "2026-08-03T13:30:00+00:00",
+  "events": [
+    {
+      "event_id": "2026-08-03-srad",
+      "company": "Sportradar",
+      "ticker": "SRAD",
+      "scope": "core_tech_crypto",
+      "research_hints": [
+        "Test whether sports-betting data demand and customer economics can create a read-through for DKNG."
+      ],
+      "watch": {
+        "sec": {
+          "cik": "0001836470",
+          "forms": [
+            "6-K",
+            "20-F"
+          ]
+        },
+        "news_release": {
+          "sources": [
+            {
+              "url": "https://investors.sportradar.com/rss/news-releases.xml",
+              "format": "feed",
+              "title_phrases": [
+                "sportradar reports second quarter 2026 financial results"
+              ],
+              "exclude_phrases": [
+                "to release"
+              ],
+              "content_terms": [
+                "sportradar",
+                "revenue"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "event_id": "2026-08-03-abtc",
+      "company": "American Bitcoin",
+      "ticker": "ABTC",
+      "scope": "core_tech_crypto",
+      "research_hints": [
+        "Test possible Bitcoin-mining, treasury, and crypto-market read-throughs to IREN, MSTR, and COIN."
+      ],
+      "watch": {
+        "sec": {
+          "cik": "0001755953",
+          "forms": [
+            "8-K",
+            "10-Q",
+            "10-K"
+          ]
+        },
+        "news_release": {
+          "sources": [
+            {
+              "url": "https://www.abtc.com/news",
+              "format": "html",
+              "title_phrases": [
+                "american bitcoin reports second quarter 2026 results"
+              ],
+              "exclude_phrases": [
+                "schedules"
+              ],
+              "content_terms": [
+                "american bitcoin",
+                "revenue"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

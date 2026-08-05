@@ -1,0 +1,81 @@
+{
+  "batch_id": "2026-08-05-bmo",
+  "session": "BMO",
+  "watch_start_at": "2026-08-05T05:00:00+00:00",
+  "watch_end_at": "2026-08-05T13:30:00+00:00",
+  "events": [
+    {
+      "event_id": "2026-08-05-uber",
+      "company": "Uber Technologies",
+      "ticker": "UBER",
+      "scope": "core_tech_crypto",
+      "research_hints": [
+        "Evaluate UBER's own tradable instrument first and reject it if the disclosure-to-price causal case is weak."
+      ],
+      "watch": {
+        "sec": {
+          "cik": "0001543151",
+          "forms": [
+            "8-K",
+            "10-Q",
+            "10-K"
+          ]
+        },
+        "news_release": {
+          "sources": [
+            {
+              "url": "https://investor.uber.com/rss/PressRelease.aspx",
+              "format": "feed",
+              "title_phrases": [
+                "uber announces results for second quarter 2026",
+                "uber reports second quarter 2026 results"
+              ],
+              "exclude_phrases": [],
+              "content_terms": [
+                "uber",
+                "revenue"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "event_id": "2026-08-05-crcl",
+      "company": "Circle Internet Group",
+      "ticker": "CRCL",
+      "scope": "core_tech_crypto",
+      "research_hints": [
+        "Evaluate CRCL directly and test stablecoin and crypto-payments read-throughs to COIN and PYPL."
+      ],
+      "watch": {
+        "sec": {
+          "cik": "0001876042",
+          "forms": [
+            "8-K",
+            "10-Q",
+            "10-K"
+          ]
+        },
+        "news_release": {
+          "sources": [
+            {
+              "url": "https://investor.circle.com/rss/PressRelease.aspx",
+              "format": "feed",
+              "title_phrases": [
+                "circle reports second quarter 2026 financial results"
+              ],
+              "exclude_phrases": [
+                "to announce"
+              ],
+              "content_terms": [
+                "circle",
+                "revenue"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
