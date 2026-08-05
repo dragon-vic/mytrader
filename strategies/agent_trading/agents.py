@@ -218,32 +218,29 @@ class ResearchAgent:
         self.company_prompt = prompts_dir / "research_company.md"
         self.research_schema = schemas_dir / "research.json"
 
-    # 静态批次内的公司预研直接并行，彼此失败不会互相取消。
+    # 同一批次按计划顺序逐家公司预研，前一个结束后才启动下一个。
     async def run_batch(
         self,
         batch: BatchPlan,
         batch_dir: Path,
         deadline: datetime,
     ) -> dict[str, ResearchOutcome]:
-        as_of = datetime.now(UTC)
-        tasks = {
-            event.event_id: asyncio.create_task(
-                self._run_company(event.event_id, batch_dir, as_of, deadline),
-                name=f"agent-trading-research-{event.event_id}",
-            )
-            for event in batch.events
-        }
-        results = await asyncio.gather(*tasks.values(), return_exceptions=True)
         outcomes: dict[str, ResearchOutcome] = {}
-        for event_id, result in zip(tasks, results, strict=True):
-            if isinstance(result, BaseException):
-                outcomes[event_id] = ResearchOutcome(
-                    event_id=event_id,
-                    research=None,
-                    error=f"{type(result).__name__}: {result}",
+        for event in batch.events:
+            try:
+                outcome = await self._run_company(
+                    event.event_id,
+                    batch_dir,
+                    datetime.now(UTC),
+                    deadline,
                 )
-            else:
-                outcomes[event_id] = result
+            except Exception as exc:
+                outcome = ResearchOutcome(
+                    event_id=event.event_id,
+                    research=None,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+            outcomes[event.event_id] = outcome
         return outcomes
 
     async def _run_company(
