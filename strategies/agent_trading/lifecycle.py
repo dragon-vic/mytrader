@@ -45,8 +45,8 @@ class BatchPlan:
 
     @property
     def research_duration(self) -> timedelta:
-        # event 并发预研，每个 event 都有自己的完整预研窗口。
-        return timedelta(minutes=RESEARCH_MINUTES_PER_EVENT)
+        # 同一批次串行预研，每个启用的 event 预留 40 分钟。
+        return timedelta(minutes=RESEARCH_MINUTES_PER_EVENT * len(self.events))
 
     @property
     def research_start_at(self) -> datetime:
@@ -153,8 +153,11 @@ def load_schedule(path: Path) -> tuple[BatchPlan, ...]:
     return batches
 
 
-# Controller 轮询时只读取调度所需字段，坏 event 不阻塞同表其他 event。
-def load_event_schedule(path: Path) -> ScheduleSnapshot:
+# Controller 轮询时只返回已经进入生命周期的 event。
+def load_event_schedule(path: Path, now: datetime) -> ScheduleSnapshot:
+    if now.tzinfo is None:
+        raise ValueError("schedule time must include timezone")
+    now = now.astimezone(UTC)
     payload, active_scope = _schedule_payload(path)
     events: list[ScheduledEvent] = []
     errors: list[str] = []
@@ -187,9 +190,17 @@ def load_event_schedule(path: Path) -> ScheduleSnapshot:
             errors.append(f"{location}: {type(exc).__name__}: {exc}")
             continue
 
-        research_start_at = watch_start_at - timedelta(
-            minutes=RESEARCH_MINUTES_PER_EVENT,
+        active_event_count = sum(
+            1
+            for value in raw_events
+            if isinstance(value, dict) and value.get("scope") == active_scope
         )
+        research_start_at = watch_start_at - timedelta(
+            minutes=RESEARCH_MINUTES_PER_EVENT * active_event_count,
+        )
+        # 月度计划只在这里短暂读取；未来 batch 不进入 controller 的任务表。
+        if now < research_start_at or now >= watch_end_at:
+            continue
         for event_index, value in enumerate(raw_events):
             event_location = f"{location}.events[{event_index}]"
             try:
@@ -232,7 +243,8 @@ def load_event_plan(
     ]
     if len(batches) != 1:
         raise ValueError(
-            f"schedule must contain exactly one batch_id={batch_id}, got {len(batches)}",
+            "schedule must contain exactly one "
+            f"batch_id={batch_id}, got {len(batches)}",
         )
     batch_payload = batches[0]
     raw_events = _list(batch_payload.get("events"), f"batch {batch_id}.events")
@@ -243,15 +255,24 @@ def load_event_plan(
     ]
     if len(matched) != 1:
         raise ValueError(
-            f"schedule must contain exactly one event_id={event_id}, got {len(matched)}",
+            "schedule must contain exactly one "
+            f"event_id={event_id}, got {len(matched)}",
         )
-    isolated = dict(batch_payload)
-    isolated["events"] = matched
-    batch = BatchPlan.from_dict(isolated)
-    event = batch.events[0]
-    if event.scope != active_scope:
+    selected = [
+        _dict(value, "events[]")
+        for value in raw_events
+        if isinstance(value, dict) and value.get("scope") == active_scope
+    ]
+    selected_batch = dict(batch_payload)
+    selected_batch["events"] = selected
+    batch = BatchPlan.from_dict(selected_batch)
+    event = next(
+        (item for item in batch.events if item.event_id == event_id),
+        None,
+    )
+    if event is None:
         raise ValueError(
-            f"event scope is not active: {event.scope} != {active_scope}",
+            f"event scope is not active: event_id={event_id}, scope={active_scope}",
         )
     return batch, event
 
@@ -392,7 +413,8 @@ def validate_decision(
         instrument_id = trade["instrument_id"]
         if instrument_id not in candidates:
             raise ValueError(
-                f"analysis selected an instrument absent from pre-research: {instrument_id}",
+                "analysis selected an instrument absent from pre-research: "
+                f"{instrument_id}",
             )
         selected.append(instrument_id)
         signal = trade["signal"]

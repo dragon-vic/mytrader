@@ -37,7 +37,7 @@ STRATEGY_ROOT = Path(__file__).resolve().parent
 RESOURCES_DIR = STRATEGY_ROOT / "resources"
 PROMPTS_DIR = RESOURCES_DIR / "prompts"
 SCHEMAS_DIR = RESOURCES_DIR / "schemas"
-SCHEDULE_PATH = RESOURCES_DIR / "schedules" / "2026-08-03_2026-08-07.json"
+SCHEDULE_PATH = RESOURCES_DIR / "schedules" / "2026-08.json"
 MARKET_UNIVERSE_PATH = SCHEDULE_PATH.with_name(
     f"{SCHEDULE_PATH.stem}_market_universe.json",
 )
@@ -47,7 +47,8 @@ DECISION_SCHEMA = SCHEMAS_DIR / "decision.json"
 EMAIL_TOOL = STRATEGY_ROOT.parents[1] / "tools" / "send_email.py"
 LOG = logging.getLogger(__name__)
 FINISHED_EVENT_STATES = {"decision_ready", "decision_sent"}
-SCHEDULE_POLL_SECONDS = 1.0
+SCHEDULE_RELOAD_SECONDS = 60.0
+LIFECYCLE_POLL_SECONDS = 1.0
 
 # Codex 是 controller 的外部依赖，不从 NT 的 live_config.yaml 读取参数。
 RESEARCH_PROFILE = CodexProfile(
@@ -92,6 +93,7 @@ class AgentController:
         self.analysis_agent = analysis_agent
         self.disclosure_watcher = disclosure_watcher
         self.batch_locks: dict[str, asyncio.Lock] = {}
+        self.research_lock = asyncio.Lock()
 
     # 分析结束时建立一次连接，将单条交易 JSON 发送进 NT 后关闭。
     async def send(self, payload: dict[str, Any]) -> None:
@@ -108,23 +110,21 @@ class AgentController:
             writer.close()
             await writer.wait_closed()
 
-    # Event 到达生命周期节点时才刷新自己的 batch/event 运行快照。
+    # Event 到达生命周期节点时才建立运行快照；已有快照保持不变。
     async def _prepare_event(
         self,
         batch: BatchPlan,
         event: EventSpec,
         market_universe: MarketUniverse,
-        update_batch_snapshot: bool = True,
     ) -> None:
-        if update_batch_snapshot:
-            lock = self.batch_locks.setdefault(batch.batch_id, asyncio.Lock())
-            async with lock:
-                self.event_store.create_batch(
-                    batch.batch_id,
-                    batch.to_dict(),
-                    market_universe.to_dict(),
-                )
-                self.event_store.update_batch(batch.batch_id, "running")
+        lock = self.batch_locks.setdefault(batch.batch_id, asyncio.Lock())
+        async with lock:
+            self.event_store.create_batch(
+                batch.batch_id,
+                batch.to_dict(),
+                market_universe.to_dict(),
+            )
+            self.event_store.update_batch(batch.batch_id, "running")
         self.event_store.create_event(
             batch.batch_id,
             event.event_id,
@@ -171,13 +171,13 @@ class AgentController:
         schedule_error: str | None = None
         while True:
             try:
-                snapshot = load_event_schedule(schedule_path)
+                snapshot = load_event_schedule(schedule_path, datetime.now(UTC))
             except Exception as exc:
                 error = f"{type(exc).__name__}: {exc}"
                 if error != schedule_error:
                     LOG.exception("dynamic schedule reload failed error=%s", error)
                     schedule_error = error
-                await asyncio.sleep(SCHEDULE_POLL_SECONDS)
+                await asyncio.sleep(SCHEDULE_RELOAD_SECONDS)
                 continue
             schedule_error = None
             current_errors = set(snapshot.errors)
@@ -185,13 +185,8 @@ class AgentController:
                 LOG.error("dynamic schedule entry rejected error=%s", error)
             schedule_errors = current_errors
 
-            now = datetime.now(UTC)
             for scheduled in snapshot.events:
                 if scheduled.event_id in tasks:
-                    continue
-                if now < scheduled.research_start_at:
-                    continue
-                if now >= scheduled.watch_end_at:
                     continue
                 try:
                     batch, event = load_event_plan(
@@ -216,8 +211,6 @@ class AgentController:
                         batch,
                         event,
                         market_universe,
-                        schedule_path,
-                        market_universe_path,
                     ),
                     name=f"agent-trading-event-{scheduled.event_id}",
                 )
@@ -238,7 +231,7 @@ class AgentController:
                         type(error).__name__,
                         error,
                     )
-            await asyncio.sleep(SCHEDULE_POLL_SECONDS)
+            await asyncio.sleep(SCHEDULE_RELOAD_SECONDS)
 
     def _save_research_outcome(
         self,
@@ -342,43 +335,26 @@ class AgentController:
             return f"{type(exc).__name__}: {exc}"
         return None
 
-    async def _wait_for_watch_plan(
+    async def _wait_for_watch_start(
         self,
-        schedule_path: Path,
         batch_id: str,
         event_id: str,
-        initial_watch_end_at: datetime,
-    ) -> tuple[BatchPlan, EventSpec]:
-        watch_end_at = initial_watch_end_at
-        last_error: str | None = None
-        while datetime.now(UTC) < watch_end_at:
-            try:
-                batch, event = load_event_plan(schedule_path, batch_id, event_id)
-            except Exception as exc:
-                error = f"{type(exc).__name__}: {exc}"
-                if error != last_error:
-                    LOG.error(
-                        "event watch plan rejected event_id=%s error=%s",
-                        event_id,
-                        error,
-                    )
-                    last_error = error
-            else:
-                last_error = None
-                watch_end_at = batch.watch_end_at
-                delay = (batch.watch_start_at - datetime.now(UTC)).total_seconds()
-                if delay <= 0:
-                    return batch, event
-            await asyncio.sleep(SCHEDULE_POLL_SECONDS)
-        raise TimeoutError(f"event watch configuration unavailable: {event_id}")
+    ) -> None:
+        plan_path = self.event_store.event_paths(batch_id, event_id).watch_plan
+        while True:
+            plan = WatchPlan.from_dict(self._load_object(plan_path, "watch plan"))
+            now = datetime.now(UTC)
+            if now >= plan.end_at:
+                raise TimeoutError(f"event watch window expired: {event_id}")
+            if now >= plan.start_at:
+                return
+            await asyncio.sleep(LIFECYCLE_POLL_SECONDS)
 
     async def run_event(
         self,
         batch: BatchPlan,
         event: EventSpec,
         market_universe: MarketUniverse,
-        schedule_path: Path,
-        market_universe_path: Path,
     ) -> None:
         event_id = event.event_id
         email_task: asyncio.Task[None] | None = None
@@ -395,43 +371,47 @@ class AgentController:
                 market_universe,
             )
             if not ready:
-                self.event_store.update(
-                    batch.batch_id,
-                    event_id,
-                    "researching",
-                )
-                outcome = await self.research_agent.run_event(
-                    event_id=event_id,
-                    batch_dir=self.event_store.batch_paths(batch.batch_id).root,
-                    deadline=batch.watch_start_at,
-                )
-                ready = self._save_research_outcome(
-                    batch.batch_id,
-                    event_id,
-                    outcome,
-                    market_universe,
-                )
+                async with self.research_lock:
+                    ready = self._reuse_event_research(
+                        batch.batch_id,
+                        event_id,
+                        market_universe,
+                    )
+                    if not ready:
+                        self.event_store.update(
+                            batch.batch_id,
+                            event_id,
+                            "researching",
+                        )
+                        outcome = await self.research_agent.run_event(
+                            event_id=event_id,
+                            batch_dir=self.event_store.batch_paths(batch.batch_id).root,
+                            deadline=batch.watch_start_at,
+                        )
+                        ready = self._save_research_outcome(
+                            batch.batch_id,
+                            event_id,
+                            outcome,
+                            market_universe,
+                        )
                 if ready:
                     email_task = asyncio.create_task(
                         self._send_research_email(batch, event),
                         name=f"agent-trading-research-email-{event_id}",
                     )
 
-            latest_batch, latest_event = await self._wait_for_watch_plan(
-                schedule_path,
+            await self._wait_for_watch_start(
                 batch.batch_id,
                 event_id,
-                batch.watch_end_at,
             )
-            latest_universe = load_market_universe(market_universe_path)
-            await self._prepare_event(
-                latest_batch,
-                latest_event,
-                latest_universe,
-                update_batch_snapshot=False,
+            latest_universe = MarketUniverse.from_dict(
+                self._load_object(
+                    self.event_store.batch_paths(batch.batch_id).market_universe,
+                    "batch market universe",
+                ),
             )
             if not self._finalize_analysis_input(
-                latest_batch.batch_id,
+                batch.batch_id,
                 event_id,
                 latest_universe,
             ):
@@ -441,7 +421,7 @@ class AgentController:
                 )
                 return
             await self._run_disclosure_and_analysis(
-                latest_batch.batch_id,
+                batch.batch_id,
                 event_id,
             )
         except Exception as exc:

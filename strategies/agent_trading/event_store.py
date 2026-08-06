@@ -90,7 +90,7 @@ class EventStore:
             decision_metrics=analysis_output / "decision.metrics.json",
         )
 
-    # batch 目录不变；每个 event 启动时刷新自己的当前调度快照。
+    # 首次到达生命周期节点时建立快照；已有文件由人工和运行结果接管。
     def create_batch(
         self,
         batch_id: str,
@@ -102,14 +102,12 @@ class EventStore:
             stored = self._read(paths.batch, "batch")
             if stored.get("batch_id") != batch_id:
                 raise ValueError(f"stored batch_id mismatch: {batch_id}")
-            merged = self._merge_batch(stored, batch)
-            if merged != stored:
-                self._write(paths.batch, merged)
         else:
-            merged = batch
-            self._write(paths.batch, merged)
+            stored = batch
+            self._write(paths.batch, stored)
 
-        self._write(paths.market_universe, market_universe)
+        if not paths.market_universe.exists():
+            self._write(paths.market_universe, market_universe)
         if not paths.state.exists():
             self._write(
                 paths.state,
@@ -119,7 +117,7 @@ class EventStore:
                     "updated_ns": time.time_ns(),
                 },
             )
-        return merged
+        return stored
 
     def create_event(
         self,
@@ -133,14 +131,16 @@ class EventStore:
             stored = self._read(paths.event, "event")
             if stored.get("event_id") != event_id:
                 raise ValueError(f"stored event_id mismatch: {event_id}")
-        self._write(
-            paths.event,
-            {
-                "event_id": event_id,
-                "metadata": metadata,
-            },
-        )
-        self._write(paths.watch_plan, watch_plan)
+        else:
+            self._write(
+                paths.event,
+                {
+                    "event_id": event_id,
+                    "metadata": metadata,
+                },
+            )
+        if not paths.watch_plan.exists():
+            self._write(paths.watch_plan, watch_plan)
         if not paths.state.exists():
             self._write(
                 paths.state,
@@ -201,32 +201,6 @@ class EventStore:
         temporary.write_text(brief.strip() + "\n", encoding="utf-8")
         temporary.replace(paths.analysis_brief)
         return paths
-
-    @staticmethod
-    def _merge_batch(
-        stored: dict[str, Any],
-        incoming: dict[str, Any],
-    ) -> dict[str, Any]:
-        existing_events = stored.get("events")
-        new_events = incoming.get("events")
-        if not isinstance(existing_events, list) or not isinstance(new_events, list):
-            raise TypeError("batch events must be arrays")
-        replacements = {
-            item.get("event_id"): item
-            for item in new_events
-            if isinstance(item, dict) and isinstance(item.get("event_id"), str)
-        }
-        merged_events = [
-            replacements.pop(item.get("event_id"), item)
-            if isinstance(item, dict)
-            else item
-            for item in existing_events
-        ]
-        merged_events.extend(replacements.values())
-        merged = dict(stored)
-        merged.update({key: value for key, value in incoming.items() if key != "events"})
-        merged["events"] = merged_events
-        return merged
 
     @staticmethod
     def _validate_id(value: str, name: str) -> None:
