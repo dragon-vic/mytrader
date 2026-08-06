@@ -3,15 +3,11 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-
-from strategies.agent_trading.lifecycle import BatchPlan
-
 
 REASONING_EFFORTS = {"minimal", "low", "medium", "high", "xhigh"}
 DEFAULT_MODEL = "gpt-5.6-sol"
@@ -25,70 +21,19 @@ class CodexProfile:
     reasoning_effort: str | None = None
     service_tier: str | None = None
     subagent_threads: int | None = None
-
-    @classmethod
-    def from_mapping(
-        cls,
-        value: Mapping[str, Any] | None,
-        location: str,
-    ) -> "CodexProfile":
-        if value is None:
-            return cls()
-        if not isinstance(value, Mapping):
-            raise TypeError(f"{location} must be a mapping")
-        allowed = {"model", "reasoning_effort", "service_tier", "subagent_threads"}
-        unknown = sorted(set(value) - allowed)
-        if unknown:
-            raise ValueError(f"{location} has unsupported keys: {', '.join(unknown)}")
-        model = str(value.get("model", DEFAULT_MODEL)).strip()
-        if not model:
-            raise ValueError(f"{location}.model must not be empty")
-        reasoning_effort = value.get("reasoning_effort")
-        if reasoning_effort is not None:
-            reasoning_effort = str(reasoning_effort)
-            if reasoning_effort not in REASONING_EFFORTS:
-                raise ValueError(
-                    f"{location}.reasoning_effort must be one of "
-                    f"{', '.join(sorted(REASONING_EFFORTS))}",
-                )
-        service_tier = value.get("service_tier")
-        if service_tier is not None:
-            service_tier = str(service_tier).strip()
-            if not service_tier:
-                raise ValueError(f"{location}.service_tier must not be empty")
-        subagent_threads = value.get("subagent_threads")
-        if subagent_threads is not None:
-            subagent_threads = int(subagent_threads)
-            if subagent_threads <= 0:
-                raise ValueError(f"{location}.subagent_threads must be positive")
-        return cls(model, reasoning_effort, service_tier, subagent_threads)
-
-
-@dataclass(frozen=True)
-class CodexProfiles:
-    research: CodexProfile
-    analysis: CodexProfile
-    digest: CodexProfile
-
-
-def load_codex_profiles(settings: Mapping[str, Any]) -> CodexProfiles:
-    """Read per-agent Codex profiles from the loaded strategy settings."""
-    value = settings.get("codex", {})
-    if not isinstance(value, Mapping):
-        raise TypeError("codex must be a mapping")
-    return CodexProfiles(
-        research=CodexProfile.from_mapping(value.get("research"), "codex.research"),
-        analysis=CodexProfile.from_mapping(value.get("analysis"), "codex.analysis"),
-        digest=CodexProfile.from_mapping(value.get("digest"), "codex.digest"),
-    )
-
+    subagent_model: str | None = None
+    subagent_reasoning_effort: str | None = None
 
 class CodexRunner:
     def __init__(
         self,
-        executable: str | Path = "codex",
+        executable: str | Path | None = None,
     ) -> None:
-        self.executable = str(executable)
+        local_executable = Path.home() / ".local" / "bin" / "codex"
+        self.executable = str(
+            executable
+            or (local_executable if local_executable.is_file() else "codex"),
+        )
 
     # 在独立进程中运行一次 Codex，并返回最终输出文件内容。
     async def run(
@@ -102,6 +47,8 @@ class CodexRunner:
         reasoning_effort: str | None = None,
         service_tier: str | None = None,
         subagent_threads: int | None = None,
+        subagent_model: str | None = None,
+        subagent_reasoning_effort: str | None = None,
     ) -> str:
         if not model.strip():
             raise ValueError("Codex model must not be empty")
@@ -111,6 +58,16 @@ class CodexRunner:
             raise ValueError("Codex service tier must not be empty")
         if subagent_threads is not None and subagent_threads <= 0:
             raise ValueError("Codex subagent thread count must be positive")
+        if subagent_model is not None and not subagent_model.strip():
+            raise ValueError("Codex subagent model must not be empty")
+        if (
+            subagent_reasoning_effort is not None
+            and subagent_reasoning_effort not in REASONING_EFFORTS
+        ):
+            raise ValueError(
+                "unsupported Codex subagent reasoning effort: "
+                f"{subagent_reasoning_effort}",
+            )
         work_dir = work_dir.resolve()
         if output_path is not None:
             output_path = output_path.resolve()
@@ -143,6 +100,15 @@ class CodexRunner:
             args.extend(["-c", f'model_reasoning_effort="{reasoning_effort}"'])
         if service_tier is not None:
             args.extend(["-c", f'service_tier="{service_tier}"'])
+        if subagent_model is not None:
+            args.extend(["-c", f'agents.default_subagent_model="{subagent_model}"'])
+        if subagent_reasoning_effort is not None:
+            args.extend(
+                [
+                    "-c",
+                    f'agents.default_subagent_reasoning_effort="{subagent_reasoning_effort}"',
+                ],
+            )
         if subagent_threads is not None:
             args.extend(
                 [
@@ -218,30 +184,26 @@ class ResearchAgent:
         self.company_prompt = prompts_dir / "research_company.md"
         self.research_schema = schemas_dir / "research.json"
 
-    # 同一批次按计划顺序逐家公司预研，前一个结束后才启动下一个。
-    async def run_batch(
+    # 单个 event 独立运行；controller 负责并发调度不同 event。
+    async def run_event(
         self,
-        batch: BatchPlan,
+        event_id: str,
         batch_dir: Path,
         deadline: datetime,
-    ) -> dict[str, ResearchOutcome]:
-        outcomes: dict[str, ResearchOutcome] = {}
-        for event in batch.events:
-            try:
-                outcome = await self._run_company(
-                    event.event_id,
-                    batch_dir,
-                    datetime.now(UTC),
-                    deadline,
-                )
-            except Exception as exc:
-                outcome = ResearchOutcome(
-                    event_id=event.event_id,
-                    research=None,
-                    error=f"{type(exc).__name__}: {exc}",
-                )
-            outcomes[event.event_id] = outcome
-        return outcomes
+    ) -> ResearchOutcome:
+        try:
+            return await self._run_company(
+                event_id,
+                batch_dir,
+                datetime.now(UTC),
+                deadline,
+            )
+        except Exception as exc:
+            return ResearchOutcome(
+                event_id=event_id,
+                research=None,
+                error=f"{type(exc).__name__}: {exc}",
+            )
 
     async def _run_company(
         self,
@@ -287,6 +249,8 @@ class ResearchAgent:
                             reasoning_effort=self.profile.reasoning_effort,
                             service_tier=self.profile.service_tier,
                             subagent_threads=self.profile.subagent_threads,
+                            subagent_model=self.profile.subagent_model,
+                            subagent_reasoning_effort=self.profile.subagent_reasoning_effort,
                         ),
                         deadline,
                     )
@@ -360,6 +324,8 @@ class AnalysisAgent:
                 reasoning_effort=self.profile.reasoning_effort,
                 service_tier=self.profile.service_tier,
                 subagent_threads=self.profile.subagent_threads,
+                subagent_model=self.profile.subagent_model,
+                subagent_reasoning_effort=self.profile.subagent_reasoning_effort,
             )
         finally:
             if temp_metrics.exists():
@@ -367,56 +333,6 @@ class AnalysisAgent:
                 temp_metrics.replace(_metrics_path(output_path))
         output_path.parent.mkdir(parents=True, exist_ok=True)
         temporary.replace(output_path)
-
-
-class ResearchDigestAgent:
-    """Ask Codex to summarize completed research and send the email itself."""
-
-    def __init__(
-        self,
-        runner: CodexRunner,
-        prompt_path: Path,
-        profile: CodexProfile | None = None,
-    ) -> None:
-        self.runner = runner
-        self.prompt_path = prompt_path
-        self.profile = profile or CodexProfile(reasoning_effort="high")
-
-    async def run(
-        self,
-        batch_dir: Path,
-        event_ids: tuple[str, ...],
-    ) -> None:
-        files = [
-            "batch.json",
-            "market_universe.json",
-            *[
-                relative
-                for event_id in event_ids
-                for relative in (
-                    f"events/{event_id}/research_output/research.json",
-                    f"events/{event_id}/research_output/research.metrics.json",
-                )
-            ],
-        ]
-        prompt = self.prompt_path.read_text(encoding="utf-8")
-        prompt += (
-            "\n\nAssigned batch directory: `.`\n"
-            "Read only these files (some optional metrics files may be absent):\n"
-            + "\n".join(f"- `{relative}`" for relative in files)
-            + "\nComplete the email send before returning."
-        )
-        await self.runner.run(
-            prompt=prompt,
-            work_dir=batch_dir,
-            output_path=None,
-            schema_path=None,
-            web_search=False,
-            model=self.profile.model,
-            reasoning_effort=self.profile.reasoning_effort,
-            service_tier=self.profile.service_tier,
-            subagent_threads=self.profile.subagent_threads,
-        )
 
 
 def _codex_diagnostic(stdout: bytes, stderr: bytes) -> str:

@@ -467,32 +467,6 @@
           }
         },
         {
-          "event_id": "2026-08-05-app",
-          "company": "AppLovin",
-          "ticker": "APP",
-          "scope": "core_tech_crypto",
-          "research_hints": [
-            "Evaluate APP's own tradable instrument first and reject it if the disclosure-to-price causal case is weak."
-          ],
-          "watch": {
-            "sec": {
-              "cik": "0001751008",
-              "forms": ["8-K", "10-Q", "10-K"]
-            },
-            "news_release": {
-              "sources": [
-                {
-                  "url": "https://investors.applovin.com/rss/PressRelease.aspx",
-                  "format": "feed",
-                  "title_phrases": ["applovin announces second quarter 2026 financial results", "applovin reports second quarter 2026 financial results"],
-                  "exclude_phrases": ["to announce"],
-                  "content_terms": ["applovin", "revenue"]
-                }
-              ]
-            }
-          }
-        },
-        {
           "event_id": "2026-08-05-flnc",
           "company": "Fluence Energy",
           "ticker": "FLNC",
@@ -513,32 +487,6 @@
                   "title_phrases": ["fluence energy, inc. reports third quarter 2026 results", "fluence reports third quarter 2026 results"],
                   "exclude_phrases": ["earnings release date", "announces fiscal"],
                   "content_terms": ["fluence", "revenue"]
-                }
-              ]
-            }
-          }
-        },
-        {
-          "event_id": "2026-08-05-dash",
-          "company": "DoorDash",
-          "ticker": "DASH",
-          "scope": "core_tech_crypto",
-          "research_hints": [
-            "Test delivery demand, competitive intensity, and unit-economics read-throughs to UBER."
-          ],
-          "watch": {
-            "sec": {
-              "cik": "0001792789",
-              "forms": ["8-K", "10-Q", "10-K"]
-            },
-            "news_release": {
-              "sources": [
-                {
-                  "url": "https://ir.doordash.com/rss/PressRelease.aspx",
-                  "format": "feed",
-                  "title_phrases": ["doordash releases second quarter 2026 financial results", "doordash announces second quarter 2026 results", "doordash reports second quarter 2026 results"],
-                  "exclude_phrases": ["to announce"],
-                  "content_terms": ["doordash", "revenue"]
                 }
               ]
             }

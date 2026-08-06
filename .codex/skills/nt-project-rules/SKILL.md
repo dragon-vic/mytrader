@@ -44,6 +44,7 @@ description: nt_quant 项目的开发、测试、交易安全、发布、配置�
 ## 本地和远程命令
 
 - 本地 Windows 使用 PowerShell 7。
+- 本地不要调用 Codex CLI；本地邮件链路测试直接使用 Python 标准库和 `.env`，只有用户明确要求时才在本地启动 Codex CLI。
 - 本地读取和写入 UTF-8 文件时显式指定 UTF-8。
 - 本地 PowerShell 7 不需要使用 Base64 传递普通命令或文件。
 - 从 Windows 调用远程 bash 时，只有复杂脚本包含管道、重定向、命令替换或 here-doc 等情况才使用 Base64，避免 shell 转义错误。

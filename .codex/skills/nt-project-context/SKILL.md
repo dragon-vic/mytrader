@@ -202,6 +202,6 @@ ssh aws
 
 - `tools/telegram_codex.py`：Telegram Codex bot。
 - `tools/change_leverage.py`：账户杠杆工具。
-- `tools/rtpr_websocket.py`：独立 websocket 工具。
+- `tools/send_email.py`：读取文件或目录并调用 Codex agent 发送总结邮件。
 
 只有用户明确要求时，才把工具接入策略或框架运行链路。

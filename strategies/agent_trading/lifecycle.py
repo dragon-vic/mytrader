@@ -45,7 +45,8 @@ class BatchPlan:
 
     @property
     def research_duration(self) -> timedelta:
-        return timedelta(minutes=RESEARCH_MINUTES_PER_EVENT * len(self.events))
+        # event 并发预研，每个 event 都有自己的完整预研窗口。
+        return timedelta(minutes=RESEARCH_MINUTES_PER_EVENT)
 
     @property
     def research_start_at(self) -> datetime:
@@ -105,14 +106,24 @@ class BatchPlan:
             raise ValueError("batch event_id values must be unique")
 
 
+@dataclass(frozen=True)
+class ScheduledEvent:
+    batch_id: str
+    event_id: str
+    research_start_at: datetime
+    watch_start_at: datetime
+    watch_end_at: datetime
+
+
+@dataclass(frozen=True)
+class ScheduleSnapshot:
+    events: tuple[ScheduledEvent, ...]
+    errors: tuple[str, ...]
+
+
 # 静态计划由人工按周或按月维护，运行时不再调用规划 Agent。
 def load_schedule(path: Path) -> tuple[BatchPlan, ...]:
-    payload = _dict(json.loads(path.read_text(encoding="utf-8")), "schedule")
-    _keys(payload, {"schedule_id", "timezone", "active_scope", "batches"}, "schedule")
-    _text(payload["schedule_id"], "schedule_id")
-    active_scope = _text(payload["active_scope"], "active_scope")
-    if payload["timezone"] != "UTC":
-        raise ValueError("schedule timezone must be UTC")
+    payload, active_scope = _schedule_payload(path)
 
     all_batches = tuple(
         BatchPlan.from_dict(_dict(item, "batches[]"))
@@ -140,6 +151,109 @@ def load_schedule(path: Path) -> tuple[BatchPlan, ...]:
     if not batches:
         raise ValueError(f"schedule has no events for active_scope: {active_scope}")
     return batches
+
+
+# Controller 轮询时只读取调度所需字段，坏 event 不阻塞同表其他 event。
+def load_event_schedule(path: Path) -> ScheduleSnapshot:
+    payload, active_scope = _schedule_payload(path)
+    events: list[ScheduledEvent] = []
+    errors: list[str] = []
+    seen: set[str] = set()
+    for batch_index, value in enumerate(_list(payload["batches"], "batches")):
+        location = f"batches[{batch_index}]"
+        try:
+            batch = _dict(value, location)
+            _keys(
+                batch,
+                {"batch_id", "session", "watch_start_at", "watch_end_at", "events"},
+                location,
+            )
+            batch_id = _text(batch["batch_id"], f"{location}.batch_id")
+            session = _text(batch["session"], f"{location}.session")
+            if session not in SESSIONS:
+                raise ValueError(f"unsupported earnings session: {session}")
+            watch_start_at = _time(
+                batch["watch_start_at"],
+                f"{location}.watch_start_at",
+            )
+            watch_end_at = _time(
+                batch["watch_end_at"],
+                f"{location}.watch_end_at",
+            )
+            if watch_end_at <= watch_start_at:
+                raise ValueError("watch_end_at must be later than watch_start_at")
+            raw_events = _list(batch["events"], f"{location}.events")
+        except (KeyError, TypeError, ValueError) as exc:
+            errors.append(f"{location}: {type(exc).__name__}: {exc}")
+            continue
+
+        research_start_at = watch_start_at - timedelta(
+            minutes=RESEARCH_MINUTES_PER_EVENT,
+        )
+        for event_index, value in enumerate(raw_events):
+            event_location = f"{location}.events[{event_index}]"
+            try:
+                raw_event = _dict(value, event_location)
+                event_id = _text(
+                    raw_event["event_id"],
+                    f"{event_location}.event_id",
+                )
+                scope = _text(raw_event["scope"], f"{event_location}.scope")
+                if event_id in seen:
+                    raise ValueError(f"duplicate event_id: {event_id}")
+                seen.add(event_id)
+                if scope != active_scope:
+                    continue
+                events.append(
+                    ScheduledEvent(
+                        batch_id=batch_id,
+                        event_id=event_id,
+                        research_start_at=research_start_at,
+                        watch_start_at=watch_start_at,
+                        watch_end_at=watch_end_at,
+                    ),
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                errors.append(f"{event_location}: {type(exc).__name__}: {exc}")
+    return ScheduleSnapshot(tuple(events), tuple(errors))
+
+
+# Event 到达生命周期节点时重新读取并完整校验自己的最新配置。
+def load_event_plan(
+    path: Path,
+    batch_id: str,
+    event_id: str,
+) -> tuple[BatchPlan, EventSpec]:
+    payload, active_scope = _schedule_payload(path)
+    batches = [
+        _dict(value, "batches[]")
+        for value in _list(payload["batches"], "batches")
+        if isinstance(value, dict) and value.get("batch_id") == batch_id
+    ]
+    if len(batches) != 1:
+        raise ValueError(
+            f"schedule must contain exactly one batch_id={batch_id}, got {len(batches)}",
+        )
+    batch_payload = batches[0]
+    raw_events = _list(batch_payload.get("events"), f"batch {batch_id}.events")
+    matched = [
+        _dict(value, "events[]")
+        for value in raw_events
+        if isinstance(value, dict) and value.get("event_id") == event_id
+    ]
+    if len(matched) != 1:
+        raise ValueError(
+            f"schedule must contain exactly one event_id={event_id}, got {len(matched)}",
+        )
+    isolated = dict(batch_payload)
+    isolated["events"] = matched
+    batch = BatchPlan.from_dict(isolated)
+    event = batch.events[0]
+    if event.scope != active_scope:
+        raise ValueError(
+            f"event scope is not active: {event.scope} != {active_scope}",
+        )
+    return batch, event
 
 
 @dataclass(frozen=True)
@@ -383,3 +497,17 @@ def _moves(candidate: dict[str, Any]) -> dict[str, float]:
         signal: float(candidate["outcomes"][signal]["expected_move_pct"])
         for signal in TRADE_SIGNALS
     }
+
+
+def _schedule_payload(path: Path) -> tuple[dict[str, Any], str]:
+    payload = _dict(json.loads(path.read_text(encoding="utf-8")), "schedule")
+    _keys(
+        payload,
+        {"schedule_id", "timezone", "active_scope", "batches"},
+        "schedule",
+    )
+    _text(payload["schedule_id"], "schedule_id")
+    active_scope = _text(payload["active_scope"], "active_scope")
+    if payload["timezone"] != "UTC":
+        raise ValueError("schedule timezone must be UTC")
+    return payload, active_scope
