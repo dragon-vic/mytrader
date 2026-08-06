@@ -1,0 +1,25 @@
+{
+  "event_id": "2026-08-05-sndk",
+  "finished_at": "2026-08-05T20:05:26.049839+00:00",
+  "winner": "rtpr",
+  "source_status": {
+    "sec": {
+      "consecutive_failures": 0,
+      "last_error": "TimeoutError: TimeoutError()",
+      "last_error_at": "2026-08-05T20:04:52.150673+00:00",
+      "last_success_at": "2026-08-05T20:05:19.132543+00:00"
+    },
+    "rtpr": {
+      "consecutive_failures": 0,
+      "last_error": null,
+      "last_error_at": null,
+      "last_success_at": "2026-08-05T20:05:26.045300+00:00"
+    },
+    "news_release:https://investor.sandisk.com/rss/news-releases.xml": {
+      "consecutive_failures": 2,
+      "last_error": "TimeoutError: TimeoutError()",
+      "last_error_at": "2026-08-05T20:05:25.151133+00:00",
+      "last_success_at": "2026-08-05T20:04:52.942219+00:00"
+    }
+  }
+}

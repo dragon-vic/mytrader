@@ -1,0 +1,42 @@
+{
+  "event_id": "2026-08-05-sndk",
+  "status": "completed",
+  "started_at": "2026-08-05T17:23:31.545162+00:00",
+  "finished_at": "2026-08-05T17:40:39.196298+00:00",
+  "elapsed_seconds": 1027.651,
+  "attempts": 1,
+  "usage": {
+    "input_tokens": 6681261,
+    "cached_input_tokens": 6241024,
+    "output_tokens": 37915,
+    "reasoning_output_tokens": 19633,
+    "total_tokens": 6719176
+  },
+  "runs": [
+    {
+      "output_path": "/home/ubuntu/pycharm_nt/strategies/agent_trading/batches/2026-08-05-amc/events/2026-08-05-sndk/research_output/research.json",
+      "status": "completed",
+      "started_at": "2026-08-05T17:23:31.545451+00:00",
+      "finished_at": "2026-08-05T17:40:39.195617+00:00",
+      "elapsed_seconds": 1027.649,
+      "thread_ids": [
+        "019fd2f3-ad76-7083-8f01-71528db5cebb"
+      ],
+      "turns": [
+        {
+          "input_tokens": 6681261,
+          "cached_input_tokens": 6241024,
+          "output_tokens": 37915,
+          "reasoning_output_tokens": 19633
+        }
+      ],
+      "usage": {
+        "input_tokens": 6681261,
+        "cached_input_tokens": 6241024,
+        "output_tokens": 37915,
+        "reasoning_output_tokens": 19633,
+        "total_tokens": 6719176
+      }
+    }
+  ]
+}

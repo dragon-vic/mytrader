@@ -1,0 +1,25 @@
+{
+  "event_id": "2026-08-05-flnc",
+  "finished_at": "2026-08-05T20:09:36.163470+00:00",
+  "winner": "sec",
+  "source_status": {
+    "sec": {
+      "consecutive_failures": 0,
+      "last_error": "TimeoutError: TimeoutError()",
+      "last_error_at": "2026-08-05T20:08:52.151354+00:00",
+      "last_success_at": "2026-08-05T20:09:36.162443+00:00"
+    },
+    "rtpr": {
+      "consecutive_failures": 0,
+      "last_error": null,
+      "last_error_at": null,
+      "last_success_at": null
+    },
+    "news_release:https://ir.fluenceenergy.com/rss/news-releases.xml": {
+      "consecutive_failures": 1,
+      "last_error": "TimeoutError: TimeoutError()",
+      "last_error_at": "2026-08-05T20:09:31.150068+00:00",
+      "last_success_at": "2026-08-05T20:09:14.963925+00:00"
+    }
+  }
+}

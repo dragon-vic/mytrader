@@ -1,0 +1,41 @@
+{
+  "event_id": "2026-08-05-flnc",
+  "source": "sec",
+  "form": "8-K",
+  "accession": "0001868941-26-000028",
+  "items": [
+    "2.02",
+    "9.01"
+  ],
+  "origin_url": "https://www.sec.gov/Archives/edgar/data/1868941/000186894126000028/0001868941-26-000028-index.htm",
+  "published_at": "2026-08-05T16:08:54-04:00",
+  "detected_ns": 1785960575711562072,
+  "files": [
+    {
+      "document_type": "8-K",
+      "description": "8-K",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/1868941/000186894126000028/flnc-20260805.htm",
+      "content_type": "text/html",
+      "content_format": "html",
+      "size_bytes": 30034,
+      "sha256": "037c5831cd187ef642445ff336e3a7cef525e8271718c257dac97bceb3acad1c",
+      "raw_path": "../watch/raw/sec/flnc-20260805.htm",
+      "analysis_path": "disclosure/sec/processed/flnc-20260805.htm.md",
+      "processing_status": "processed",
+      "processing_error": null
+    },
+    {
+      "document_type": "EX-99.1",
+      "description": "EX-99.1",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/1868941/000186894126000028/flncq3fy26earningspressrel.htm",
+      "content_type": "text/html",
+      "content_format": "html",
+      "size_bytes": 329491,
+      "sha256": "6cc433780144bb7a54a89dce0da186c78e012ca943c6806a54a6142da59e89c4",
+      "raw_path": "../watch/raw/sec/flncq3fy26earningspressrel.htm",
+      "analysis_path": "disclosure/sec/processed/flncq3fy26earningspressrel.htm.md",
+      "processing_status": "processed",
+      "processing_error": null
+    }
+  ]
+}

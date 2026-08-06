@@ -1,0 +1,16 @@
+{
+  "event_id": "2026-08-05-dash",
+  "status": "skipped_manual_hold",
+  "started_at": "2026-08-05T16:00:00+00:00",
+  "finished_at": "2026-08-05T16:00:00+00:00",
+  "elapsed_seconds": 0.0,
+  "attempts": 0,
+  "usage": {
+    "input_tokens": 0,
+    "cached_input_tokens": 0,
+    "output_tokens": 0,
+    "reasoning_output_tokens": 0,
+    "total_tokens": 0
+  },
+  "reason": "manual hold override"
+}

@@ -1,0 +1,38 @@
+{
+  "event_id": "2026-08-05-wdc",
+  "trade_candidates": [
+    {
+      "symbol": "WDC",
+      "instrument_id": "WDCUSDT-PERP.BINANCE",
+      "outcomes": {
+        "STRONG_BUY": {
+          "condition": "Using only the first complete official release/deck, take FY26 Q4 continuing-operations revenue, non-GAAP gross margin and WDC-defined non-GAAP diluted EPS, plus arithmetic midpoints of FY27 Q1 guidance on a confirmed 13-week basis. After all HOLD vetoes and material-conflict tests, require at least two material-positive Q4 readings—revenue ≥$3.79B, gross margin ≥52.5%, EPS ≥$3.59—with gross margin one of them; the remaining Q4 reading must not be negative (revenue < $3.69B, gross margin <51.0%, or EPS < $3.29). Also require a material-positive Q1 block: revenue midpoint ≥$4.10B and either same-definition EPS ≥$3.85 or gross-margin midpoint ≥52.5% and at least Q4's actual margin. No Q4 material-negative reading, Q1 revenue ≤$3.94B, Q1 EPS ≤$3.30, Q1 margin ≤50.5%, or Q1 margin decline ≥1.5 points may be present.",
+          "expected_move_pct": 9.5
+        },
+        "MEDIUM_BUY": {
+          "condition": "Use the same first-package, continuing-operations, non-GAAP and 13-week definitions. Apply only if STRONG_BUY is false and no HOLD veto or material cross-sign conflict exists. At least two Q4 readings must be positive—revenue >$3.71B, gross margin >52.0%, EPS >$3.35—with at least one reaching its material-positive threshold of $3.79B, 52.5%, or $3.59; no Q4 reading may be negative (revenue < $3.69B, gross margin <51.0%, EPS < $3.29). Require a positive Q1 block: revenue midpoint >$4.06B and either same-definition EPS ≥$3.73 or gross-margin midpoint ≥52.0% and no more than 0.5 point below Q4 actual margin. No material-negative Q1 signal—revenue ≤$3.94B, EPS ≤$3.30, margin ≤50.5%, or margin decline ≥1.5 points—is allowed.",
+          "expected_move_pct": 7.5
+        },
+        "WEAK_BUY": {
+          "condition": "Use the first official package and the same definitions; apply only after STRONG_BUY and MEDIUM_BUY are false and no HOLD veto exists. Count positive votes for Q4 revenue >$3.71B, Q4 gross margin >52.0%, Q4 EPS >$3.35, and Q1 revenue-guide midpoint >$4.06B. Count negative votes for Q4 revenue < $3.69B, Q4 gross margin <51.0%, Q4 EPS < $3.29, and Q1 revenue midpoint < $3.98B. Require at least two positive votes and more positive than negative votes. Permit neutral or one modest opposite reading, but prohibit every material-negative signal: Q4 revenue ≤$3.62B, gross margin ≤50.5%, EPS ≤$3.06; or Q1 revenue ≤$3.94B, same-definition EPS ≤$3.30, margin ≤50.5%, or margin decline ≥1.5 points. If Q1 EPS is definition-ineligible, ignore it rather than substituting another EPS measure.",
+          "expected_move_pct": 4.5
+        },
+        "HOLD": {
+          "condition": "Apply before directional tiers if the first complete official package lacks Q4 continuing-operations revenue, non-GAAP gross margin or WDC-defined non-GAAP EPS; lacks quantitative Q1 revenue guidance; leaves the fiscal period, continuing-operations scope, capped-call/share convention or a metric reconciliation materially unresolved; or contains conflicting release/deck values. Also HOLD if a customer/order/pricing, capacity/yield, qualification, supply, legal, cyber or financing fact is described as excluded from guidance and is quantified at ≥$100M Q1 revenue, ≥50 bp Q1 gross margin or ≥$0.10 Q1 EPS, or if a comparable material fact is acknowledged but not quantified. After vetoes, HOLD if material positive and negative signals coexist; positive and negative vote counts are tied; all Q4 metrics and Q1 revenue are inside their neutral bands ($3.69B–$3.71B, 51.0%–52.0%, $3.29–$3.35 and $3.98B–$4.06B); there is only one isolated directional vote; or none of the six directional conditions is met because the package lacks a clear edge rather than merely failing a stronger tier."
+        },
+        "WEAK_SELL": {
+          "condition": "Use the first official package and the same continuing-operations, non-GAAP and 13-week definitions; apply only after STRONG_SELL and MEDIUM_SELL are false and no HOLD veto exists. Count negative votes for Q4 revenue < $3.69B, Q4 gross margin <51.0%, Q4 EPS < $3.29, and Q1 revenue-guide midpoint < $3.98B. Count positive votes for Q4 revenue >$3.71B, Q4 gross margin >52.0%, Q4 EPS >$3.35, and Q1 revenue midpoint >$4.06B. Require at least two negative votes and more negative than positive votes. Permit neutral or one modest opposite reading, but prohibit every material-positive signal: Q4 revenue ≥$3.79B, gross margin ≥52.5%, EPS ≥$3.59; or Q1 revenue ≥$4.10B, same-definition EPS ≥$3.85, or margin ≥52.5% with no sequential decline. If Q1 EPS is definition-ineligible, ignore it rather than substituting another EPS measure.",
+          "expected_move_pct": 4.5
+        },
+        "MEDIUM_SELL": {
+          "condition": "Use the same first-package, continuing-operations, non-GAAP and 13-week definitions. Apply only if STRONG_SELL is false and no HOLD veto or material cross-sign conflict exists. At least two Q4 readings must be negative—revenue < $3.69B, gross margin <51.0%, EPS < $3.29—with at least one reaching its material-negative threshold of $3.62B, 50.5%, or $3.06; no Q4 reading may be positive (revenue >$3.71B, gross margin >52.0%, EPS >$3.35). Require a negative Q1 block: revenue midpoint < $3.98B and either same-definition EPS ≤$3.50, gross-margin midpoint <51.0%, or gross margin more than 1.0 point below Q4 actual margin. No material-positive Q1 signal—revenue ≥$4.10B, EPS ≥$3.85, or margin ≥52.5% with no sequential decline—is allowed.",
+          "expected_move_pct": 7.5
+        },
+        "STRONG_SELL": {
+          "condition": "Using only the first complete official release/deck, take FY26 Q4 continuing-operations revenue, non-GAAP gross margin and WDC-defined non-GAAP diluted EPS, plus arithmetic midpoints of FY27 Q1 guidance on a confirmed 13-week basis. After all HOLD vetoes and material-conflict tests, require at least two material-negative Q4 readings—revenue ≤$3.62B, gross margin ≤50.5%, EPS ≤$3.06—with gross margin one of them; the remaining Q4 reading must not be positive (revenue >$3.71B, gross margin >52.0%, or EPS >$3.35). Also require a material-negative Q1 block: revenue midpoint ≤$3.94B and either same-definition EPS ≤$3.30, gross-margin midpoint ≤50.5%, or gross margin at least 1.5 points below Q4 actual margin. No Q4 material-positive reading, Q1 revenue ≥$4.10B, Q1 EPS ≥$3.85, or Q1 margin ≥52.5% with no sequential decline may be present.",
+          "expected_move_pct": 9.9
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "event_id": "2026-08-05-dash",
+  "as_of": "2026-08-05T16:00:00+00:00",
+  "research_complete": true,
+  "research_report": "Manual HOLD placeholder: this event was intentionally excluded from pre-research. No directional research was performed.",
+  "analysis_brief": "MANUAL HOLD OVERRIDE. No pre-research was performed for this event. Do not infer or add a trade candidate. Return decision=HOLD with trades=[].",
+  "trade_candidates": [],
+  "sources": [
+    {
+      "id": "MANUAL_HOLD_OVERRIDE",
+      "title": "Manual HOLD placeholder; no pre-research performed",
+      "url": "manual://agent-trading/hold-override",
+      "published_at": null
+    }
+  ]
+}

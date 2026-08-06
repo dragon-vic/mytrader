@@ -1,0 +1,25 @@
+{
+  "output_path": "/home/ubuntu/pycharm_nt/strategies/agent_trading/batches/2026-08-05-amc/events/2026-08-05-flnc/analysis_input/.decision.output.json",
+  "status": "completed",
+  "started_at": "2026-08-05T20:09:36.165289+00:00",
+  "finished_at": "2026-08-05T20:09:47.838875+00:00",
+  "elapsed_seconds": 11.673,
+  "thread_ids": [
+    "019fd38b-b6fe-7841-88ad-470f89a43e75"
+  ],
+  "turns": [
+    {
+      "input_tokens": 27670,
+      "cached_input_tokens": 13056,
+      "output_tokens": 525,
+      "reasoning_output_tokens": 267
+    }
+  ],
+  "usage": {
+    "input_tokens": 27670,
+    "cached_input_tokens": 13056,
+    "output_tokens": 525,
+    "reasoning_output_tokens": 267,
+    "total_tokens": 28195
+  }
+}

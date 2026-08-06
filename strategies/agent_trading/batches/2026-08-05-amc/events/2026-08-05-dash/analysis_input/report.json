@@ -1,0 +1,42 @@
+{
+  "event_id": "2026-08-05-dash",
+  "source": "sec",
+  "form": "8-K",
+  "accession": "0001792789-26-000048",
+  "items": [
+    "2.02",
+    "7.01",
+    "9.01"
+  ],
+  "origin_url": "https://www.sec.gov/Archives/edgar/data/1792789/000179278926000048/0001792789-26-000048-index.htm",
+  "published_at": "2026-08-05T16:12:32-04:00",
+  "detected_ns": 1785960776763519792,
+  "files": [
+    {
+      "document_type": "8-K",
+      "description": "8-K",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/1792789/000179278926000048/dash-20260805.htm",
+      "content_type": "text/html",
+      "content_format": "html",
+      "size_bytes": 24383,
+      "sha256": "1ca3a864187ce13c11f539de2b11cabb1cfb8055bdc6aefbe01cee81b03d6280",
+      "raw_path": "../watch/raw/sec/dash-20260805.htm",
+      "analysis_path": "disclosure/sec/processed/dash-20260805.htm.md",
+      "processing_status": "processed",
+      "processing_error": null
+    },
+    {
+      "document_type": "EX-99.1",
+      "description": "EX-99.1",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/1792789/000179278926000048/proddashex991-pressrelease.htm",
+      "content_type": "text/html",
+      "content_format": "html",
+      "size_bytes": 506803,
+      "sha256": "1a35a361f3037a3677dce0a4c50582d38dfe4dc23fa4b36cf68c35e60ba87764",
+      "raw_path": "../watch/raw/sec/proddashex991-pressrelease.htm",
+      "analysis_path": "disclosure/sec/processed/proddashex991-pressrelease.htm.md",
+      "processing_status": "processed",
+      "processing_error": null
+    }
+  ]
+}

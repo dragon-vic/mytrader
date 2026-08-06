@@ -1,0 +1,25 @@
+{
+  "output_path": "/home/ubuntu/pycharm_nt/strategies/agent_trading/batches/2026-08-05-amc/events/2026-08-05-wdc/analysis_input/.decision.output.json",
+  "status": "completed",
+  "started_at": "2026-08-05T20:05:15.485854+00:00",
+  "finished_at": "2026-08-05T20:05:53.209414+00:00",
+  "elapsed_seconds": 37.723,
+  "thread_ids": [
+    "019fd387-bcf1-7882-b333-ae5884c542b9"
+  ],
+  "turns": [
+    {
+      "input_tokens": 113502,
+      "cached_input_tokens": 76800,
+      "output_tokens": 2171,
+      "reasoning_output_tokens": 1157
+    }
+  ],
+  "usage": {
+    "input_tokens": 113502,
+    "cached_input_tokens": 76800,
+    "output_tokens": 2171,
+    "reasoning_output_tokens": 1157,
+    "total_tokens": 115673
+  }
+}

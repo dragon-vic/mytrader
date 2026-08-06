@@ -1,0 +1,25 @@
+{
+  "event_id": "2026-08-05-app",
+  "finished_at": "2026-08-05T20:05:13.890129+00:00",
+  "winner": "rtpr",
+  "source_status": {
+    "sec": {
+      "consecutive_failures": 0,
+      "last_error": "TimeoutError: TimeoutError()",
+      "last_error_at": "2026-08-05T20:04:52.150641+00:00",
+      "last_success_at": "2026-08-05T20:05:13.616440+00:00"
+    },
+    "rtpr": {
+      "consecutive_failures": 0,
+      "last_error": null,
+      "last_error_at": null,
+      "last_success_at": "2026-08-05T20:05:13.870863+00:00"
+    },
+    "news_release:https://investors.applovin.com/rss/PressRelease.aspx": {
+      "consecutive_failures": 0,
+      "last_error": null,
+      "last_error_at": null,
+      "last_success_at": "2026-08-05T20:05:13.556847+00:00"
+    }
+  }
+}
