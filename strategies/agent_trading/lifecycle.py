@@ -31,6 +31,7 @@ class EventSpec:
     company: str
     ticker: str
     scope: str
+    confirmed: bool
     research_hints: tuple[str, ...]
     watch_plan: WatchPlan
 
@@ -87,6 +88,7 @@ class BatchPlan:
                     "company": event.company,
                     "ticker": event.ticker,
                     "scope": event.scope,
+                    "confirmed": event.confirmed,
                     "research_hints": list(event.research_hints),
                     "watch": event.watch_plan.to_watch_dict(),
                 }
@@ -436,7 +438,15 @@ def _event(
 ) -> EventSpec:
     _keys(
         payload,
-        {"event_id", "company", "ticker", "scope", "research_hints", "watch"},
+        {
+            "event_id",
+            "company",
+            "ticker",
+            "scope",
+            "confirmed",
+            "research_hints",
+            "watch",
+        },
         "events[]",
     )
     research_hints = tuple(
@@ -445,12 +455,16 @@ def _event(
     )
     if not research_hints:
         raise ValueError("events[].research_hints must not be empty")
+    confirmed = payload["confirmed"]
+    if not isinstance(confirmed, bool):
+        raise TypeError("events[].confirmed must be a boolean")
     event_id = _text(payload["event_id"], "events[].event_id")
     return EventSpec(
         event_id=event_id,
         company=_text(payload["company"], "events[].company"),
         ticker=_text(payload["ticker"], "events[].ticker"),
         scope=_text(payload["scope"], "events[].scope"),
+        confirmed=confirmed,
         research_hints=research_hints,
         watch_plan=WatchPlan.from_watch_dict(
             event_id,

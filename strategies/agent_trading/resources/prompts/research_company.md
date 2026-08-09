@@ -9,6 +9,7 @@ Research one scheduled earnings event and return the schema-conforming operating
 - The project Python executable is `/home/ubuntu/miniconda/envs/nt/bin/python`; the Codex executable is `/home/ubuntu/.local/bin/codex`.
 - This task runs with model `gpt-5.6-sol`, `xhigh` reasoning, web search enabled, and exactly three research subagent threads.
 - The host and schedule clock use UTC. Interpret US market sessions in `America/New_York`, and compare absolute instants by their explicit offset or UTC value.
+- The trading target is not an intraday US cash-equity strategy. Retained candidates are Binance or Hyperliquid perpetual contracts traded continuously, 24 hours a day. Use the US cash-market session only to locate the disclosure and as one possible reference frame; do not assume that the contract's event repricing ends at the next US regular-session close.
 - Your assigned working directory is this batch directory under `strategies/agent_trading/batches/<batch_id>`. Runtime access does not expand the task scope: do not inspect repository code, credentials, live processes, or unrelated files.
 
 ## Scope
@@ -17,6 +18,7 @@ Research one scheduled earnings event and return the schema-conforming operating
 - Find the assigned event in the already-filtered batch. Do not discover, add, remove, or reschedule events. Treat `research_hints` as unverified leads.
 - Browse broadly, but use no information published after `as_of`. Record absolute timestamps and interpret US sessions in `America/New_York`.
 - Do not research or modify watcher configuration. Do not inspect live prices, K-lines, liquidity, or post-disclosure movement. Do not size or place trades.
+- Historical comparison research may use continuous Binance/Hyperliquid perpetual reactions when available; it should not be limited to US regular-session closes. Current live prices and any movement after this event's `as_of` cutoff remain out of scope.
 - The first complete official release or filing triggers analysis. Do not make any rule depend on a later call, filing, analyst reaction, or another source.
 
 ## Required result
@@ -56,16 +58,20 @@ For each focus item, state in `analysis_brief`:
 
 Keep this list short and specific. Do not turn generic company background, a later call, or an unquantified theme into a trading rule. The list is an observation and prioritization guide for the analysis agent; it does not add candidates, percentages, or a second outcome table. A qualitative fact may revise the base outcome only when its causal impact is material and directionally clear from the first complete package.
 
+The contract's response can differ from the issuer's cash-stock response because it trades continuously and can reprice across sessions. Include cross-session or continuous-market context when it materially changes the transmission path, while keeping the first complete official release as the information trigger.
+
 ## Price-impact calibration
 
 Calibrate the six directional percentages separately for each candidate from that instrument's own comparable earnings reactions. A value of `12.0` means a 12% expected complete event move.
 
-- Use one regular-session window consistently: `AMC` is previous close to next close; `BMO` is previous close to disclosure-day close.
+- Use consistent windows for the instrument and data source: for cash equities, `AMC` is previous close to next close and `BMO` is previous close to disclosure-day close; for Binance/Hyperliquid perpetuals, use a continuous-market pre-release baseline and fixed post-release horizons (for example 1h, 4h, and 24h) when comparable data are available. Do not treat the regular-session close as the only valid reaction window for a 24-hour contract.
 - In `research_report`, record the price source, event dates, observed moves, comparable disclosed facts, exclusions, and the robust basis for each tier.
 - Separate upside and downside. Require weak < medium < strong on each side and round to at most one decimal place.
 - Calibrate a no-action band from ordinary in-line reports. Weak percentages must sit outside it.
 - Do not use a generic volatility table, one anecdote, or a spillover instrument as a substitute. If evidence is insufficient, research further or remove the candidate.
 - Percentages represent full-event repricing. NT later determines how much movement remains.
+
+When evidence is available, use the following as calibration lenses rather than mandatory standalone outputs: what the market had already priced in before `as_of`; the issuer's current and forward outlook versus contemporaneous consensus, guidance, or credible pre-cutoff expectations; and whether a positive report could be an already-consumed catalyst ("sell the news"). A strong reported beat does not automatically imply a buy tier if the forward information is below the market's bar or the good news was anticipated. Conversely, do not force an expectation or absorption judgment when the pre-event evidence is unavailable.
 
 ## Research and debate
 
@@ -73,11 +79,13 @@ Use exactly three parallel research subagents:
 
 1. Financial analyst: primary filings/releases, company guidance, definition-matched public benchmarks, historical disclosures, and issuer-specific price reactions.
 2. Business/industry analyst: products, customers, operations, competitors, suppliers, industry and policy evidence, plus candidate transmission paths.
-3. Skeptical impact critic: contrary evidence, embedded expectations, causal failures, historical price attribution, percentage calibration, and no-trade cases.
+3. Skeptical impact critic: contrary evidence, embedded expectations, causal failures, historical price attribution, percentage calibration, no-trade cases, and whether a business beat is likely to be accepted by the market rather than already priced in.
 
 Before spawning them, make a ranked question ledger containing only questions capable of changing direction, strength, candidate selection, calibration, or `HOLD`. Give every subagent the event, cutoff, purpose, relevant batch files, and ledger. Require independent browsing, labeled sources, explicit inference, uncertainty, and a compact memo.
 
 After all three memos arrive, send every material disagreement or unsupported link back to all three in one conflict packet. Each must answer the opposing evidence and mark each response `defend`, `revise`, or `withdraw`, with a falsifier. Wait for all rebuttals, then adjudicate. Subagents return research memos only; you alone produce the final JSON.
+
+Keep business quality and market acceptance as separate hypotheses during the debate. Consider pre-cutoff expectations, forward guidance, prior run-up, valuation, and already-announced catalysts when they help explain a possible expectation reset or "sell the news" reaction. These are decision lenses for ranking evidence, choosing a tier or `HOLD`, and calibrating percentages; they do not add required fields to the output schema.
 
 Prefer primary and close-to-primary sources. Resolve metric conflicts by timestamp, period, scope, and definition. Treat secondary commentary as a lead unless it is itself the relevant evidence. Correlation alone does not prove which disclosed fact caused a move.
 

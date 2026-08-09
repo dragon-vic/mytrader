@@ -14,7 +14,6 @@ from jsonschema.exceptions import ValidationError
 
 from strategies.agent_trading.agents import AnalysisAgent
 from strategies.agent_trading.agents import CodexProfile
-from strategies.agent_trading.agents import CodexRunner
 from strategies.agent_trading.agents import ResearchAgent
 from strategies.agent_trading.agents import ResearchOutcome
 from strategies.agent_trading.event_store import EventStore
@@ -30,6 +29,7 @@ from strategies.agent_trading.watch import DisclosurePackage
 from strategies.agent_trading.watch import DisclosureTimeoutError
 from strategies.agent_trading.watch import DisclosureWatcher
 from strategies.agent_trading.watch import WatchPlan
+from tools.codex_agent import CodexRunner
 
 
 SEC_USER_AGENT = "nt_quant-agent-trading/1.0 victorice@yeah.net"
@@ -133,6 +133,7 @@ class AgentController:
                 "company": event.company,
                 "ticker": event.ticker,
                 "scope": event.scope,
+                "confirmed": event.confirmed,
                 "research_hints": list(event.research_hints),
             },
             event.watch_plan.to_dict(),

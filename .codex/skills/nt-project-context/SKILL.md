@@ -202,6 +202,7 @@ ssh aws
 
 - `tools/telegram_codex.py`：Telegram Codex bot。
 - `tools/change_leverage.py`：账户杠杆工具。
+- `tools/codex_agent.py`：统一的 Codex CLI 执行接口，供 `agent_trading` 和邮件工具复用。
 - `tools/send_email.py`：读取文件或目录并调用 Codex agent 发送总结邮件。
 
 只有用户明确要求时，才把工具接入策略或框架运行链路。

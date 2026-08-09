@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import json
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -10,7 +8,13 @@ from dotenv import load_dotenv
 
 
 ROOT = Path(__file__).resolve().parents[1]
-LOCAL_CODEX_PATH = Path.home() / ".local" / "bin" / "codex"
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from tools.codex_agent import AgentRequest
+from tools.codex_agent import CodexRunner
+
+
 CODEX_MODEL = "gpt-5.6-luna"
 CODEX_REASONING_EFFORT = "xhigh"
 
@@ -79,54 +83,17 @@ def build_agent_prompt(input_paths: list[Path], custom_prompt: str) -> str:
 
 def run_agent(input_paths: list[Path], custom_prompt: str) -> str:
     """调用 Codex agent 阅读输入并由 agent 完成邮件发送。"""
-    codex_executable = str(LOCAL_CODEX_PATH) if LOCAL_CODEX_PATH.is_file() else "codex"
-    command = [
-        codex_executable,
-        "exec",
-        "--model",
-        CODEX_MODEL,
-        "--json",
-        "--ephemeral",
-        "--sandbox",
-        "danger-full-access",
-        "-C",
-        str(ROOT),
-        "-c",
-        f'model_reasoning_effort="{CODEX_REASONING_EFFORT}"',
-        "-",
-    ]
-    process = subprocess.run(
-        command,
-        input=build_agent_prompt(input_paths, custom_prompt),
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
+    result = CodexRunner().run_sync(
+        AgentRequest(
+            prompt=build_agent_prompt(input_paths, custom_prompt),
+            work_dir=ROOT,
+            model=CODEX_MODEL,
+            reasoning_effort=CODEX_REASONING_EFFORT,
+            ephemeral=True,
+            sandbox="danger-full-access",
+        ),
     )
-    if process.returncode != 0:
-        detail = process.stderr.strip() or process.stdout.strip()
-        raise RuntimeError(
-            f"codex agent failed with code {process.returncode}: {detail or 'no diagnostic output'}",
-        )
-    return last_agent_message(process.stdout)
-
-
-def last_agent_message(output: str) -> str:
-    """从 Codex JSONL 输出中提取 agent 的最终消息。"""
-    messages: list[str] = []
-    for line in output.splitlines():
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        item = event.get("item") or {}
-        if item.get("type") == "agent_message" and item.get("text"):
-            messages.append(str(item["text"]))
-    if not messages:
-        raise RuntimeError("codex agent returned no final message")
-    return messages[-1]
+    return result.message
 
 
 def main() -> None:

@@ -20,20 +20,33 @@
           "watch": {
             "sec": {
               "cik": "0001567094",
-              "forms": ["8-K", "10-Q", "10-K"]
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
             },
             "news_release": {
               "sources": [
                 {
                   "url": "https://investors.cnh.com/rss/PressRelease.aspx",
                   "format": "feed",
-                  "title_phrases": ["cnh industrial n.v. reports second quarter 2026 results", "cnh reports second quarter 2026 results"],
-                  "exclude_phrases": ["to announce"],
-                  "content_terms": ["cnh", "net sales"]
+                  "title_phrases": [
+                    "cnh industrial n.v. reports second quarter 2026 results",
+                    "cnh reports second quarter 2026 results"
+                  ],
+                  "exclude_phrases": [
+                    "to announce"
+                  ],
+                  "content_terms": [
+                    "cnh",
+                    "net sales"
+                  ]
                 }
               ]
             }
-          }
+          },
+          "confirmed": true
         },
         {
           "event_id": "2026-08-03-srad",
@@ -46,20 +59,31 @@
           "watch": {
             "sec": {
               "cik": "0001836470",
-              "forms": ["6-K", "20-F"]
+              "forms": [
+                "6-K",
+                "20-F"
+              ]
             },
             "news_release": {
               "sources": [
                 {
                   "url": "https://investors.sportradar.com/rss/news-releases.xml",
                   "format": "feed",
-                  "title_phrases": ["sportradar reports second quarter 2026 financial results"],
-                  "exclude_phrases": ["to release"],
-                  "content_terms": ["sportradar", "revenue"]
+                  "title_phrases": [
+                    "sportradar reports second quarter 2026 financial results"
+                  ],
+                  "exclude_phrases": [
+                    "to release"
+                  ],
+                  "content_terms": [
+                    "sportradar",
+                    "revenue"
+                  ]
                 }
               ]
             }
-          }
+          },
+          "confirmed": true
         },
         {
           "event_id": "2026-08-03-abtc",
@@ -72,20 +96,32 @@
           "watch": {
             "sec": {
               "cik": "0001755953",
-              "forms": ["8-K", "10-Q", "10-K"]
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
             },
             "news_release": {
               "sources": [
                 {
                   "url": "https://www.abtc.com/news",
                   "format": "html",
-                  "title_phrases": ["american bitcoin reports second quarter 2026 results"],
-                  "exclude_phrases": ["schedules"],
-                  "content_terms": ["american bitcoin", "revenue"]
+                  "title_phrases": [
+                    "american bitcoin reports second quarter 2026 results"
+                  ],
+                  "exclude_phrases": [
+                    "schedules"
+                  ],
+                  "content_terms": [
+                    "american bitcoin",
+                    "revenue"
+                  ]
                 }
               ]
             }
-          }
+          },
+          "confirmed": true
         }
       ]
     },
@@ -106,20 +142,32 @@
           "watch": {
             "sec": {
               "cik": "0001321655",
-              "forms": ["8-K", "10-Q", "10-K"]
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
             },
             "news_release": {
               "sources": [
                 {
                   "url": "https://investors.palantir.com/feed/PressRelease.svc/GetPressReleaseList?languageId=1&bodyType=0&year=2026&includeTags=true&pressReleaseDateFilter=1",
                   "format": "q4_json",
-                  "title_phrases": ["palantir reports q2 2026"],
-                  "exclude_phrases": ["announces date"],
-                  "content_terms": ["palantir", "revenue"]
+                  "title_phrases": [
+                    "palantir reports q2 2026"
+                  ],
+                  "exclude_phrases": [
+                    "announces date"
+                  ],
+                  "content_terms": [
+                    "palantir",
+                    "revenue"
+                  ]
                 }
               ]
             }
-          }
+          },
+          "confirmed": true
         }
       ]
     },
@@ -140,20 +188,33 @@
           "watch": {
             "sec": {
               "cik": "0000018230",
-              "forms": ["8-K", "10-Q", "10-K"]
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
             },
             "news_release": {
               "sources": [
                 {
                   "url": "https://investors.caterpillar.com/feed/PressRelease.svc/GetPressReleaseList?languageId=1&bodyType=0&year=2026&includeTags=true&pressReleaseDateFilter=1",
                   "format": "q4_json",
-                  "title_phrases": ["caterpillar reports second-quarter 2026 results", "caterpillar reports second quarter 2026 results"],
-                  "exclude_phrases": ["to announce"],
-                  "content_terms": ["caterpillar", "sales and revenues"]
+                  "title_phrases": [
+                    "caterpillar reports second-quarter 2026 results",
+                    "caterpillar reports second quarter 2026 results"
+                  ],
+                  "exclude_phrases": [
+                    "to announce"
+                  ],
+                  "content_terms": [
+                    "caterpillar",
+                    "sales and revenues"
+                  ]
                 }
               ]
             }
-          }
+          },
+          "confirmed": true
         }
       ]
     },
@@ -174,20 +235,33 @@
           "watch": {
             "sec": {
               "cik": "0001181412",
-              "forms": ["8-K", "10-Q", "10-K"]
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
             },
             "news_release": {
               "sources": [
                 {
                   "url": "https://ir.spacex.com/rss/PressRelease.aspx",
                   "format": "feed",
-                  "title_phrases": ["spacex posts second quarter 2026 results", "spacex reports second quarter 2026 results"],
-                  "exclude_phrases": ["to post"],
-                  "content_terms": ["spacex", "revenue"]
+                  "title_phrases": [
+                    "spacex posts second quarter 2026 results",
+                    "spacex reports second quarter 2026 results"
+                  ],
+                  "exclude_phrases": [
+                    "to post"
+                  ],
+                  "content_terms": [
+                    "spacex",
+                    "revenue"
+                  ]
                 }
               ]
             }
-          }
+          },
+          "confirmed": true
         },
         {
           "event_id": "2026-08-04-amd",
@@ -200,20 +274,32 @@
           "watch": {
             "sec": {
               "cik": "0000002488",
-              "forms": ["8-K", "10-Q", "10-K"]
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
             },
             "news_release": {
               "sources": [
                 {
                   "url": "https://ir.amd.com/news-events/press-releases/rss",
                   "format": "feed",
-                  "title_phrases": ["amd reports fiscal second quarter 2026 financial results"],
-                  "exclude_phrases": ["to report"],
-                  "content_terms": ["amd", "revenue"]
+                  "title_phrases": [
+                    "amd reports fiscal second quarter 2026 financial results"
+                  ],
+                  "exclude_phrases": [
+                    "to report"
+                  ],
+                  "content_terms": [
+                    "amd",
+                    "revenue"
+                  ]
                 }
               ]
             }
-          }
+          },
+          "confirmed": true
         },
         {
           "event_id": "2026-08-04-alab",
@@ -226,20 +312,32 @@
           "watch": {
             "sec": {
               "cik": "0001736297",
-              "forms": ["8-K", "10-Q", "10-K"]
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
             },
             "news_release": {
               "sources": [
                 {
                   "url": "https://ir.asteralabs.com/news-events/news-releases",
                   "format": "html",
-                  "title_phrases": ["astera labs reports second quarter 2026 financial results"],
-                  "exclude_phrases": ["announces conference"],
-                  "content_terms": ["astera labs", "revenue"]
+                  "title_phrases": [
+                    "astera labs reports second quarter 2026 financial results"
+                  ],
+                  "exclude_phrases": [
+                    "announces conference"
+                  ],
+                  "content_terms": [
+                    "astera labs",
+                    "revenue"
+                  ]
                 }
               ]
             }
-          }
+          },
+          "confirmed": true
         },
         {
           "event_id": "2026-08-04-anet",
@@ -252,20 +350,33 @@
           "watch": {
             "sec": {
               "cik": "0001596532",
-              "forms": ["8-K", "10-Q", "10-K"]
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
             },
             "news_release": {
               "sources": [
                 {
                   "url": "https://www.arista.com/en/company/news/press-release",
                   "format": "html",
-                  "title_phrases": ["arista networks, inc. reports second quarter 2026 financial results", "arista networks reports second quarter 2026 financial results"],
-                  "exclude_phrases": ["to announce"],
-                  "content_terms": ["arista networks", "revenue"]
+                  "title_phrases": [
+                    "arista networks, inc. reports second quarter 2026 financial results",
+                    "arista networks reports second quarter 2026 financial results"
+                  ],
+                  "exclude_phrases": [
+                    "to announce"
+                  ],
+                  "content_terms": [
+                    "arista networks",
+                    "revenue"
+                  ]
                 }
               ]
             }
-          }
+          },
+          "confirmed": true
         }
       ]
     },
@@ -286,20 +397,31 @@
           "watch": {
             "sec": {
               "cik": "0000353278",
-              "forms": ["6-K", "20-F"]
+              "forms": [
+                "6-K",
+                "20-F"
+              ]
             },
             "news_release": {
               "sources": [
                 {
                   "url": "https://www.novonordisk.com/investors/financial-results.html",
                   "format": "html",
-                  "title_phrases": ["financial report for the first half of 2026", "financial results for the first half of 2026", "financial report for first half 2026"],
+                  "title_phrases": [
+                    "financial report for the first half of 2026",
+                    "financial results for the first half of 2026",
+                    "financial report for first half 2026"
+                  ],
                   "exclude_phrases": [],
-                  "content_terms": ["novo nordisk", "sales"]
+                  "content_terms": [
+                    "novo nordisk",
+                    "sales"
+                  ]
                 }
               ]
             }
-          }
+          },
+          "confirmed": true
         },
         {
           "event_id": "2026-08-05-lly",
@@ -312,20 +434,32 @@
           "watch": {
             "sec": {
               "cik": "0000059478",
-              "forms": ["8-K", "10-Q", "10-K"]
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
             },
             "news_release": {
               "sources": [
                 {
                   "url": "https://investor.lilly.com/financial-information/quarterly-results",
                   "format": "html",
-                  "title_phrases": ["q2 2026 financial results", "second-quarter 2026 financial results", "press release"],
+                  "title_phrases": [
+                    "q2 2026 financial results",
+                    "second-quarter 2026 financial results",
+                    "press release"
+                  ],
                   "exclude_phrases": [],
-                  "content_terms": ["lilly", "revenue"]
+                  "content_terms": [
+                    "lilly",
+                    "revenue"
+                  ]
                 }
               ]
             }
-          }
+          },
+          "confirmed": true
         },
         {
           "event_id": "2026-08-05-dis",
@@ -338,20 +472,33 @@
           "watch": {
             "sec": {
               "cik": "0001744489",
-              "forms": ["8-K", "10-Q", "10-K"]
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
             },
             "news_release": {
               "sources": [
                 {
                   "url": "https://investors.thewaltdisneycompany.com/rss/PressRelease.aspx",
                   "format": "feed",
-                  "title_phrases": ["the walt disney company reports third quarter", "the walt disney company reports fiscal third quarter 2026"],
-                  "exclude_phrases": ["to report"],
-                  "content_terms": ["the walt disney company", "revenues"]
+                  "title_phrases": [
+                    "the walt disney company reports third quarter",
+                    "the walt disney company reports fiscal third quarter 2026"
+                  ],
+                  "exclude_phrases": [
+                    "to report"
+                  ],
+                  "content_terms": [
+                    "the walt disney company",
+                    "revenues"
+                  ]
                 }
               ]
             }
-          }
+          },
+          "confirmed": true
         },
         {
           "event_id": "2026-08-05-uber",
@@ -364,20 +511,31 @@
           "watch": {
             "sec": {
               "cik": "0001543151",
-              "forms": ["8-K", "10-Q", "10-K"]
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
             },
             "news_release": {
               "sources": [
                 {
                   "url": "https://investor.uber.com/rss/PressRelease.aspx",
                   "format": "feed",
-                  "title_phrases": ["uber announces results for second quarter 2026", "uber reports second quarter 2026 results"],
+                  "title_phrases": [
+                    "uber announces results for second quarter 2026",
+                    "uber reports second quarter 2026 results"
+                  ],
                   "exclude_phrases": [],
-                  "content_terms": ["uber", "revenue"]
+                  "content_terms": [
+                    "uber",
+                    "revenue"
+                  ]
                 }
               ]
             }
-          }
+          },
+          "confirmed": true
         },
         {
           "event_id": "2026-08-05-crcl",
@@ -390,20 +548,32 @@
           "watch": {
             "sec": {
               "cik": "0001876042",
-              "forms": ["8-K", "10-Q", "10-K"]
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
             },
             "news_release": {
               "sources": [
                 {
                   "url": "https://investor.circle.com/rss/PressRelease.aspx",
                   "format": "feed",
-                  "title_phrases": ["circle reports second quarter 2026 financial results"],
-                  "exclude_phrases": ["to announce"],
-                  "content_terms": ["circle", "revenue"]
+                  "title_phrases": [
+                    "circle reports second quarter 2026 financial results"
+                  ],
+                  "exclude_phrases": [
+                    "to announce"
+                  ],
+                  "content_terms": [
+                    "circle",
+                    "revenue"
+                  ]
                 }
               ]
             }
-          }
+          },
+          "confirmed": true
         }
       ]
     },
@@ -424,20 +594,33 @@
           "watch": {
             "sec": {
               "cik": "0002023554",
-              "forms": ["8-K", "10-Q", "10-K"]
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
             },
             "news_release": {
               "sources": [
                 {
                   "url": "https://investor.sandisk.com/rss/news-releases.xml",
                   "format": "feed",
-                  "title_phrases": ["sandisk reports fiscal fourth quarter", "sandisk reports fourth quarter 2026"],
-                  "exclude_phrases": ["to report"],
-                  "content_terms": ["sandisk", "revenue"]
+                  "title_phrases": [
+                    "sandisk reports fiscal fourth quarter",
+                    "sandisk reports fourth quarter 2026"
+                  ],
+                  "exclude_phrases": [
+                    "to report"
+                  ],
+                  "content_terms": [
+                    "sandisk",
+                    "revenue"
+                  ]
                 }
               ]
             }
-          }
+          },
+          "confirmed": true
         },
         {
           "event_id": "2026-08-05-wdc",
@@ -450,21 +633,33 @@
           "watch": {
             "sec": {
               "cik": "0000106040",
-              "forms": ["8-K", "10-Q", "10-K"]
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
             },
             "news_release": {
               "sources": [
                 {
                   "url": "https://investor.wdc.com/rss/news-releases.xml",
                   "format": "feed",
-                  "title_phrases": ["wd reports fiscal fourth quarter 2026 financial results"],
-                  "exclude_phrases": ["to announce"],
-                  "content_terms": ["western digital", "revenue"],
+                  "title_phrases": [
+                    "wd reports fiscal fourth quarter 2026 financial results"
+                  ],
+                  "exclude_phrases": [
+                    "to announce"
+                  ],
+                  "content_terms": [
+                    "western digital",
+                    "revenue"
+                  ],
                   "user_agent": "curl/8.5.0"
                 }
               ]
             }
-          }
+          },
+          "confirmed": true
         },
         {
           "event_id": "2026-08-05-flnc",
@@ -477,20 +672,34 @@
           "watch": {
             "sec": {
               "cik": "0001868941",
-              "forms": ["8-K", "10-Q", "10-K"]
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
             },
             "news_release": {
               "sources": [
                 {
                   "url": "https://ir.fluenceenergy.com/rss/news-releases.xml",
                   "format": "feed",
-                  "title_phrases": ["fluence energy, inc. reports third quarter 2026 results", "fluence reports third quarter 2026 results"],
-                  "exclude_phrases": ["earnings release date", "announces fiscal"],
-                  "content_terms": ["fluence", "revenue"]
+                  "title_phrases": [
+                    "fluence energy, inc. reports third quarter 2026 results",
+                    "fluence reports third quarter 2026 results"
+                  ],
+                  "exclude_phrases": [
+                    "earnings release date",
+                    "announces fiscal"
+                  ],
+                  "content_terms": [
+                    "fluence",
+                    "revenue"
+                  ]
                 }
               ]
             }
-          }
+          },
+          "confirmed": true
         }
       ]
     },
@@ -511,20 +720,33 @@
           "watch": {
             "sec": {
               "cik": "0000921738",
-              "forms": ["8-K", "10-Q", "10-K"]
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
             },
             "news_release": {
               "sources": [
                 {
                   "url": "https://investors.pennentertainment.com/press-releases",
                   "format": "html",
-                  "title_phrases": ["penn entertainment, inc. reports second quarter results", "penn entertainment reports second quarter 2026 results"],
-                  "exclude_phrases": ["to report"],
-                  "content_terms": ["penn entertainment", "revenues"]
+                  "title_phrases": [
+                    "penn entertainment, inc. reports second quarter results",
+                    "penn entertainment reports second quarter 2026 results"
+                  ],
+                  "exclude_phrases": [
+                    "to report"
+                  ],
+                  "content_terms": [
+                    "penn entertainment",
+                    "revenues"
+                  ]
                 }
               ]
             }
-          }
+          },
+          "confirmed": true
         }
       ]
     },
@@ -545,20 +767,32 @@
           "watch": {
             "sec": {
               "cik": "0001883685",
-              "forms": ["8-K", "10-Q", "10-K"]
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
             },
             "news_release": {
               "sources": [
                 {
                   "url": "https://ir.aboutdraftkings.com/rss/PressRelease.aspx",
                   "format": "feed",
-                  "title_phrases": ["draftkings reports second quarter 2026 results"],
-                  "exclude_phrases": ["to release"],
-                  "content_terms": ["draftkings", "revenue"]
+                  "title_phrases": [
+                    "draftkings reports second quarter 2026 results"
+                  ],
+                  "exclude_phrases": [
+                    "to release"
+                  ],
+                  "content_terms": [
+                    "draftkings",
+                    "revenue"
+                  ]
                 }
               ]
             }
-          }
+          },
+          "confirmed": true
         },
         {
           "event_id": "2026-08-06-aaoi",
@@ -571,20 +805,32 @@
           "watch": {
             "sec": {
               "cik": "0001158114",
-              "forms": ["8-K", "10-Q", "10-K"]
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
             },
             "news_release": {
               "sources": [
                 {
                   "url": "https://investors.ao-inc.com/rss/news-releases.xml",
                   "format": "feed",
-                  "title_phrases": ["applied optoelectronics reports second quarter 2026 financial results"],
-                  "exclude_phrases": ["announces date"],
-                  "content_terms": ["applied optoelectronics", "revenue"]
+                  "title_phrases": [
+                    "applied optoelectronics reports second quarter 2026 financial results"
+                  ],
+                  "exclude_phrases": [
+                    "announces date"
+                  ],
+                  "content_terms": [
+                    "applied optoelectronics",
+                    "revenue"
+                  ]
                 }
               ]
             }
-          }
+          },
+          "confirmed": true
         },
         {
           "event_id": "2026-08-06-mara",
@@ -597,20 +843,33 @@
           "watch": {
             "sec": {
               "cik": "0001507605",
-              "forms": ["8-K", "10-Q", "10-K"]
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
             },
             "news_release": {
               "sources": [
                 {
                   "url": "https://ir.mara.com/news-events/press-releases",
                   "format": "html",
-                  "title_phrases": ["mara announces second quarter 2026 results", "mara reports second quarter 2026 results"],
-                  "exclude_phrases": ["schedules"],
-                  "content_terms": ["mara", "second quarter 2026"]
+                  "title_phrases": [
+                    "mara announces second quarter 2026 results",
+                    "mara reports second quarter 2026 results"
+                  ],
+                  "exclude_phrases": [
+                    "schedules"
+                  ],
+                  "content_terms": [
+                    "mara",
+                    "second quarter 2026"
+                  ]
                 }
               ]
             }
-          }
+          },
+          "confirmed": true
         }
       ]
     },
@@ -631,20 +890,33 @@
           "watch": {
             "sec": {
               "cik": "0000030697",
-              "forms": ["8-K", "10-Q", "10-K"]
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
             },
             "news_release": {
               "sources": [
                 {
                   "url": "https://www.irwendys.com/rss/PressRelease.aspx",
                   "format": "feed",
-                  "title_phrases": ["the wendy's company reports second quarter 2026 results", "wendy's reports second quarter 2026 results"],
-                  "exclude_phrases": ["to report"],
-                  "content_terms": ["wendy's", "revenues"]
+                  "title_phrases": [
+                    "the wendy's company reports second quarter 2026 results",
+                    "wendy's reports second quarter 2026 results"
+                  ],
+                  "exclude_phrases": [
+                    "to report"
+                  ],
+                  "content_terms": [
+                    "wendy's",
+                    "revenues"
+                  ]
                 }
               ]
             }
-          }
+          },
+          "confirmed": true
         },
         {
           "event_id": "2026-08-07-ttwo",
@@ -657,20 +929,33 @@
           "watch": {
             "sec": {
               "cik": "0000946581",
-              "forms": ["8-K", "10-Q", "10-K"]
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
             },
             "news_release": {
               "sources": [
                 {
                   "url": "https://www.take2games.com/ir/press-releases",
                   "format": "html",
-                  "title_phrases": ["take-two interactive software, inc. reports results for fiscal first quarter 2027", "take-two reports fiscal first quarter 2027 results"],
-                  "exclude_phrases": ["to report"],
-                  "content_terms": ["take-two interactive", "net revenue"]
+                  "title_phrases": [
+                    "take-two interactive software, inc. reports results for fiscal first quarter 2027",
+                    "take-two reports fiscal first quarter 2027 results"
+                  ],
+                  "exclude_phrases": [
+                    "to report"
+                  ],
+                  "content_terms": [
+                    "take-two interactive",
+                    "net revenue"
+                  ]
                 }
               ]
             }
-          }
+          },
+          "confirmed": true
         }
       ]
     },
@@ -681,9 +966,43 @@
       "watch_end_at": "2026-08-10T13:30:00Z",
       "events": [
         {
-          "event_id": "2026-08-10-usar", "company": "USA Rare Earth", "ticker": "USAR", "scope": "other",
-          "research_hints": ["Evaluate USAR directly and test rare-earth supply-chain read-throughs."],
-          "watch": {"sec": {"cik": "0001970622", "forms": ["8-K", "10-Q", "10-K"]}, "news_release": {"sources": [{"url": "https://investors.usare.com/news-events/press-releases", "format": "html", "title_phrases": ["usa rare earth reports", "usa rare earth announces financial results"], "exclude_phrases": ["to report"], "content_terms": ["usa rare earth", "financial results"]}]}}
+          "event_id": "2026-08-10-usar",
+          "company": "USA Rare Earth",
+          "ticker": "USAR",
+          "scope": "other",
+          "research_hints": [
+            "Evaluate USAR directly and test rare-earth supply-chain read-throughs."
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0001970622",
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://investors.usare.com/news-events/press-releases",
+                  "format": "html",
+                  "title_phrases": [
+                    "usa rare earth reports",
+                    "usa rare earth announces financial results"
+                  ],
+                  "exclude_phrases": [
+                    "to report"
+                  ],
+                  "content_terms": [
+                    "usa rare earth",
+                    "financial results"
+                  ]
+                }
+              ]
+            }
+          },
+          "confirmed": false
         }
       ]
     },
@@ -694,19 +1013,121 @@
       "watch_end_at": "2026-08-10T22:00:00Z",
       "events": [
         {
-          "event_id": "2026-08-10-asts", "company": "AST SpaceMobile", "ticker": "ASTS", "scope": "core_tech_crypto",
-          "research_hints": ["Evaluate ASTS directly and test satellite-network read-throughs to RKLB and SPCX."],
-          "watch": {"sec": {"cik": "0001780312", "forms": ["8-K", "10-Q", "10-K"]}, "news_release": {"sources": [{"url": "https://investors.ast-science.com/", "format": "html", "title_phrases": ["ast spacemobile provides business update", "ast spacemobile reports"], "exclude_phrases": ["to report"], "content_terms": ["ast spacemobile", "quarter"]}]}}
+          "event_id": "2026-08-10-asts",
+          "company": "AST SpaceMobile",
+          "ticker": "ASTS",
+          "scope": "core_tech_crypto",
+          "research_hints": [
+            "Evaluate ASTS directly and test satellite-network read-throughs to RKLB and SPCX."
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0001780312",
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://investors.ast-science.com/",
+                  "format": "html",
+                  "title_phrases": [
+                    "ast spacemobile provides business update",
+                    "ast spacemobile reports"
+                  ],
+                  "exclude_phrases": [
+                    "to report"
+                  ],
+                  "content_terms": [
+                    "ast spacemobile",
+                    "quarter"
+                  ]
+                }
+              ]
+            }
+          },
+          "confirmed": true
         },
         {
-          "event_id": "2026-08-10-hims", "company": "Hims & Hers Health", "ticker": "HIMS", "scope": "other",
-          "research_hints": ["Evaluate HIMS directly and reject weak cross-asset read-throughs."],
-          "watch": {"sec": {"cik": "0001773751", "forms": ["8-K", "10-Q", "10-K"]}, "news_release": {"sources": [{"url": "https://investors.hims.com/news/news-releases", "format": "html", "title_phrases": ["hims & hers reports", "hims and hers reports"], "exclude_phrases": ["to report"], "content_terms": ["hims", "revenue"]}]}}
+          "event_id": "2026-08-10-hims",
+          "company": "Hims & Hers Health",
+          "ticker": "HIMS",
+          "scope": "other",
+          "research_hints": [
+            "Evaluate HIMS directly and reject weak cross-asset read-throughs."
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0001773751",
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://investors.hims.com/news/news-releases",
+                  "format": "html",
+                  "title_phrases": [
+                    "hims & hers reports",
+                    "hims and hers reports"
+                  ],
+                  "exclude_phrases": [
+                    "to report"
+                  ],
+                  "content_terms": [
+                    "hims",
+                    "revenue"
+                  ]
+                }
+              ]
+            }
+          },
+          "confirmed": true
         },
         {
-          "event_id": "2026-08-10-rklb", "company": "Rocket Lab", "ticker": "RKLB", "scope": "core_tech_crypto",
-          "research_hints": ["Evaluate RKLB directly and test launch and space-systems read-throughs to ASTS and SPCX."],
-          "watch": {"sec": {"cik": "0001819994", "forms": ["8-K", "10-Q", "10-K"]}, "news_release": {"sources": [{"url": "https://investors.rocketlabusa.com/news-events/press-releases", "format": "html", "title_phrases": ["rocket lab announces financial results", "rocket lab reports"], "exclude_phrases": ["to report"], "content_terms": ["rocket lab", "revenue"]}]}}
+          "event_id": "2026-08-10-rklb",
+          "company": "Rocket Lab",
+          "ticker": "RKLB",
+          "scope": "core_tech_crypto",
+          "research_hints": [
+            "Evaluate RKLB directly and test launch and space-systems read-throughs to ASTS and SPCX."
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0001819994",
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://investors.rocketlabusa.com/news-events/press-releases",
+                  "format": "html",
+                  "title_phrases": [
+                    "rocket lab announces financial results",
+                    "rocket lab reports"
+                  ],
+                  "exclude_phrases": [
+                    "to report"
+                  ],
+                  "content_terms": [
+                    "rocket lab",
+                    "revenue"
+                  ]
+                }
+              ]
+            }
+          },
+          "confirmed": true
         }
       ]
     },
@@ -717,19 +1138,121 @@
       "watch_end_at": "2026-08-11T22:00:00Z",
       "events": [
         {
-          "event_id": "2026-08-11-crwv", "company": "CoreWeave", "ticker": "CRWV", "scope": "core_tech_crypto",
-          "research_hints": ["Evaluate CRWV directly and test AI infrastructure demand read-throughs to NVDA, DELL and SMCI."],
-          "watch": {"sec": {"cik": "0001769628", "forms": ["8-K", "10-Q", "10-K"]}, "news_release": {"sources": [{"url": "https://investors.coreweave.com/news-events/news-releases", "format": "html", "title_phrases": ["coreweave reports", "coreweave announces financial results"], "exclude_phrases": ["to report"], "content_terms": ["coreweave", "revenue"]}]}}
+          "event_id": "2026-08-11-crwv",
+          "company": "CoreWeave",
+          "ticker": "CRWV",
+          "scope": "core_tech_crypto",
+          "research_hints": [
+            "Evaluate CRWV directly and test AI infrastructure demand read-throughs to NVDA, DELL and SMCI."
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0001769628",
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://investors.coreweave.com/news-events/news-releases",
+                  "format": "html",
+                  "title_phrases": [
+                    "coreweave reports",
+                    "coreweave announces financial results"
+                  ],
+                  "exclude_phrases": [
+                    "to report"
+                  ],
+                  "content_terms": [
+                    "coreweave",
+                    "revenue"
+                  ]
+                }
+              ]
+            }
+          },
+          "confirmed": true
         },
         {
-          "event_id": "2026-08-11-lite", "company": "Lumentum Holdings", "ticker": "LITE", "scope": "core_tech_crypto",
-          "research_hints": ["Evaluate LITE directly and test optical-network demand read-throughs to COHR and AAOI."],
-          "watch": {"sec": {"cik": "0001633978", "forms": ["8-K", "10-Q", "10-K"]}, "news_release": {"sources": [{"url": "https://investor.lumentum.com/financial-news-releases/default.aspx", "format": "html", "title_phrases": ["lumentum announces financial results", "lumentum reports"], "exclude_phrases": ["to report"], "content_terms": ["lumentum", "revenue"]}]}}
+          "event_id": "2026-08-11-lite",
+          "company": "Lumentum Holdings",
+          "ticker": "LITE",
+          "scope": "core_tech_crypto",
+          "research_hints": [
+            "Evaluate LITE directly and test optical-network demand read-throughs to COHR and AAOI."
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0001633978",
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://investor.lumentum.com/financial-news-releases/default.aspx",
+                  "format": "html",
+                  "title_phrases": [
+                    "lumentum announces financial results",
+                    "lumentum reports"
+                  ],
+                  "exclude_phrases": [
+                    "to report"
+                  ],
+                  "content_terms": [
+                    "lumentum",
+                    "revenue"
+                  ]
+                }
+              ]
+            }
+          },
+          "confirmed": true
         },
         {
-          "event_id": "2026-08-11-smci", "company": "Super Micro Computer", "ticker": "SMCI", "scope": "core_tech_crypto",
-          "research_hints": ["Evaluate SMCI directly and test AI-server demand and supply read-throughs to NVDA, DELL and CRWV."],
-          "watch": {"sec": {"cik": "0001375365", "forms": ["8-K", "10-Q", "10-K"]}, "news_release": {"sources": [{"url": "https://ir.supermicro.com/news/news-releases", "format": "html", "title_phrases": ["supermicro announces financial results", "super micro computer reports"], "exclude_phrases": ["to announce"], "content_terms": ["supermicro", "net sales"]}]}}
+          "event_id": "2026-08-11-smci",
+          "company": "Super Micro Computer",
+          "ticker": "SMCI",
+          "scope": "core_tech_crypto",
+          "research_hints": [
+            "Evaluate SMCI directly and test AI-server demand and supply read-throughs to NVDA, DELL and CRWV."
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0001375365",
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://ir.supermicro.com/news/news-releases",
+                  "format": "html",
+                  "title_phrases": [
+                    "supermicro announces financial results",
+                    "super micro computer reports"
+                  ],
+                  "exclude_phrases": [
+                    "to announce"
+                  ],
+                  "content_terms": [
+                    "supermicro",
+                    "net sales"
+                  ]
+                }
+              ]
+            }
+          },
+          "confirmed": true
         }
       ]
     },
@@ -740,9 +1263,42 @@
       "watch_end_at": "2026-08-12T13:30:00Z",
       "events": [
         {
-          "event_id": "2026-08-12-nbis", "company": "Nebius Group", "ticker": "NBIS", "scope": "core_tech_crypto",
-          "research_hints": ["Evaluate NBIS directly and test AI-cloud capacity and demand read-throughs to CRWV and NVDA."],
-          "watch": {"sec": {"cik": "0001513845", "forms": ["6-K", "20-F"]}, "news_release": {"sources": [{"url": "https://nebius.com/newsroom", "format": "html", "title_phrases": ["nebius group reports", "nebius announces financial results"], "exclude_phrases": ["to report"], "content_terms": ["nebius", "revenue"]}]}}
+          "event_id": "2026-08-12-nbis",
+          "company": "Nebius Group",
+          "ticker": "NBIS",
+          "scope": "core_tech_crypto",
+          "research_hints": [
+            "Evaluate NBIS directly and test AI-cloud capacity and demand read-throughs to CRWV and NVDA."
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0001513845",
+              "forms": [
+                "6-K",
+                "20-F"
+              ]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://nebius.com/newsroom",
+                  "format": "html",
+                  "title_phrases": [
+                    "nebius group reports",
+                    "nebius announces financial results"
+                  ],
+                  "exclude_phrases": [
+                    "to report"
+                  ],
+                  "content_terms": [
+                    "nebius",
+                    "revenue"
+                  ]
+                }
+              ]
+            }
+          },
+          "confirmed": true
         }
       ]
     },
@@ -753,19 +1309,121 @@
       "watch_end_at": "2026-08-12T22:00:00Z",
       "events": [
         {
-          "event_id": "2026-08-12-cohr", "company": "Coherent", "ticker": "COHR", "scope": "core_tech_crypto",
-          "research_hints": ["Evaluate COHR directly and test optical and datacenter demand read-throughs to LITE and AAOI."],
-          "watch": {"sec": {"cik": "0000820318", "forms": ["8-K", "10-Q", "10-K"]}, "news_release": {"sources": [{"url": "https://investor.coherent.com/news-events/news-releases", "format": "html", "title_phrases": ["coherent reports", "coherent announces financial results"], "exclude_phrases": ["to report"], "content_terms": ["coherent", "revenue"]}]}}
+          "event_id": "2026-08-12-cohr",
+          "company": "Coherent",
+          "ticker": "COHR",
+          "scope": "core_tech_crypto",
+          "research_hints": [
+            "Evaluate COHR directly and test optical and datacenter demand read-throughs to LITE and AAOI."
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0000820318",
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://investor.coherent.com/news-events/news-releases",
+                  "format": "html",
+                  "title_phrases": [
+                    "coherent reports",
+                    "coherent announces financial results"
+                  ],
+                  "exclude_phrases": [
+                    "to report"
+                  ],
+                  "content_terms": [
+                    "coherent",
+                    "revenue"
+                  ]
+                }
+              ]
+            }
+          },
+          "confirmed": true
         },
         {
-          "event_id": "2026-08-12-fwdi", "company": "Forward Industries", "ticker": "FWDI", "scope": "core_tech_crypto",
-          "research_hints": ["Evaluate FWDI directly and test crypto-treasury read-throughs only when explicitly supported by the release."],
-          "watch": {"sec": {"cik": "0000038264", "forms": ["8-K", "10-Q", "10-K"]}, "news_release": {"sources": [{"url": "https://ir.forwardindustries.com/news-events/press-releases", "format": "html", "title_phrases": ["forward industries reports", "forward industries announces financial results"], "exclude_phrases": ["to report"], "content_terms": ["forward industries", "financial results"]}]}}
+          "event_id": "2026-08-12-fwdi",
+          "company": "Forward Industries",
+          "ticker": "FWDI",
+          "scope": "core_tech_crypto",
+          "research_hints": [
+            "Evaluate FWDI directly and test crypto-treasury read-throughs only when explicitly supported by the release."
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0000038264",
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://ir.forwardindustries.com/news-events/press-releases",
+                  "format": "html",
+                  "title_phrases": [
+                    "forward industries reports",
+                    "forward industries announces financial results"
+                  ],
+                  "exclude_phrases": [
+                    "to report"
+                  ],
+                  "content_terms": [
+                    "forward industries",
+                    "financial results"
+                  ]
+                }
+              ]
+            }
+          },
+          "confirmed": true
         },
         {
-          "event_id": "2026-08-12-csco", "company": "Cisco Systems", "ticker": "CSCO", "scope": "core_tech_crypto",
-          "research_hints": ["Evaluate CSCO directly and test networking and AI-infrastructure read-throughs to ANET and optical suppliers."],
-          "watch": {"sec": {"cik": "0000858877", "forms": ["8-K", "10-Q", "10-K"]}, "news_release": {"sources": [{"url": "https://investor.cisco.com/news/news-details", "format": "html", "title_phrases": ["cisco reports", "cisco announces financial results"], "exclude_phrases": ["to report"], "content_terms": ["cisco", "revenue"]}]}}
+          "event_id": "2026-08-12-csco",
+          "company": "Cisco Systems",
+          "ticker": "CSCO",
+          "scope": "core_tech_crypto",
+          "research_hints": [
+            "Evaluate CSCO directly and test networking and AI-infrastructure read-throughs to ANET and optical suppliers."
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0000858877",
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://investor.cisco.com/news/news-details",
+                  "format": "html",
+                  "title_phrases": [
+                    "cisco reports",
+                    "cisco announces financial results"
+                  ],
+                  "exclude_phrases": [
+                    "to report"
+                  ],
+                  "content_terms": [
+                    "cisco",
+                    "revenue"
+                  ]
+                }
+              ]
+            }
+          },
+          "confirmed": false
         }
       ]
     },
@@ -776,9 +1434,43 @@
       "watch_end_at": "2026-08-13T13:30:00Z",
       "events": [
         {
-          "event_id": "2026-08-13-onds", "company": "Ondas", "ticker": "ONDS", "scope": "core_tech_crypto",
-          "research_hints": ["Evaluate ONDS directly and test autonomous-systems read-throughs only when causally supported."],
-          "watch": {"sec": {"cik": "0001646188", "forms": ["8-K", "10-Q", "10-K"]}, "news_release": {"sources": [{"url": "https://ir.ondas.com/press-releases", "format": "html", "title_phrases": ["ondas reports", "ondas announces financial results"], "exclude_phrases": ["to report"], "content_terms": ["ondas", "revenue"]}]}}
+          "event_id": "2026-08-13-onds",
+          "company": "Ondas",
+          "ticker": "ONDS",
+          "scope": "core_tech_crypto",
+          "research_hints": [
+            "Evaluate ONDS directly and test autonomous-systems read-throughs only when causally supported."
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0001646188",
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://ir.ondas.com/press-releases",
+                  "format": "html",
+                  "title_phrases": [
+                    "ondas reports",
+                    "ondas announces financial results"
+                  ],
+                  "exclude_phrases": [
+                    "to report"
+                  ],
+                  "content_terms": [
+                    "ondas",
+                    "revenue"
+                  ]
+                }
+              ]
+            }
+          },
+          "confirmed": true
         }
       ]
     },
@@ -789,41 +1481,441 @@
       "watch_end_at": "2026-08-13T22:00:00Z",
       "events": [
         {
-          "event_id": "2026-08-13-amat", "company": "Applied Materials", "ticker": "AMAT", "scope": "core_tech_crypto",
-          "research_hints": ["Evaluate AMAT directly and test wafer-fab equipment demand read-throughs to LRCX, KLAC, TSM and memory names."],
-          "watch": {"sec": {"cik": "0000006951", "forms": ["8-K", "10-Q", "10-K"]}, "news_release": {"sources": [{"url": "https://ir.appliedmaterials.com/news-releases", "format": "html", "title_phrases": ["applied materials announces financial results", "applied materials reports"], "exclude_phrases": ["to announce"], "content_terms": ["applied materials", "net revenue"]}]}}
+          "event_id": "2026-08-13-amat",
+          "company": "Applied Materials",
+          "ticker": "AMAT",
+          "scope": "core_tech_crypto",
+          "research_hints": [
+            "Evaluate AMAT directly and test wafer-fab equipment demand read-throughs to LRCX, KLAC, TSM and memory names."
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0000006951",
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://ir.appliedmaterials.com/news-releases",
+                  "format": "html",
+                  "title_phrases": [
+                    "applied materials announces financial results",
+                    "applied materials reports"
+                  ],
+                  "exclude_phrases": [
+                    "to announce"
+                  ],
+                  "content_terms": [
+                    "applied materials",
+                    "net revenue"
+                  ]
+                }
+              ]
+            }
+          },
+          "confirmed": true
         }
       ]
     },
     {
-      "batch_id": "2026-08-18-bmo", "session": "BMO", "watch_start_at": "2026-08-18T10:00:00Z", "watch_end_at": "2026-08-18T13:30:00Z",
-      "events": [{"event_id": "2026-08-18-hd", "company": "The Home Depot", "ticker": "HD", "scope": "other", "research_hints": ["Evaluate HD directly."], "watch": {"sec": {"cik": "0000354950", "forms": ["8-K", "10-Q", "10-K"]}, "news_release": {"sources": [{"url": "https://ir.homedepot.com/news-releases", "format": "html", "title_phrases": ["the home depot announces", "home depot reports"], "exclude_phrases": ["to announce"], "content_terms": ["home depot", "sales"]}]}}}]
-    },
-    {
-      "batch_id": "2026-08-19-bmo", "session": "BMO", "watch_start_at": "2026-08-19T10:00:00Z", "watch_end_at": "2026-08-19T13:30:00Z",
-      "events": [{"event_id": "2026-08-19-bz", "company": "Kanzhun", "ticker": "BZ", "scope": "other", "research_hints": ["Evaluate BZ directly."], "watch": {"sec": {"cik": "0001842827", "forms": ["6-K", "20-F"]}, "news_release": {"sources": [{"url": "https://ir.zhipin.com/news-releases", "format": "html", "title_phrases": ["kanzhun limited announces", "kanzhun reports"], "exclude_phrases": ["to report"], "content_terms": ["kanzhun", "revenues"]}]}}}]
-    },
-    {
-      "batch_id": "2026-08-20-bmo", "session": "BMO", "watch_start_at": "2026-08-20T10:00:00Z", "watch_end_at": "2026-08-20T13:30:00Z",
-      "events": [{"event_id": "2026-08-20-wmt", "company": "Walmart", "ticker": "WMT", "scope": "other", "research_hints": ["Evaluate WMT directly."], "watch": {"sec": {"cik": "0000104169", "forms": ["8-K", "10-Q", "10-K"]}, "news_release": {"sources": [{"url": "https://stock.walmart.com/news-events/newsroom", "format": "html", "title_phrases": ["walmart releases", "walmart reports"], "exclude_phrases": ["to report"], "content_terms": ["walmart", "revenue"]}]}}}]
-    },
-    {
-      "batch_id": "2026-08-25-amc", "session": "AMC", "watch_start_at": "2026-08-25T20:00:00Z", "watch_end_at": "2026-08-25T22:00:00Z",
-      "events": [{"event_id": "2026-08-25-zm", "company": "Zoom Communications", "ticker": "ZM", "scope": "core_tech_crypto", "research_hints": ["Evaluate ZM directly and test enterprise-software demand read-throughs only when supported."], "watch": {"sec": {"cik": "0001585521", "forms": ["8-K", "10-Q", "10-K"]}, "news_release": {"sources": [{"url": "https://investors.zoom.us/news-releases", "format": "html", "title_phrases": ["zoom announces financial results", "zoom reports"], "exclude_phrases": ["to announce"], "content_terms": ["zoom", "revenue"]}]}}}]
-    },
-    {
-      "batch_id": "2026-08-26-amc", "session": "AMC", "watch_start_at": "2026-08-26T20:00:00Z", "watch_end_at": "2026-08-26T22:00:00Z",
+      "batch_id": "2026-08-18-bmo",
+      "session": "BMO",
+      "watch_start_at": "2026-08-18T10:00:00Z",
+      "watch_end_at": "2026-08-18T13:30:00Z",
       "events": [
-        {"event_id": "2026-08-26-crwd", "company": "CrowdStrike", "ticker": "CRWD", "scope": "core_tech_crypto", "research_hints": ["Evaluate CRWD directly and test cybersecurity demand read-throughs to PANW."], "watch": {"sec": {"cik": "0001535527", "forms": ["8-K", "10-Q", "10-K"]}, "news_release": {"sources": [{"url": "https://ir.crowdstrike.com/news-events/press-releases", "format": "html", "title_phrases": ["crowdstrike reports", "crowdstrike announces financial results"], "exclude_phrases": ["to report"], "content_terms": ["crowdstrike", "annual recurring revenue"]}]}}},
-        {"event_id": "2026-08-26-nvda", "company": "NVIDIA", "ticker": "NVDA", "scope": "core_tech_crypto", "research_hints": ["Evaluate NVDA directly and comprehensively map AI-compute, networking, memory, foundry and customer read-throughs."], "watch": {"sec": {"cik": "0001045810", "forms": ["8-K", "10-Q", "10-K"]}, "news_release": {"sources": [{"url": "https://investor.nvidia.com/news-and-events/financial-releases/default.aspx", "format": "html", "title_phrases": ["nvidia announces financial results", "nvidia reports"], "exclude_phrases": ["to announce"], "content_terms": ["nvidia", "data center"]}]}}}
+        {
+          "event_id": "2026-08-18-hd",
+          "company": "The Home Depot",
+          "ticker": "HD",
+          "scope": "other",
+          "research_hints": [
+            "Evaluate HD directly."
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0000354950",
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://ir.homedepot.com/news-releases",
+                  "format": "html",
+                  "title_phrases": [
+                    "the home depot announces",
+                    "home depot reports"
+                  ],
+                  "exclude_phrases": [
+                    "to announce"
+                  ],
+                  "content_terms": [
+                    "home depot",
+                    "sales"
+                  ]
+                }
+              ]
+            }
+          },
+          "confirmed": true
+        }
       ]
     },
     {
-      "batch_id": "2026-08-27-amc", "session": "AMC", "watch_start_at": "2026-08-27T20:00:00Z", "watch_end_at": "2026-08-27T22:00:00Z",
+      "batch_id": "2026-08-19-bmo",
+      "session": "BMO",
+      "watch_start_at": "2026-08-19T10:00:00Z",
+      "watch_end_at": "2026-08-19T13:30:00Z",
       "events": [
-        {"event_id": "2026-08-27-mrvl", "company": "Marvell Technology", "ticker": "MRVL", "scope": "core_tech_crypto", "research_hints": ["Evaluate MRVL directly and test custom silicon, networking and storage read-throughs."], "watch": {"sec": {"cik": "0001835632", "forms": ["8-K", "10-Q", "10-K"]}, "news_release": {"sources": [{"url": "https://investor.marvell.com/news-events/press-releases", "format": "html", "title_phrases": ["marvell technology reports", "marvell announces financial results"], "exclude_phrases": ["to report"], "content_terms": ["marvell", "net revenue"]}]}}},
-        {"event_id": "2026-08-27-dell", "company": "Dell Technologies", "ticker": "DELL", "scope": "core_tech_crypto", "research_hints": ["Evaluate DELL directly and test AI-server and enterprise-demand read-throughs to NVDA, SMCI and CRWV."], "watch": {"sec": {"cik": "0001571996", "forms": ["8-K", "10-Q", "10-K"]}, "news_release": {"sources": [{"url": "https://investors.delltechnologies.com/news-events/news-releases", "format": "html", "title_phrases": ["dell technologies delivers", "dell technologies reports"], "exclude_phrases": ["to hold"], "content_terms": ["dell technologies", "revenue"]}]}}},
-        {"event_id": "2026-08-27-iren", "company": "IREN", "ticker": "IREN", "scope": "core_tech_crypto", "research_hints": ["Evaluate IREN directly and separate Bitcoin-mining economics from AI-cloud capacity and contracting."], "watch": {"sec": {"cik": "0001878848", "forms": ["6-K", "20-F"]}, "news_release": {"sources": [{"url": "https://investors.iren.com/news-and-events/news-releases", "format": "html", "title_phrases": ["iren reports", "iren announces financial results"], "exclude_phrases": ["to report"], "content_terms": ["iren", "bitcoin mining"]}]}}}
+        {
+          "event_id": "2026-08-19-bz",
+          "company": "Kanzhun",
+          "ticker": "BZ",
+          "scope": "other",
+          "research_hints": [
+            "Evaluate BZ directly."
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0001842827",
+              "forms": [
+                "6-K",
+                "20-F"
+              ]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://ir.zhipin.com/news-releases",
+                  "format": "html",
+                  "title_phrases": [
+                    "kanzhun limited announces",
+                    "kanzhun reports"
+                  ],
+                  "exclude_phrases": [
+                    "to report"
+                  ],
+                  "content_terms": [
+                    "kanzhun",
+                    "revenues"
+                  ]
+                }
+              ]
+            }
+          },
+          "confirmed": false
+        }
+      ]
+    },
+    {
+      "batch_id": "2026-08-20-bmo",
+      "session": "BMO",
+      "watch_start_at": "2026-08-20T10:00:00Z",
+      "watch_end_at": "2026-08-20T13:30:00Z",
+      "events": [
+        {
+          "event_id": "2026-08-20-wmt",
+          "company": "Walmart",
+          "ticker": "WMT",
+          "scope": "other",
+          "research_hints": [
+            "Evaluate WMT directly."
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0000104169",
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://stock.walmart.com/news-events/newsroom",
+                  "format": "html",
+                  "title_phrases": [
+                    "walmart releases",
+                    "walmart reports"
+                  ],
+                  "exclude_phrases": [
+                    "to report"
+                  ],
+                  "content_terms": [
+                    "walmart",
+                    "revenue"
+                  ]
+                }
+              ]
+            }
+          },
+          "confirmed": true
+        }
+      ]
+    },
+    {
+      "batch_id": "2026-08-25-amc",
+      "session": "AMC",
+      "watch_start_at": "2026-08-25T20:00:00Z",
+      "watch_end_at": "2026-08-25T22:00:00Z",
+      "events": [
+        {
+          "event_id": "2026-08-25-zm",
+          "company": "Zoom Communications",
+          "ticker": "ZM",
+          "scope": "core_tech_crypto",
+          "research_hints": [
+            "Evaluate ZM directly and test enterprise-software demand read-throughs only when supported."
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0001585521",
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://investors.zoom.us/news-releases",
+                  "format": "html",
+                  "title_phrases": [
+                    "zoom announces financial results",
+                    "zoom reports"
+                  ],
+                  "exclude_phrases": [
+                    "to announce"
+                  ],
+                  "content_terms": [
+                    "zoom",
+                    "revenue"
+                  ]
+                }
+              ]
+            }
+          },
+          "confirmed": false
+        }
+      ]
+    },
+    {
+      "batch_id": "2026-08-26-amc",
+      "session": "AMC",
+      "watch_start_at": "2026-08-26T20:00:00Z",
+      "watch_end_at": "2026-08-26T22:00:00Z",
+      "events": [
+        {
+          "event_id": "2026-08-26-crwd",
+          "company": "CrowdStrike",
+          "ticker": "CRWD",
+          "scope": "core_tech_crypto",
+          "research_hints": [
+            "Evaluate CRWD directly and test cybersecurity demand read-throughs to PANW."
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0001535527",
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://ir.crowdstrike.com/news-events/press-releases",
+                  "format": "html",
+                  "title_phrases": [
+                    "crowdstrike reports",
+                    "crowdstrike announces financial results"
+                  ],
+                  "exclude_phrases": [
+                    "to report"
+                  ],
+                  "content_terms": [
+                    "crowdstrike",
+                    "annual recurring revenue"
+                  ]
+                }
+              ]
+            }
+          },
+          "confirmed": false
+        },
+        {
+          "event_id": "2026-08-26-nvda",
+          "company": "NVIDIA",
+          "ticker": "NVDA",
+          "scope": "core_tech_crypto",
+          "research_hints": [
+            "Evaluate NVDA directly and comprehensively map AI-compute, networking, memory, foundry and customer read-throughs."
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0001045810",
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://investor.nvidia.com/news-and-events/financial-releases/default.aspx",
+                  "format": "html",
+                  "title_phrases": [
+                    "nvidia announces financial results",
+                    "nvidia reports"
+                  ],
+                  "exclude_phrases": [
+                    "to announce"
+                  ],
+                  "content_terms": [
+                    "nvidia",
+                    "data center"
+                  ]
+                }
+              ]
+            }
+          },
+          "confirmed": true
+        }
+      ]
+    },
+    {
+      "batch_id": "2026-08-27-amc",
+      "session": "AMC",
+      "watch_start_at": "2026-08-27T20:00:00Z",
+      "watch_end_at": "2026-08-27T22:00:00Z",
+      "events": [
+        {
+          "event_id": "2026-08-27-mrvl",
+          "company": "Marvell Technology",
+          "ticker": "MRVL",
+          "scope": "core_tech_crypto",
+          "research_hints": [
+            "Evaluate MRVL directly and test custom silicon, networking and storage read-throughs."
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0001835632",
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://investor.marvell.com/news-events/press-releases",
+                  "format": "html",
+                  "title_phrases": [
+                    "marvell technology reports",
+                    "marvell announces financial results"
+                  ],
+                  "exclude_phrases": [
+                    "to report"
+                  ],
+                  "content_terms": [
+                    "marvell",
+                    "net revenue"
+                  ]
+                }
+              ]
+            }
+          },
+          "confirmed": false
+        },
+        {
+          "event_id": "2026-08-27-dell",
+          "company": "Dell Technologies",
+          "ticker": "DELL",
+          "scope": "core_tech_crypto",
+          "research_hints": [
+            "Evaluate DELL directly and test AI-server and enterprise-demand read-throughs to NVDA, SMCI and CRWV."
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0001571996",
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://investors.delltechnologies.com/news-events/news-releases",
+                  "format": "html",
+                  "title_phrases": [
+                    "dell technologies delivers",
+                    "dell technologies reports"
+                  ],
+                  "exclude_phrases": [
+                    "to hold"
+                  ],
+                  "content_terms": [
+                    "dell technologies",
+                    "revenue"
+                  ]
+                }
+              ]
+            }
+          },
+          "confirmed": false
+        },
+        {
+          "event_id": "2026-08-27-iren",
+          "company": "IREN",
+          "ticker": "IREN",
+          "scope": "core_tech_crypto",
+          "research_hints": [
+            "Evaluate IREN directly and separate Bitcoin-mining economics from AI-cloud capacity and contracting."
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0001878848",
+              "forms": [
+                "6-K",
+                "20-F"
+              ]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://investors.iren.com/news-and-events/news-releases",
+                  "format": "html",
+                  "title_phrases": [
+                    "iren reports",
+                    "iren announces financial results"
+                  ],
+                  "exclude_phrases": [
+                    "to report"
+                  ],
+                  "content_terms": [
+                    "iren",
+                    "bitcoin mining"
+                  ]
+                }
+              ]
+            }
+          },
+          "confirmed": false
+        }
       ]
     }
   ]
