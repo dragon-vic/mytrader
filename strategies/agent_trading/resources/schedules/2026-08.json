@@ -960,10 +960,10 @@
       ]
     },
     {
-      "batch_id": "2026-08-10-bmo",
-      "session": "BMO",
-      "watch_start_at": "2026-08-10T10:00:00Z",
-      "watch_end_at": "2026-08-10T13:30:00Z",
+      "batch_id": "2026-08-10-amc",
+      "session": "AMC",
+      "watch_start_at": "2026-08-10T20:00:00Z",
+      "watch_end_at": "2026-08-10T22:00:00Z",
       "events": [
         {
           "event_id": "2026-08-10-usar",
@@ -1002,16 +1002,8 @@
               ]
             }
           },
-          "confirmed": false
-        }
-      ]
-    },
-    {
-      "batch_id": "2026-08-10-amc",
-      "session": "AMC",
-      "watch_start_at": "2026-08-10T20:00:00Z",
-      "watch_end_at": "2026-08-10T22:00:00Z",
-      "events": [
+          "confirmed": true
+        },
         {
           "event_id": "2026-08-10-asts",
           "company": "AST SpaceMobile",
@@ -1423,7 +1415,7 @@
               ]
             }
           },
-          "confirmed": false
+          "confirmed": true
         }
       ]
     },

@@ -23,8 +23,6 @@ class EventPaths:
     watch_plan: Path
     analysis_input: Path
     analysis_event: Path
-    analysis_research: Path
-    analysis_brief: Path
     report: Path
     analysis_output: Path
     decision: Path
@@ -76,14 +74,12 @@ class EventStore:
             state=root / "state.json",
             event=root / "event.json",
             research_output=research_output,
-            research=research_output / "research.json",
+            research=research_output / "research.md",
             research_metrics=research_output / "research.metrics.json",
             watch=watch,
             watch_plan=watch / "plan.json",
             analysis_input=analysis_input,
             analysis_event=analysis_input / "event.json",
-            analysis_research=analysis_input / "research.json",
-            analysis_brief=analysis_input / "analysis_brief.md",
             report=analysis_input / "report.json",
             analysis_output=analysis_output,
             decision=analysis_output / "decision.json",
@@ -132,13 +128,13 @@ class EventStore:
             if stored.get("event_id") != event_id:
                 raise ValueError(f"stored event_id mismatch: {event_id}")
         else:
-            self._write(
-                paths.event,
-                {
-                    "event_id": event_id,
-                    "metadata": metadata,
-                },
-            )
+            stored = {
+                "event_id": event_id,
+                "metadata": metadata,
+            }
+            self._write(paths.event, stored)
+        if not paths.analysis_event.exists():
+            self._write(paths.analysis_event, stored)
         if not paths.watch_plan.exists():
             self._write(paths.watch_plan, watch_plan)
         if not paths.state.exists():
@@ -184,23 +180,6 @@ class EventStore:
         payload["updated_ns"] = time.time_ns()
         self._write(paths.state, payload)
         return payload
-
-    def save_analysis_input(
-        self,
-        batch_id: str,
-        event_id: str,
-        research: dict[str, Any],
-        brief: str,
-    ) -> EventPaths:
-        if not isinstance(brief, str) or not brief.strip():
-            raise TypeError("analysis_brief must be non-empty text")
-        paths = self.event_paths(batch_id, event_id)
-        self._write(paths.analysis_event, self._read(paths.event, "event"))
-        self._write(paths.analysis_research, research)
-        temporary = paths.analysis_brief.with_suffix(".md.tmp")
-        temporary.write_text(brief.strip() + "\n", encoding="utf-8")
-        temporary.replace(paths.analysis_brief)
-        return paths
 
     @staticmethod
     def _validate_id(value: str, name: str) -> None:

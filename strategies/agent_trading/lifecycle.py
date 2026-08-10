@@ -15,14 +15,6 @@ from strategies.agent_trading.watch.watch_data_models import WatchPlan
 SESSIONS = {"BMO", "AMC"}
 VENUES = {"BINANCE", "HYPERLIQUID"}
 RESEARCH_MINUTES_PER_EVENT = 40
-TRADE_SIGNALS = {
-    "STRONG_BUY",
-    "MEDIUM_BUY",
-    "WEAK_BUY",
-    "WEAK_SELL",
-    "MEDIUM_SELL",
-    "STRONG_SELL",
-}
 
 
 @dataclass(frozen=True)
@@ -329,10 +321,8 @@ class MarketUniverse:
             ],
         }
 
-    # 校验预研候选来自实时市场列表，并执行 Binance 优先规则。
-    def validate_candidate(self, candidate: dict[str, Any]) -> None:
-        symbol = candidate["symbol"]
-        instrument_id = candidate["instrument_id"]
+    # 最终决策只能使用批次市场快照中的标的，并执行 Binance 优先规则。
+    def validate_instrument_id(self, instrument_id: str) -> None:
         selected = next(
             (
                 item
@@ -341,20 +331,22 @@ class MarketUniverse:
             ),
             None,
         )
-        if selected is None or selected.symbol != symbol:
+        if selected is None:
             raise ValueError(
-                f"candidate is not an eligible non-index instrument: {instrument_id}",
+                f"decision instrument is not eligible: {instrument_id}",
             )
         venues = {
             item.venue
             for item in self.instruments
-            if item.symbol == symbol and not item.is_index
+            if item.symbol == selected.symbol and not item.is_index
         }
         preferred = "BINANCE" if "BINANCE" in venues else "HYPERLIQUID"
         if selected.venue != preferred:
             raise ValueError(
-                f"candidate must prefer {preferred} for {symbol}: {instrument_id}",
+                f"decision must prefer {preferred} for {selected.symbol}: "
+                f"{instrument_id}",
             )
+
 
 # 周度交易范围提前生成并随排期加载，所有批次复用同一份。
 def load_market_universe(path: Path) -> MarketUniverse:
@@ -363,70 +355,23 @@ def load_market_universe(path: Path) -> MarketUniverse:
 
 
 # JSON schema 约束形状；这里只检查事件、市场和跨字段关系。
-def validate_research(
+def validate_decision(
     event_id: str,
     payload: dict[str, Any],
     market_universe: MarketUniverse,
 ) -> None:
     if payload.get("event_id") != event_id:
         raise ValueError(
-            f"research event_id mismatch: {payload.get('event_id')} != {event_id}",
-        )
-    candidates = payload["trade_candidates"]
-    instrument_ids: list[str] = []
-    for candidate in candidates:
-        market_universe.validate_candidate(candidate)
-        moves = _moves(candidate)
-        for side in ("BUY", "SELL"):
-            values = [
-                moves[f"{strength}_{side}"]
-                for strength in ("WEAK", "MEDIUM", "STRONG")
-            ]
-            if values != sorted(values) or len(set(values)) != 3:
-                raise ValueError(
-                    f"candidate {side} impact must increase from weak to strong",
-                )
-        instrument_ids.append(candidate["instrument_id"])
-    if len(instrument_ids) != len(set(instrument_ids)):
-        raise ValueError("trade candidate instruments must be unique")
-
-
-def validate_decision(
-    event_id: str,
-    payload: dict[str, Any],
-    research: dict[str, Any],
-) -> None:
-    if payload.get("event_id") != event_id:
-        raise ValueError(
             f"decision event_id mismatch: {payload.get('event_id')} != {event_id}",
-        )
-    if research.get("event_id") != event_id:
-        raise ValueError(
-            f"research event_id mismatch: {research.get('event_id')} != {event_id}",
         )
     trades = payload["trades"]
     if (payload.get("decision") == "HOLD") != (not trades):
         raise ValueError("HOLD must have no trades and TRADE must have trades")
-    candidates: dict[str, dict[str, Any]] = {}
-    for candidate in research["trade_candidates"]:
-        candidates[candidate["instrument_id"]] = candidate
     selected: list[str] = []
     for trade in trades:
         instrument_id = trade["instrument_id"]
-        if instrument_id not in candidates:
-            raise ValueError(
-                "analysis selected an instrument absent from pre-research: "
-                f"{instrument_id}",
-            )
+        market_universe.validate_instrument_id(instrument_id)
         selected.append(instrument_id)
-        signal = trade["signal"]
-        expected_move = float(trade["expected_move_pct"])
-        mapped_move = _moves(candidates[instrument_id])[signal]
-        if expected_move != mapped_move:
-            raise ValueError(
-                "trade expected_move_pct does not match pre-research "
-                f"outcomes.{signal}: {expected_move} != {mapped_move}",
-            )
     if len(selected) != len(set(selected)):
         raise ValueError("decision instruments must be unique")
 
@@ -526,13 +471,6 @@ def _text(value: Any, name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise TypeError(f"{name} must be non-empty text")
     return value.strip()
-
-
-def _moves(candidate: dict[str, Any]) -> dict[str, float]:
-    return {
-        signal: float(candidate["outcomes"][signal]["expected_move_pct"])
-        for signal in TRADE_SIGNALS
-    }
 
 
 def _schedule_payload(path: Path) -> tuple[dict[str, Any], str]:

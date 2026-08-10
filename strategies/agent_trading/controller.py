@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any
 
 from jsonschema import Draft202012Validator
-from jsonschema.exceptions import ValidationError
 
 from strategies.agent_trading.agents import AnalysisAgent
 from strategies.agent_trading.agents import CodexProfile
@@ -24,7 +23,6 @@ from strategies.agent_trading.lifecycle import load_event_plan
 from strategies.agent_trading.lifecycle import load_event_schedule
 from strategies.agent_trading.lifecycle import load_market_universe
 from strategies.agent_trading.lifecycle import validate_decision
-from strategies.agent_trading.lifecycle import validate_research
 from strategies.agent_trading.watch import DisclosurePackage
 from strategies.agent_trading.watch import DisclosureTimeoutError
 from strategies.agent_trading.watch import DisclosureWatcher
@@ -42,7 +40,6 @@ MARKET_UNIVERSE_PATH = SCHEDULE_PATH.with_name(
     f"{SCHEDULE_PATH.stem}_market_universe.json",
 )
 ANALYSIS_PROMPT = PROMPTS_DIR / "analysis.md"
-RESEARCH_SCHEMA = SCHEMAS_DIR / "research.json"
 DECISION_SCHEMA = SCHEMAS_DIR / "decision.json"
 EMAIL_TOOL = STRATEGY_ROOT.parents[1] / "tools" / "send_email.py"
 LOG = logging.getLogger(__name__)
@@ -72,7 +69,6 @@ def _validator(name: str) -> Draft202012Validator:
     return Draft202012Validator(schema)
 
 
-RESEARCH_VALIDATOR = _validator("research.json")
 DECISION_VALIDATOR = _validator("decision.json")
 
 
@@ -144,19 +140,20 @@ class AgentController:
         self,
         batch_id: str,
         event_id: str,
-        market_universe: MarketUniverse,
     ) -> bool:
         paths = self.event_store.event_paths(batch_id, event_id)
         if not paths.research.exists():
             return False
-        research = self._load_object(paths.research, "event research")
-        if research.get("research_complete") is not True:
+        try:
+            state = self.event_store.load(batch_id, event_id)
+            memo = paths.research.read_text(encoding="utf-8")
+        except (OSError, UnicodeError, json.JSONDecodeError, TypeError):
             return False
-        return self._save_research_outcome(
-            batch_id,
-            event_id,
-            ResearchOutcome(event_id=event_id, research=research, error=None),
-            market_universe,
+        return (
+            state.get("research_complete") is True
+            and isinstance(state.get("research_session_id"), str)
+            and bool(state["research_session_id"].strip())
+            and bool(memo.strip())
         )
 
     # 持续重读现有 schedule；只有到点且校验通过的 event 才启动。
@@ -239,7 +236,6 @@ class AgentController:
         batch_id: str,
         event_id: str,
         outcome: ResearchOutcome,
-        market_universe: MarketUniverse,
     ) -> bool:
         if not outcome.ready:
             self.event_store.update(
@@ -247,21 +243,14 @@ class AgentController:
                 event_id,
                 "research_incomplete",
                 research_complete=False,
-                research_error=outcome.error or "research_complete is false",
+                research_error=outcome.error or "research memo or session id is missing",
             )
             return False
 
-        assert outcome.research is not None
-        error = self._research_error(event_id, outcome.research, market_universe)
-        if error is not None:
-            self.event_store.update(
-                batch_id,
-                event_id,
-                "research_incomplete",
-                research_complete=False,
-                research_error=error,
+        if outcome.event_id != event_id:
+            raise ValueError(
+                f"research event_id mismatch: {outcome.event_id} != {event_id}",
             )
-            return False
 
         paths = self.event_store.event_paths(batch_id, event_id)
         self.event_store.update(
@@ -270,6 +259,8 @@ class AgentController:
             "research_ready",
             research_complete=True,
             research_error=None,
+            research_session_id=outcome.session_id,
+            research_completed_at=datetime.now(UTC).isoformat(),
             research_path=paths.research.relative_to(paths.root).as_posix(),
         )
         return True
@@ -278,18 +269,25 @@ class AgentController:
         self,
         batch_id: str,
         event_id: str,
-        market_universe: MarketUniverse,
     ) -> bool:
         paths = self.event_store.event_paths(batch_id, event_id)
         try:
-            full = self._load_object(paths.research, "event research")
+            state = self.event_store.load(batch_id, event_id)
+            memo = paths.research.read_text(encoding="utf-8")
         except (OSError, UnicodeError, json.JSONDecodeError, TypeError) as exc:
             error = f"{type(exc).__name__}: {exc}"
         else:
-            if full.get("research_complete") is not True:
+            session_id = state.get("research_session_id")
+            if state.get("research_complete") is not True:
                 error = "research_complete is false"
+            elif not isinstance(session_id, str) or not session_id.strip():
+                error = "research_session_id is missing"
+            elif not memo.strip():
+                error = "research memo is empty"
+            elif not paths.analysis_event.exists():
+                error = "analysis event input is missing"
             else:
-                error = self._research_error(event_id, full, market_universe)
+                error = None
         if error is not None:
             self.event_store.update(
                 batch_id,
@@ -300,41 +298,14 @@ class AgentController:
             )
             return False
 
-        paths = self.event_store.save_analysis_input(
-            batch_id,
-            event_id,
-            {
-                "event_id": event_id,
-                "trade_candidates": full["trade_candidates"],
-            },
-            full["analysis_brief"],
-        )
         self.event_store.update(
             batch_id,
             event_id,
             "analysis_input_ready",
             research_complete=True,
             research_error=None,
-            analysis_brief_path=(
-                paths.analysis_brief.relative_to(paths.root).as_posix()
-            ),
         )
         return True
-
-    @staticmethod
-    def _research_error(
-        event_id: str,
-        research: dict[str, Any],
-        market_universe: MarketUniverse,
-    ) -> str | None:
-        try:
-            RESEARCH_VALIDATOR.validate(research)
-            validate_research(event_id, research, market_universe)
-        except ValidationError as exc:
-            return f"ValidationError: {exc.message}"
-        except (KeyError, TypeError, ValueError) as exc:
-            return f"{type(exc).__name__}: {exc}"
-        return None
 
     async def _wait_for_watch_start(
         self,
@@ -369,14 +340,12 @@ class AgentController:
             ready = self._reuse_event_research(
                 batch.batch_id,
                 event_id,
-                market_universe,
             )
             if not ready:
                 async with self.research_lock:
                     ready = self._reuse_event_research(
                         batch.batch_id,
                         event_id,
-                        market_universe,
                     )
                     if not ready:
                         self.event_store.update(
@@ -393,7 +362,6 @@ class AgentController:
                             batch.batch_id,
                             event_id,
                             outcome,
-                            market_universe,
                         )
                 if ready:
                     email_task = asyncio.create_task(
@@ -405,16 +373,9 @@ class AgentController:
                 batch.batch_id,
                 event_id,
             )
-            latest_universe = MarketUniverse.from_dict(
-                self._load_object(
-                    self.event_store.batch_paths(batch.batch_id).market_universe,
-                    "batch market universe",
-                ),
-            )
             if not self._finalize_analysis_input(
                 batch.batch_id,
                 event_id,
-                latest_universe,
             ):
                 LOG.error(
                     "event analysis input incomplete event_id=%s",
@@ -459,7 +420,7 @@ class AgentController:
         input_path = self.event_store.event_paths(
             batch.batch_id,
             event.event_id,
-        ).research_output
+        ).research
         custom_prompt = (
             f"这是 `{batch.batch_id}` 批次中 `{event.event_id}` "
             f"（{event.company}/{event.ticker}）的单个事件预研。"
@@ -552,17 +513,27 @@ class AgentController:
 
     async def run_analysis(self, batch_id: str, event_id: str) -> dict[str, Any]:
         paths = self.event_store.event_paths(batch_id, event_id)
+        state = self.event_store.load(batch_id, event_id)
+        session_id = state.get("research_session_id")
+        if not isinstance(session_id, str) or not session_id.strip():
+            raise ValueError(f"research session id is missing: {event_id}")
         self.event_store.update(batch_id, event_id, "analyzing")
         await self.analysis_agent.run(
             ANALYSIS_PROMPT.read_text(encoding="utf-8"),
             paths.analysis_input,
             paths.decision,
+            session_id,
             DECISION_SCHEMA,
         )
         decision = self._load_object(paths.decision, "decision")
         DECISION_VALIDATOR.validate(decision)
-        research = self._load_object(paths.analysis_research, "research")
-        validate_decision(event_id, decision, research)
+        market_universe = MarketUniverse.from_dict(
+            self._load_object(
+                self.event_store.batch_paths(batch_id).market_universe,
+                "batch market universe",
+            ),
+        )
+        validate_decision(event_id, decision, market_universe)
         self.event_store.update(
             batch_id,
             event_id,
@@ -584,7 +555,6 @@ async def main() -> None:
     research_agent = ResearchAgent(
         runner,
         PROMPTS_DIR,
-        SCHEMAS_DIR,
         profile=RESEARCH_PROFILE,
     )
     async with DisclosureWatcher(
