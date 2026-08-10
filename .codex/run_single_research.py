@@ -6,6 +6,12 @@ import sys
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from strategies.agent_trading.agents import ResearchAgent
 from strategies.agent_trading.controller import PROMPTS_DIR
