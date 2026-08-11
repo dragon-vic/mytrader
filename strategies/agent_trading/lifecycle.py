@@ -1,16 +1,12 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
-from dataclasses import replace
-from datetime import UTC
-from datetime import datetime
-from datetime import timedelta
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from strategies.agent_trading.watch.watch_data_models import WatchPlan
-
 
 SESSIONS = {"BMO", "AMC"}
 VENUES = {"BINANCE", "HYPERLIQUID"}
@@ -23,6 +19,7 @@ class EventSpec:
     company: str
     ticker: str
     scope: str
+    active: bool
     confirmed: bool
     research_hints: tuple[str, ...]
     watch_plan: WatchPlan
@@ -80,6 +77,7 @@ class BatchPlan:
                     "company": event.company,
                     "ticker": event.ticker,
                     "scope": event.scope,
+                    "active": event.active,
                     "confirmed": event.confirmed,
                     "research_hints": list(event.research_hints),
                     "watch": event.watch_plan.to_watch_dict(),
@@ -117,7 +115,7 @@ class ScheduleSnapshot:
 
 # 静态计划由人工按周或按月维护，运行时不再调用规划 Agent。
 def load_schedule(path: Path) -> tuple[BatchPlan, ...]:
-    payload, active_scope = _schedule_payload(path)
+    payload = _schedule_payload(path)
 
     all_batches = tuple(
         BatchPlan.from_dict(_dict(item, "batches[]"))
@@ -135,15 +133,15 @@ def load_schedule(path: Path) -> tuple[BatchPlan, ...]:
     if list(all_batches) != sorted(all_batches, key=lambda batch: batch.watch_start_at):
         raise ValueError("schedule batches must be ordered by watch_start_at")
 
-    # 当前只把计划中明确标记的事件交给预研和 watcher。
+    # 只有 event 自身的 active=true 才进入交易侧 schedule。
     selected: list[BatchPlan] = []
     for batch in all_batches:
-        events = tuple(event for event in batch.events if event.scope == active_scope)
+        events = tuple(event for event in batch.events if event.active)
         if events:
             selected.append(replace(batch, events=events))
     batches = tuple(selected)
     if not batches:
-        raise ValueError(f"schedule has no events for active_scope: {active_scope}")
+        raise ValueError("schedule has no active events")
     return batches
 
 
@@ -152,7 +150,7 @@ def load_event_schedule(path: Path, now: datetime) -> ScheduleSnapshot:
     if now.tzinfo is None:
         raise ValueError("schedule time must include timezone")
     now = now.astimezone(UTC)
-    payload, active_scope = _schedule_payload(path)
+    payload = _schedule_payload(path)
     events: list[ScheduledEvent] = []
     errors: list[str] = []
     seen: set[str] = set()
@@ -187,13 +185,13 @@ def load_event_schedule(path: Path, now: datetime) -> ScheduleSnapshot:
         active_event_count = sum(
             1
             for value in raw_events
-            if isinstance(value, dict) and value.get("scope") == active_scope
+            if isinstance(value, dict) and value.get("active") is True
         )
         research_start_at = watch_start_at - timedelta(
             minutes=RESEARCH_MINUTES_PER_EVENT * active_event_count,
         )
-        # 月度计划只在这里短暂读取；未来 batch 不进入 controller 的任务表。
-        if now < research_start_at or now >= watch_end_at:
+        # group 只提供同一时间窗口；生命周期和状态仍然只属于 event。
+        if now < research_start_at or now >= watch_start_at:
             continue
         for event_index, value in enumerate(raw_events):
             event_location = f"{location}.events[{event_index}]"
@@ -203,11 +201,13 @@ def load_event_schedule(path: Path, now: datetime) -> ScheduleSnapshot:
                     raw_event["event_id"],
                     f"{event_location}.event_id",
                 )
-                scope = _text(raw_event["scope"], f"{event_location}.scope")
+                active = raw_event.get("active")
+                if not isinstance(active, bool):
+                    raise TypeError(f"{event_location}.active must be a boolean")
                 if event_id in seen:
                     raise ValueError(f"duplicate event_id: {event_id}")
                 seen.add(event_id)
-                if scope != active_scope:
+                if not active:
                     continue
                 events.append(
                     ScheduledEvent(
@@ -226,22 +226,30 @@ def load_event_schedule(path: Path, now: datetime) -> ScheduleSnapshot:
 # Event 到达生命周期节点时重新读取并完整校验自己的最新配置。
 def load_event_plan(
     path: Path,
-    batch_id: str,
+    group_id: str,
     event_id: str,
-) -> tuple[BatchPlan, EventSpec]:
-    payload, active_scope = _schedule_payload(path)
+) -> EventSpec:
+    payload = _schedule_payload(path)
     batches = [
         _dict(value, "batches[]")
         for value in _list(payload["batches"], "batches")
-        if isinstance(value, dict) and value.get("batch_id") == batch_id
+        if isinstance(value, dict) and value.get("batch_id") == group_id
     ]
     if len(batches) != 1:
         raise ValueError(
             "schedule must contain exactly one "
-            f"batch_id={batch_id}, got {len(batches)}",
+            f"group_id={group_id}, got {len(batches)}",
         )
     batch_payload = batches[0]
-    raw_events = _list(batch_payload.get("events"), f"batch {batch_id}.events")
+    _keys(
+        batch_payload,
+        {"batch_id", "session", "watch_start_at", "watch_end_at", "events"},
+        f"group {group_id}",
+    )
+    session = _text(batch_payload["session"], f"group {group_id}.session")
+    if session not in SESSIONS:
+        raise ValueError(f"unsupported earnings session: {session}")
+    raw_events = _list(batch_payload.get("events"), f"group {group_id}.events")
     matched = [
         _dict(value, "events[]")
         for value in raw_events
@@ -252,23 +260,14 @@ def load_event_plan(
             "schedule must contain exactly one "
             f"event_id={event_id}, got {len(matched)}",
         )
-    selected = [
-        _dict(value, "events[]")
-        for value in raw_events
-        if isinstance(value, dict) and value.get("scope") == active_scope
-    ]
-    selected_batch = dict(batch_payload)
-    selected_batch["events"] = selected
-    batch = BatchPlan.from_dict(selected_batch)
-    event = next(
-        (item for item in batch.events if item.event_id == event_id),
-        None,
-    )
-    if event is None:
-        raise ValueError(
-            f"event scope is not active: event_id={event_id}, scope={active_scope}",
-        )
-    return batch, event
+    watch_start_at = _time(batch_payload["watch_start_at"], "watch_start_at")
+    watch_end_at = _time(batch_payload["watch_end_at"], "watch_end_at")
+    if watch_end_at <= watch_start_at:
+        raise ValueError("watch_end_at must be later than watch_start_at")
+    event = _event(matched[0], watch_start_at, watch_end_at)
+    if not event.active:
+        raise ValueError(f"event is inactive in schedule: event_id={event_id}")
+    return event
 
 
 @dataclass(frozen=True)
@@ -388,6 +387,7 @@ def _event(
             "company",
             "ticker",
             "scope",
+            "active",
             "confirmed",
             "research_hints",
             "watch",
@@ -403,12 +403,16 @@ def _event(
     confirmed = payload["confirmed"]
     if not isinstance(confirmed, bool):
         raise TypeError("events[].confirmed must be a boolean")
+    active = payload["active"]
+    if not isinstance(active, bool):
+        raise TypeError("events[].active must be a boolean")
     event_id = _text(payload["event_id"], "events[].event_id")
     return EventSpec(
         event_id=event_id,
         company=_text(payload["company"], "events[].company"),
         ticker=_text(payload["ticker"], "events[].ticker"),
         scope=_text(payload["scope"], "events[].scope"),
+        active=active,
         confirmed=confirmed,
         research_hints=research_hints,
         watch_plan=WatchPlan.from_watch_dict(
@@ -473,15 +477,14 @@ def _text(value: Any, name: str) -> str:
     return value.strip()
 
 
-def _schedule_payload(path: Path) -> tuple[dict[str, Any], str]:
+def _schedule_payload(path: Path) -> dict[str, Any]:
     payload = _dict(json.loads(path.read_text(encoding="utf-8")), "schedule")
     _keys(
         payload,
-        {"schedule_id", "timezone", "active_scope", "batches"},
+        {"schedule_id", "timezone", "batches"},
         "schedule",
     )
     _text(payload["schedule_id"], "schedule_id")
-    active_scope = _text(payload["active_scope"], "active_scope")
     if payload["timezone"] != "UTC":
         raise ValueError("schedule timezone must be UTC")
-    return payload, active_scope
+    return payload

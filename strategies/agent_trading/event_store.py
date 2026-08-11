@@ -2,13 +2,51 @@ from __future__ import annotations
 
 import json
 import re
-import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-
 ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+class EventState(StrEnum):
+    CREATED = "created"
+    RESEARCHING = "researching"
+    RESEARCH_READY = "research_ready"
+    ANALYSIS_INPUT_READY = "analysis_input_ready"
+    WATCHING_DISCLOSURE = "watching_disclosure"
+    REPORT_READY = "report_ready"
+    ANALYZING = "analyzing"
+    DECISION_READY = "decision_ready"
+    DECISION_SENT = "decision_sent"
+    FAILED = "failed"
+
+    @property
+    def is_finished(self) -> bool:
+        return self in {EventState.DECISION_READY, EventState.DECISION_SENT}
+
+
+class FailureStage(StrEnum):
+    RESEARCH = "research"
+    WATCH = "watch"
+    ANALYSIS = "analysis"
+    LIFECYCLE = "lifecycle"
+
+
+@dataclass(frozen=True)
+class ResearchHandoff:
+    session_id: str | None
+    memo: str | None
+
+    def __post_init__(self) -> None:
+        if (self.session_id is None) == (self.memo is None):
+            raise ValueError("research handoff requires exactly one context source")
+        if self.session_id is not None and not self.session_id.strip():
+            raise ValueError("research handoff session id must not be empty")
+        if self.memo is not None and not self.memo.strip():
+            raise ValueError("research handoff memo must not be empty")
 
 
 @dataclass(frozen=True)
@@ -30,10 +68,8 @@ class EventPaths:
 
 
 @dataclass(frozen=True)
-class BatchPaths:
+class EventGroupPaths:
     root: Path
-    state: Path
-    batch: Path
     market_universe: Path
     events: Path
 
@@ -42,27 +78,26 @@ class EventStore:
     def __init__(self, root: Path) -> None:
         self.root = root.resolve()
 
-    def batch_paths(self, batch_id: str) -> BatchPaths:
-        self._validate_id(batch_id, "batch_id")
-        root = (self.root / "batches" / batch_id).resolve()
+    # 同一时间附近的 event 共用目录和市场快照；这里没有 group 生命周期状态。
+    def event_group_paths(self, group_id: str) -> EventGroupPaths:
+        self._validate_id(group_id, "group_id")
+        root = (self.root / "batches" / group_id).resolve()
         root.relative_to(self.root)
         events = root / "events"
         events.mkdir(parents=True, exist_ok=True)
-        return BatchPaths(
+        return EventGroupPaths(
             root=root,
-            state=root / "state.json",
-            batch=root / "batch.json",
             market_universe=root / "market_universe.json",
             events=events,
         )
 
-    # event始终属于一个batch，不再维护顶层events目录。
-    def event_paths(self, batch_id: str, event_id: str) -> EventPaths:
-        self._validate_id(batch_id, "batch_id")
+    # event 始终归属于一个 schedule group，但所有生命周期数据都在 event 内。
+    def event_paths(self, group_id: str, event_id: str) -> EventPaths:
+        self._validate_id(group_id, "group_id")
         self._validate_id(event_id, "event_id")
-        batch = self.batch_paths(batch_id)
-        root = (batch.events / event_id).resolve()
-        root.relative_to(batch.events.resolve())
+        group = self.event_group_paths(group_id)
+        root = (group.events / event_id).resolve()
+        root.relative_to(group.events.resolve())
         research_output = root / "research_output"
         watch = root / "watch"
         analysis_input = root / "analysis_input"
@@ -86,43 +121,24 @@ class EventStore:
             decision_metrics=analysis_output / "decision.metrics.json",
         )
 
-    # 首次到达生命周期节点时建立快照；已有文件由人工和运行结果接管。
-    def create_batch(
+    # 建立共享快照；不建立、不读取、不更新 group 状态。
+    def ensure_event_group(
         self,
-        batch_id: str,
-        batch: dict[str, Any],
+        group_id: str,
         market_universe: dict[str, Any],
-    ) -> dict[str, Any]:
-        paths = self.batch_paths(batch_id)
-        if paths.batch.exists():
-            stored = self._read(paths.batch, "batch")
-            if stored.get("batch_id") != batch_id:
-                raise ValueError(f"stored batch_id mismatch: {batch_id}")
-        else:
-            stored = batch
-            self._write(paths.batch, stored)
-
+    ) -> None:
+        paths = self.event_group_paths(group_id)
         if not paths.market_universe.exists():
             self._write(paths.market_universe, market_universe)
-        if not paths.state.exists():
-            self._write(
-                paths.state,
-                {
-                    "batch_id": batch_id,
-                    "state": "created",
-                    "updated_ns": time.time_ns(),
-                },
-            )
-        return stored
 
     def create_event(
         self,
-        batch_id: str,
+        group_id: str,
         event_id: str,
         metadata: dict[str, Any],
         watch_plan: dict[str, Any],
     ) -> EventPaths:
-        paths = self.event_paths(batch_id, event_id)
+        paths = self.event_paths(group_id, event_id)
         if paths.event.exists():
             stored = self._read(paths.event, "event")
             if stored.get("event_id") != event_id:
@@ -142,42 +158,77 @@ class EventStore:
                 paths.state,
                 {
                     "event_id": event_id,
-                    "state": "created",
-                    "updated_ns": time.time_ns(),
+                    "state": EventState.CREATED,
                 },
             )
         return paths
 
-    def load_batch(self, batch_id: str) -> dict[str, Any]:
-        return self._read(self.batch_paths(batch_id).state, "batch state")
-
-    def update_batch(self, batch_id: str, state: str, **values: Any) -> dict[str, Any]:
-        paths = self.batch_paths(batch_id)
-        payload = self._read(paths.state, "batch state")
-        payload.update(values)
-        payload["state"] = state
-        payload["updated_ns"] = time.time_ns()
-        self._write(paths.state, payload)
-        return payload
-
-    def load(self, batch_id: str, event_id: str) -> dict[str, Any]:
+    def load(self, group_id: str, event_id: str) -> dict[str, Any]:
         return self._read(
-            self.event_paths(batch_id, event_id).state,
+            self.event_paths(group_id, event_id).state,
             "event state",
+        )
+
+    def load_state(self, group_id: str, event_id: str) -> EventState:
+        payload = self.load(group_id, event_id)
+        try:
+            return EventState(payload.get("state"))
+        except ValueError as exc:
+            raise ValueError(
+                f"invalid event state for {event_id}: {payload.get('state')!r}",
+            ) from exc
+
+    # research.md 是正式交接物；session_id 只决定分析是否恢复原会话。
+    def load_research_handoff(
+        self,
+        group_id: str,
+        event_id: str,
+    ) -> ResearchHandoff | None:
+        if self.load_state(group_id, event_id) is not EventState.RESEARCH_READY:
+            return None
+        paths = self.event_paths(group_id, event_id)
+        if not paths.research.is_file():
+            return None
+        memo = paths.research.read_text(encoding="utf-8").strip()
+        if not memo:
+            return None
+        payload = self.load(group_id, event_id)
+        session_id = payload.get("research_session_id")
+        if session_id is not None:
+            if not isinstance(session_id, str) or not session_id.strip():
+                raise ValueError(
+                    f"invalid research_session_id for {event_id}",
+                )
+            session_id = session_id.strip()
+        return ResearchHandoff(
+            session_id=session_id,
+            memo=memo if session_id is None else None,
         )
 
     def update(
         self,
-        batch_id: str,
+        group_id: str,
         event_id: str,
-        state: str,
+        state: EventState,
         **values: Any,
     ) -> dict[str, Any]:
-        paths = self.event_paths(batch_id, event_id)
+        paths = self.event_paths(group_id, event_id)
         payload = self._read(paths.state, "event state")
+        payload.pop("research_complete", None)
+        payload.pop("research_error", None)
+        if state is EventState.FAILED:
+            failed_stage = values.get("failed_stage")
+            error = values.get("error")
+            if not isinstance(failed_stage, FailureStage):
+                raise ValueError("failed event state requires failed_stage")
+            if not isinstance(error, str) or not error.strip():
+                raise ValueError("failed event state requires error")
+        else:
+            payload.pop("failed_stage", None)
+            payload.pop("error", None)
         payload.update(values)
-        payload["state"] = state
-        payload["updated_ns"] = time.time_ns()
+        payload["state"] = state.value
+        payload["updated_at"] = datetime.now(UTC).isoformat()
         self._write(paths.state, payload)
         return payload
 

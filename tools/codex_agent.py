@@ -6,11 +6,9 @@ import os
 import shutil
 import time
 from dataclasses import dataclass
-from datetime import UTC
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-
 
 REASONING_EFFORTS = {"minimal", "low", "medium", "high", "xhigh", "max"}
 APPROVAL_POLICIES = {"untrusted", "on-request", "never"}
@@ -220,7 +218,15 @@ class CodexRunner:
         command = [self.executable]
         if request.web_search:
             command.append("--search")
-        command.extend(["exec"])
+        command.append("exec")
+        # 这些是 exec 父命令参数，必须放在 resume 子命令之前。
+        if request.dangerously_bypass_approvals_and_sandbox:
+            command.append("--dangerously-bypass-approvals-and-sandbox")
+        else:
+            if request.approval_policy is not None:
+                command.extend(["--ask-for-approval", request.approval_policy])
+            command.extend(["--sandbox", request.sandbox])
+        command.extend(["-C", str(work_dir)])
         if request.session_id:
             command.append("resume")
         command.extend(["--model", request.model, "--json"])
@@ -228,7 +234,6 @@ class CodexRunner:
             command.append("--ephemeral")
         if output_path is not None:
             command.extend(["--output-last-message", str(output_path)])
-        command.extend(["-C", str(work_dir)])
         if schema_path is not None:
             command.extend(["--output-schema", str(schema_path)])
         if request.reasoning_effort is not None:
@@ -251,12 +256,6 @@ class CodexRunner:
             command.extend(["-c", "features.multi_agent=true"])
         for override in request.config_overrides:
             command.extend(["-c", override])
-        if request.dangerously_bypass_approvals_and_sandbox:
-            command.append("--dangerously-bypass-approvals-and-sandbox")
-        else:
-            if request.approval_policy is not None:
-                command.extend(["--ask-for-approval", request.approval_policy])
-            command.extend(["--sandbox", request.sandbox])
         if request.session_id:
             command.extend([request.session_id, request.prompt])
         else:

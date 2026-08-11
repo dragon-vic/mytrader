@@ -19,7 +19,7 @@ Use `market_universe.json` as the executable instrument set. You may study at mo
 
 Do not inspect repository code, unrelated events, credentials, running processes, existing research outputs, or disclosure files. Do not modify files, send messages, place orders, or create execution plans.
 
-The repository-root `.env` may be read only to load these Alpaca Market Data settings: `APCA_API_KEY_ID`, `APCA_API_SECRET_KEY`, and `APCA_API_BASE_URL`. Never display, log, quote, or return their values, and do not scan other environment fields. Alpaca may be used for historical US cash-equity prices, but it is neither required nor exclusive.
+The repository-root `.env` may be read only to load these Alpaca Market Data settings: `APCA_API_KEY_ID`, `APCA_API_SECRET_KEY`, and `APCA_API_BASE_URL`. Never display, log, quote, or return their values, and do not scan other environment fields. Alpaca may be used for historical US cash-equity prices, but it is neither required nor exclusive. Its SIP one-minute bars include premarket and after-hours trading and are preferred over IEX or daily bars when reconstructing historical earnings reactions.
 
 ## Information time
 
@@ -27,9 +27,9 @@ This is the normal live pre-event workflow. Use all reliable public information 
 
 ## Research process
 
-Begin with a brief trading-value screen before creating the question ledger or spawning any subagent. Use enough reliable evidence to decide whether a complete event-specific repricing of at least roughly 5% is plausible and whether an eligible instrument has a usable causal path. Consider historical cash and perpetual reactions, the current catalyst set, forward-information sensitivity, positioning or valuation asymmetry, and basic contract transmission.
+Begin with a brief trading-value screen before creating the question ledger or spawning any subagent. Use enough reliable evidence to decide whether a complete event-specific repricing of at least roughly 5% is plausible and whether an eligible instrument has a usable causal path. Consider historical issuer price reactions from the cash equity or perpetual contract, the current catalyst set, forward-information sensitivity, and positioning or valuation asymmetry.
 
-End the research early only when positive evidence shows that the event has little trading value: the likely issuer-specific reaction is below 5%, no credible catalyst or positioning setup creates a larger tail, or no eligible instrument has a defensible causal path. Do not stop merely because estimates conflict, exact data are difficult to find, direction is uncertain, or a recently listed perpetual lacks its own earnings history. Cash-equity history and available contract transmission evidence are valid for this screen.
+End the research early only when positive evidence shows that the event has little trading value: the likely issuer-specific reaction is below 5%, no credible catalyst or positioning setup creates a larger tail, or no eligible instrument has a defensible causal path. Do not stop merely because estimates conflict, exact data are difficult to find, direction is uncertain, or a recently listed perpetual lacks its own earnings history. Cash-equity event history is fully valid for this screen and for reaction calibration.
 
 If the event has little trading value, do not spawn subagents. Return a short Markdown memo that explains the evidence for early stopping, the expected full-event range, the relevant instrument if one exists, and the few extraordinary disclosure facts that would invalidate the low-impact view. This is a completed pre-research result, not a research failure.
 
@@ -37,7 +37,7 @@ If the event passes the screen, spawn exactly three subagents and give them inde
 
 1. Financial expectations: reconstruct current consensus and credible ranges, guidance definitions, revisions, financial and operating trends, and an independent expectation model.
 2. Business and industry: research the company, products, customers, competitors, supply chain, policy and macro drivers, and the causal path from new information to value.
-3. Skeptical market-impact review: test what is priced in, valuation and positioning, run-up or de-risking, historical reactions, sell-the-news risk, contrary evidence, and the transmission from cash equity to the 24-hour perpetual.
+3. Skeptical market-impact review: test what is priced in, valuation and positioning, run-up or de-risking, historical reactions, sell-the-news risk, and contrary evidence.
 
 The main agent owns the synthesis. For an event that passes the screen, create an internal ranked question ledger before delegating. After the first pass, send the subagents a conflict packet containing the most important disagreements, missing evidence, stale estimates, definition mismatches, and causal claims that need falsification. Require each relevant lane to defend, revise, or withdraw its claim. Resolve the conflicts yourself and reach a view; do not treat disagreement or missing consensus as a reason to stop.
 
@@ -47,16 +47,18 @@ Research broadly enough to understand the event rather than collecting a few hea
 - several current analyst or sell-side views and broader market expectations;
 - whisper expectations, revisions and definition differences where observable;
 - company and industry economics, competitive and policy changes, forward demand and execution risks;
-- valuation, positioning, options-implied move, recent run-up, short interest, funding, basis, liquidity or crypto beta where useful;
+- valuation, positioning, options-implied move, recent run-up and short interest where useful;
 - previous comparable events and the actual price response, including reversals and delayed reactions.
 
 Treat consensus values as evidence, not the answer. When sources conflict, investigate date, metric definition, period, GAAP versus adjusted treatment, contributor quality and whether estimates have moved. Use primary sources for facts and diverse credible market sources for expectations. Then state your own conclusion and why it is better supported.
 
 ## Market-reaction calibration
 
-This strategy trades Binance or Hyperliquid 24-hour contracts, not US cash equities during regular hours only. You may use the perpetual contract, the underlying cash equity, or both; there is no forced source priority. A recently listed contract may require older cash-equity event history plus all available contract basis and transmission evidence.
+This strategy trades Binance or Hyperliquid 24-hour contracts, not US cash equities during regular hours only. You may use the perpetual contract, the underlying cash equity, or both; there is no forced source priority. Under normal conditions, treat an eligible equity perpetual as accurately tracking its underlying equity. Do not spend research effort estimating contract-specific amplification, basis, overnight liquidity or liquidation effects. When the perpetual listed recently or lacks comparable event history, use cash-equity event history directly without reducing research confidence, lowering trading value or increasing the likelihood of HOLD merely for that reason.
 
-Use consistent timestamps and windows. Separate the initial jump, conference-call or guidance digestion, and the complete event repricing when the evidence supports it. Distinguish market-wide or crypto moves from issuer-specific residual movement. Do not assume cash and perpetual magnitudes are identical, and do not discard useful cash history merely because the contract listed later.
+Measure historical cash-equity reactions from the actual disclosure timestamp using extended-hours trades, quotes or intraday bars. For an after-market-close release, measure the initial jump and subsequent path during the after-hours session. For a before-market-open release, measure them during the premarket session. Use windows such as the first few minutes, 30 minutes, one hour, the conference-call end and the extended-session end when available. Do not use the next regular-session open, or the previous close-to-next-open return, as the event reaction; the next session is only evidence of follow-through or reversal. Daily OHLC data alone are insufficient for this task.
+
+Use consistent timestamps and windows. Separate the initial jump, conference-call or guidance digestion, and the complete event repricing when the evidence supports it. Distinguish market-wide moves from issuer-specific movement. Unless direct evidence shows a tracking failure, cash-equity event magnitude is applicable to the eligible perpetual, and useful cash history must not be discarded because the contract listed later.
 
 Estimate realistic upside and downside ranges, asymmetry, an ordinary/no-action region, and tail conditions. The important object is the expected complete event move; NT will later measure how much of that move remains after the decision arrives.
 
@@ -80,7 +82,7 @@ Write one self-contained Markdown memo for the assigned event. Keep it compact e
 - the most credible expectation range and how you resolved conflicting estimates;
 - what appears priced in and what would be genuinely incremental;
 - the decisive financial, forward-looking, business and positioning drivers;
-- relevant executable instrument IDs and cash/perpetual reaction calibration;
+- relevant executable instrument IDs and historical cash or perpetual event reactions measured in the correct premarket or after-hours windows;
 - the likely directional scenarios, full-event magnitude and asymmetry;
 - the few disclosure facts that would most strongly confirm or falsify the thesis;
 - material contrary evidence and unresolved uncertainty.

@@ -4,31 +4,39 @@ import asyncio
 import json
 import logging
 import sys
-from datetime import UTC
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from jsonschema import Draft202012Validator
 
-from strategies.agent_trading.agents import AnalysisAgent
-from strategies.agent_trading.agents import CodexProfile
-from strategies.agent_trading.agents import ResearchAgent
-from strategies.agent_trading.agents import ResearchOutcome
-from strategies.agent_trading.event_store import EventStore
-from strategies.agent_trading.lifecycle import BatchPlan
-from strategies.agent_trading.lifecycle import EventSpec
-from strategies.agent_trading.lifecycle import MarketUniverse
-from strategies.agent_trading.lifecycle import load_event_plan
-from strategies.agent_trading.lifecycle import load_event_schedule
-from strategies.agent_trading.lifecycle import load_market_universe
-from strategies.agent_trading.lifecycle import validate_decision
-from strategies.agent_trading.watch import DisclosurePackage
-from strategies.agent_trading.watch import DisclosureTimeoutError
-from strategies.agent_trading.watch import DisclosureWatcher
-from strategies.agent_trading.watch import WatchPlan
+from strategies.agent_trading.agents import (
+    AnalysisAgent,
+    CodexProfile,
+    ResearchAgent,
+    ResearchOutcome,
+)
+from strategies.agent_trading.event_store import (
+    EventState,
+    EventStore,
+    FailureStage,
+    ResearchHandoff,
+)
+from strategies.agent_trading.lifecycle import (
+    EventSpec,
+    MarketUniverse,
+    load_event_plan,
+    load_event_schedule,
+    load_market_universe,
+    validate_decision,
+)
+from strategies.agent_trading.watch import (
+    DisclosurePackage,
+    DisclosureTimeoutError,
+    DisclosureWatcher,
+    WatchPlan,
+)
 from tools.codex_agent import CodexRunner
-
 
 SEC_USER_AGENT = "nt_quant-agent-trading/1.0 victorice@yeah.net"
 STRATEGY_ROOT = Path(__file__).resolve().parent
@@ -43,7 +51,6 @@ ANALYSIS_PROMPT = PROMPTS_DIR / "analysis.md"
 DECISION_SCHEMA = SCHEMAS_DIR / "decision.json"
 EMAIL_TOOL = STRATEGY_ROOT.parents[1] / "tools" / "send_email.py"
 LOG = logging.getLogger(__name__)
-FINISHED_EVENT_STATES = {"decision_ready", "decision_sent"}
 SCHEDULE_RELOAD_SECONDS = 60.0
 LIFECYCLE_POLL_SECONDS = 1.0
 
@@ -88,7 +95,6 @@ class AgentController:
         self.research_agent = research_agent
         self.analysis_agent = analysis_agent
         self.disclosure_watcher = disclosure_watcher
-        self.batch_locks: dict[str, asyncio.Lock] = {}
         self.research_lock = asyncio.Lock()
 
     # 分析结束时建立一次连接，将单条交易 JSON 发送进 NT 后关闭。
@@ -106,54 +112,30 @@ class AgentController:
             writer.close()
             await writer.wait_closed()
 
-    # Event 到达生命周期节点时才建立运行快照；已有快照保持不变。
-    async def _prepare_event(
+    # Event 到达生命周期节点时建立自己的输入和共享快照；不建立 group 状态。
+    def _prepare_event(
         self,
-        batch: BatchPlan,
+        group_id: str,
         event: EventSpec,
         market_universe: MarketUniverse,
     ) -> None:
-        lock = self.batch_locks.setdefault(batch.batch_id, asyncio.Lock())
-        async with lock:
-            self.event_store.create_batch(
-                batch.batch_id,
-                batch.to_dict(),
-                market_universe.to_dict(),
-            )
-            self.event_store.update_batch(batch.batch_id, "running")
+        self.event_store.ensure_event_group(
+            group_id,
+            market_universe.to_dict(),
+        )
         self.event_store.create_event(
-            batch.batch_id,
+            group_id,
             event.event_id,
             {
-                "batch_id": batch.batch_id,
+                "schedule_group_id": group_id,
                 "company": event.company,
                 "ticker": event.ticker,
                 "scope": event.scope,
+                "active": event.active,
                 "confirmed": event.confirmed,
                 "research_hints": list(event.research_hints),
             },
             event.watch_plan.to_dict(),
-        )
-
-    # 已有预研只复用，不触发邮件；watch 开始时还会再次读取和校验。
-    def _reuse_event_research(
-        self,
-        batch_id: str,
-        event_id: str,
-    ) -> bool:
-        paths = self.event_store.event_paths(batch_id, event_id)
-        if not paths.research.exists():
-            return False
-        try:
-            state = self.event_store.load(batch_id, event_id)
-            memo = paths.research.read_text(encoding="utf-8")
-        except (OSError, UnicodeError, json.JSONDecodeError, TypeError):
-            return False
-        return (
-            state.get("research_complete") is True
-            and isinstance(state.get("research_session_id"), str)
-            and bool(state["research_session_id"].strip())
-            and bool(memo.strip())
         )
 
     # 持续重读现有 schedule；只有到点且校验通过的 event 才启动。
@@ -187,13 +169,13 @@ class AgentController:
                 if scheduled.event_id in tasks:
                     continue
                 try:
-                    batch, event = load_event_plan(
+                    event = load_event_plan(
                         schedule_path,
                         scheduled.batch_id,
                         scheduled.event_id,
                     )
                     market_universe = load_market_universe(market_universe_path)
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 - 单个 event 不能阻塞 schedule
                     error = f"{type(exc).__name__}: {exc}"
                     if event_errors.get(scheduled.event_id) != error:
                         LOG.error(
@@ -206,7 +188,7 @@ class AgentController:
                 event_errors.pop(scheduled.event_id, None)
                 tasks[scheduled.event_id] = asyncio.create_task(
                     self.run_event(
-                        batch,
+                        scheduled.batch_id,
                         event,
                         market_universe,
                     ),
@@ -233,86 +215,68 @@ class AgentController:
 
     def _save_research_outcome(
         self,
-        batch_id: str,
+        group_id: str,
         event_id: str,
         outcome: ResearchOutcome,
-    ) -> bool:
+    ) -> ResearchHandoff | None:
         if not outcome.ready:
             self.event_store.update(
-                batch_id,
+                group_id,
                 event_id,
-                "research_incomplete",
-                research_complete=False,
-                research_error=outcome.error or "research memo or session id is missing",
+                EventState.FAILED,
+                failed_stage=FailureStage.RESEARCH,
+                error=outcome.error or "research memo is missing",
             )
-            return False
+            return None
 
         if outcome.event_id != event_id:
             raise ValueError(
                 f"research event_id mismatch: {outcome.event_id} != {event_id}",
             )
 
-        paths = self.event_store.event_paths(batch_id, event_id)
+        paths = self.event_store.event_paths(group_id, event_id)
+        values: dict[str, Any] = {
+            "research_session_id": outcome.session_id,
+            "research_completed_at": datetime.now(UTC).isoformat(),
+            "research_path": paths.research.relative_to(paths.root).as_posix(),
+        }
         self.event_store.update(
-            batch_id,
+            group_id,
             event_id,
-            "research_ready",
-            research_complete=True,
-            research_error=None,
-            research_session_id=outcome.session_id,
-            research_completed_at=datetime.now(UTC).isoformat(),
-            research_path=paths.research.relative_to(paths.root).as_posix(),
+            EventState.RESEARCH_READY,
+            **values,
         )
-        return True
+        return self.event_store.load_research_handoff(group_id, event_id)
 
-    def _finalize_analysis_input(
+    def _prepare_analysis_input(
         self,
-        batch_id: str,
+        group_id: str,
         event_id: str,
     ) -> bool:
-        paths = self.event_store.event_paths(batch_id, event_id)
-        try:
-            state = self.event_store.load(batch_id, event_id)
-            memo = paths.research.read_text(encoding="utf-8")
-        except (OSError, UnicodeError, json.JSONDecodeError, TypeError) as exc:
-            error = f"{type(exc).__name__}: {exc}"
-        else:
-            session_id = state.get("research_session_id")
-            if state.get("research_complete") is not True:
-                error = "research_complete is false"
-            elif not isinstance(session_id, str) or not session_id.strip():
-                error = "research_session_id is missing"
-            elif not memo.strip():
-                error = "research memo is empty"
-            elif not paths.analysis_event.exists():
-                error = "analysis event input is missing"
-            else:
-                error = None
-        if error is not None:
+        paths = self.event_store.event_paths(group_id, event_id)
+        if not paths.analysis_event.is_file():
             self.event_store.update(
-                batch_id,
+                group_id,
                 event_id,
-                "research_incomplete",
-                research_complete=False,
-                research_error=error,
+                EventState.FAILED,
+                failed_stage=FailureStage.LIFECYCLE,
+                error="analysis event input is missing",
             )
             return False
 
         self.event_store.update(
-            batch_id,
+            group_id,
             event_id,
-            "analysis_input_ready",
-            research_complete=True,
-            research_error=None,
+            EventState.ANALYSIS_INPUT_READY,
         )
         return True
 
     async def _wait_for_watch_start(
         self,
-        batch_id: str,
+        group_id: str,
         event_id: str,
     ) -> None:
-        plan_path = self.event_store.event_paths(batch_id, event_id).watch_plan
+        plan_path = self.event_store.event_paths(group_id, event_id).watch_plan
         while True:
             plan = WatchPlan.from_dict(self._load_object(plan_path, "watch plan"))
             now = datetime.now(UTC)
@@ -324,57 +288,64 @@ class AgentController:
 
     async def run_event(
         self,
-        batch: BatchPlan,
+        group_id: str,
         event: EventSpec,
         market_universe: MarketUniverse,
     ) -> None:
         event_id = event.event_id
         email_task: asyncio.Task[None] | None = None
         try:
-            paths = self.event_store.event_paths(batch.batch_id, event_id)
-            if paths.state.exists():
-                state = self.event_store.load(batch.batch_id, event_id)
-                if state["state"] in FINISHED_EVENT_STATES:
-                    return
-            await self._prepare_event(batch, event, market_universe)
-            ready = self._reuse_event_research(
-                batch.batch_id,
+            paths = self.event_store.event_paths(group_id, event_id)
+            if (
+                paths.state.exists()
+                and self.event_store.load_state(group_id, event_id).is_finished
+            ):
+                return
+            self._prepare_event(group_id, event, market_universe)
+            research = self.event_store.load_research_handoff(
+                group_id,
                 event_id,
             )
-            if not ready:
+            generated_research = False
+            if research is None:
                 async with self.research_lock:
-                    ready = self._reuse_event_research(
-                        batch.batch_id,
+                    research = self.event_store.load_research_handoff(
+                        group_id,
                         event_id,
                     )
-                    if not ready:
+                    if research is None:
                         self.event_store.update(
-                            batch.batch_id,
+                            group_id,
                             event_id,
-                            "researching",
+                            EventState.RESEARCHING,
                         )
                         outcome = await self.research_agent.run_event(
                             event_id=event_id,
-                            batch_dir=self.event_store.batch_paths(batch.batch_id).root,
-                            deadline=batch.watch_start_at,
+                            group_dir=self.event_store.event_group_paths(group_id).root,
+                            deadline=event.watch_plan.start_at,
                         )
-                        ready = self._save_research_outcome(
-                            batch.batch_id,
+                        research = self._save_research_outcome(
+                            group_id,
                             event_id,
                             outcome,
                         )
-                if ready:
+                        generated_research = research is not None
+                if generated_research:
                     email_task = asyncio.create_task(
-                        self._send_research_email(batch, event),
+                        self._send_research_email(group_id, event),
                         name=f"agent-trading-research-email-{event_id}",
                     )
 
+            if research is None:
+                LOG.error("event research incomplete event_id=%s", event_id)
+                return
+
             await self._wait_for_watch_start(
-                batch.batch_id,
+                group_id,
                 event_id,
             )
-            if not self._finalize_analysis_input(
-                batch.batch_id,
+            if not self._prepare_analysis_input(
+                group_id,
                 event_id,
             ):
                 LOG.error(
@@ -383,24 +354,25 @@ class AgentController:
                 )
                 return
             await self._run_disclosure_and_analysis(
-                batch.batch_id,
+                group_id,
                 event_id,
+                research,
             )
         except Exception as exc:
             LOG.exception(
-                "agent trading event failed event_id=%s error_type=%s error=%r",
+                "agent trading event failed event_id=%s error_type=%s",
                 event_id,
                 type(exc).__name__,
-                exc,
             )
             try:
                 self.event_store.update(
-                    batch.batch_id,
+                    group_id,
                     event_id,
-                    "failed",
+                    EventState.FAILED,
+                    failed_stage=FailureStage.LIFECYCLE,
                     error=f"{type(exc).__name__}: {exc}",
                 )
-            except Exception as state_exc:
+            except Exception as state_exc:  # noqa: BLE001 - 原始错误后尽力记录状态
                 LOG.error(
                     "event failure state unavailable event_id=%s "
                     "error_type=%s error=%r",
@@ -414,18 +386,17 @@ class AgentController:
 
     async def _send_research_email(
         self,
-        batch: BatchPlan,
+        group_id: str,
         event: EventSpec,
     ) -> None:
         input_path = self.event_store.event_paths(
-            batch.batch_id,
+            group_id,
             event.event_id,
         ).research
         custom_prompt = (
-            f"这是 `{batch.batch_id}` 批次中 `{event.event_id}` "
-            f"（{event.company}/{event.ticker}）的单个事件预研。"
-            "邮件只总结这个 event，不等待或引用同批次其他 event。"
-            "邮件主题必须包含 batch id 和 event id，并明确这是财报发布前预研。"
+            f"这是 `{event.event_id}`（{event.company}/{event.ticker}）的事件预研。"
+            "邮件只总结这个 event，不等待或引用其他 event。"
+            "邮件主题必须包含 event id，并明确这是财报发布前预研。"
         )
         try:
             process = await asyncio.create_subprocess_exec(
@@ -446,48 +417,67 @@ class AgentController:
                 )
         except Exception as exc:
             LOG.exception(
-                "research email failed batch_id=%s event_id=%s "
-                "error_type=%s error=%r",
-                batch.batch_id,
+                "research email failed group_id=%s event_id=%s "
+                "error_type=%s",
+                group_id,
                 event.event_id,
                 type(exc).__name__,
-                exc,
             )
 
     async def _run_disclosure_and_analysis(
         self,
-        batch_id: str,
+        group_id: str,
         event_id: str,
+        research: ResearchHandoff,
     ) -> None:
         try:
-            await self.wait_report(batch_id, event_id)
-            decision = await self.run_analysis(batch_id, event_id)
-            await self.send(decision)
-            self.event_store.update(batch_id, event_id, "decision_sent")
+            await self.wait_report(group_id, event_id)
+            await self._run_analysis_and_send(group_id, event_id, research)
         except Exception as exc:
             LOG.exception(
-                "agent trading event failed event_id=%s error_type=%s error=%r",
+                "agent trading event failed event_id=%s error_type=%s",
                 event_id,
                 type(exc).__name__,
-                exc,
             )
             details: dict[str, Any] = {}
             if isinstance(exc, DisclosureTimeoutError):
                 details["source_status"] = exc.source_status
+            state = self.event_store.load_state(group_id, event_id)
+            failed_stage = (
+                FailureStage.ANALYSIS
+                if state
+                in {
+                    EventState.REPORT_READY,
+                    EventState.ANALYZING,
+                    EventState.DECISION_READY,
+                }
+                else FailureStage.WATCH
+            )
             self.event_store.update(
-                batch_id,
+                group_id,
                 event_id,
-                "failed",
+                EventState.FAILED,
+                failed_stage=failed_stage,
                 error=f"{type(exc).__name__}: {exc}",
                 **details,
             )
 
+    async def _run_analysis_and_send(
+        self,
+        group_id: str,
+        event_id: str,
+        research: ResearchHandoff,
+    ) -> None:
+        decision = await self.run_analysis(group_id, event_id, research)
+        await self.send(decision)
+        self.event_store.update(group_id, event_id, EventState.DECISION_SENT)
+
     async def wait_report(
         self,
-        batch_id: str,
+        group_id: str,
         event_id: str,
     ) -> DisclosurePackage:
-        paths = self.event_store.event_paths(batch_id, event_id)
+        paths = self.event_store.event_paths(group_id, event_id)
         plan = WatchPlan.from_dict(
             self._load_object(paths.watch_plan, "watch plan"),
         )
@@ -495,49 +485,54 @@ class AgentController:
             raise ValueError(
                 f"stored watch plan event_id mismatch: {plan.event_id} != {event_id}",
             )
-        self.event_store.update(batch_id, event_id, "watching_disclosure")
+        self.event_store.update(
+            group_id,
+            event_id,
+            EventState.WATCHING_DISCLOSURE,
+        )
         package = await self.disclosure_watcher.watch(
             plan,
             paths.analysis_input,
             paths.watch,
         )
         self.event_store.update(
-            batch_id,
+            group_id,
             event_id,
-            "report_ready",
+            EventState.REPORT_READY,
             report_path=paths.report.relative_to(paths.root).as_posix(),
             report_source=package.source,
             report_detected_ns=package.detected_ns,
         )
         return package
 
-    async def run_analysis(self, batch_id: str, event_id: str) -> dict[str, Any]:
-        paths = self.event_store.event_paths(batch_id, event_id)
-        state = self.event_store.load(batch_id, event_id)
-        session_id = state.get("research_session_id")
-        if not isinstance(session_id, str) or not session_id.strip():
-            raise ValueError(f"research session id is missing: {event_id}")
-        self.event_store.update(batch_id, event_id, "analyzing")
+    async def run_analysis(
+        self,
+        group_id: str,
+        event_id: str,
+        research: ResearchHandoff,
+    ) -> dict[str, Any]:
+        paths = self.event_store.event_paths(group_id, event_id)
+        self.event_store.update(group_id, event_id, EventState.ANALYZING)
         await self.analysis_agent.run(
             ANALYSIS_PROMPT.read_text(encoding="utf-8"),
             paths.analysis_input,
             paths.decision,
-            session_id,
+            research,
             DECISION_SCHEMA,
         )
         decision = self._load_object(paths.decision, "decision")
         DECISION_VALIDATOR.validate(decision)
         market_universe = MarketUniverse.from_dict(
             self._load_object(
-                self.event_store.batch_paths(batch_id).market_universe,
-                "batch market universe",
+                self.event_store.event_group_paths(group_id).market_universe,
+                "event market universe",
             ),
         )
         validate_decision(event_id, decision, market_universe)
         self.event_store.update(
-            batch_id,
+            group_id,
             event_id,
-            "decision_ready",
+            EventState.DECISION_READY,
             decision_path=paths.decision.relative_to(paths.root).as_posix(),
         )
         return decision

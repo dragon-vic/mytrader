@@ -1,7 +1,6 @@
 {
   "schedule_id": "2026-08",
   "timezone": "UTC",
-  "active_scope": "core_tech_crypto",
   "batches": [
     {
       "batch_id": "2026-08-03-bmo",
@@ -14,6 +13,7 @@
           "company": "CNH Industrial",
           "ticker": "CNH",
           "scope": "other",
+          "active": false,
           "research_hints": [
             "Test whether CNH can create a construction or agricultural-equipment read-through for CAT; do not assume the relationship is tradable."
           ],
@@ -53,6 +53,7 @@
           "company": "Sportradar",
           "ticker": "SRAD",
           "scope": "core_tech_crypto",
+          "active": true,
           "research_hints": [
             "Test whether sports-betting data demand and customer economics can create a read-through for DKNG."
           ],
@@ -90,6 +91,7 @@
           "company": "American Bitcoin",
           "ticker": "ABTC",
           "scope": "core_tech_crypto",
+          "active": true,
           "research_hints": [
             "Test possible Bitcoin-mining, treasury, and crypto-market read-throughs to IREN, MSTR, and COIN."
           ],
@@ -136,6 +138,7 @@
           "company": "Palantir Technologies",
           "ticker": "PLTR",
           "scope": "core_tech_crypto",
+          "active": true,
           "research_hints": [
             "Evaluate PLTR's own tradable instrument first and reject it if the disclosure-to-price causal case is weak."
           ],
@@ -182,6 +185,7 @@
           "company": "Caterpillar",
           "ticker": "CAT",
           "scope": "other",
+          "active": false,
           "research_hints": [
             "Evaluate CAT's own tradable instrument first and reject it if the disclosure-to-price causal case is weak."
           ],
@@ -229,6 +233,7 @@
           "company": "SpaceX",
           "ticker": "SPCX",
           "scope": "core_tech_crypto",
+          "active": true,
           "research_hints": [
             "Evaluate SPCX directly and test commercial-space demand or valuation read-throughs to ASTS and RKLB."
           ],
@@ -268,6 +273,7 @@
           "company": "Advanced Micro Devices",
           "ticker": "AMD",
           "scope": "core_tech_crypto",
+          "active": true,
           "research_hints": [
             "Evaluate AMD directly and test AI-accelerator, data-center, and foundry read-throughs to NVDA and TSM."
           ],
@@ -306,6 +312,7 @@
           "company": "Astera Labs",
           "ticker": "ALAB",
           "scope": "core_tech_crypto",
+          "active": true,
           "research_hints": [
             "Evaluate ALAB directly and test data-center connectivity read-throughs to CRDO and MRVL."
           ],
@@ -344,6 +351,7 @@
           "company": "Arista Networks",
           "ticker": "ANET",
           "scope": "core_tech_crypto",
+          "active": true,
           "research_hints": [
             "Test AI-networking and optical-demand read-throughs to AVGO, CIEN, and AAOI."
           ],
@@ -391,6 +399,7 @@
           "company": "Novo Nordisk",
           "ticker": "NVO",
           "scope": "other",
+          "active": false,
           "research_hints": [
             "Evaluate NVO directly and test obesity and diabetes market-share read-throughs to LLY."
           ],
@@ -428,6 +437,7 @@
           "company": "Eli Lilly",
           "ticker": "LLY",
           "scope": "other",
+          "active": false,
           "research_hints": [
             "Evaluate LLY directly and test obesity and diabetes market-share read-throughs to NVO."
           ],
@@ -466,6 +476,7 @@
           "company": "The Walt Disney Company",
           "ticker": "DIS",
           "scope": "other",
+          "active": false,
           "research_hints": [
             "Evaluate DIS directly and test streaming demand, pricing, and profitability read-throughs to NFLX."
           ],
@@ -505,6 +516,7 @@
           "company": "Uber Technologies",
           "ticker": "UBER",
           "scope": "core_tech_crypto",
+          "active": true,
           "research_hints": [
             "Evaluate UBER's own tradable instrument first and reject it if the disclosure-to-price causal case is weak."
           ],
@@ -542,6 +554,7 @@
           "company": "Circle Internet Group",
           "ticker": "CRCL",
           "scope": "core_tech_crypto",
+          "active": true,
           "research_hints": [
             "Evaluate CRCL directly and test stablecoin and crypto-payments read-throughs to COIN and PYPL."
           ],
@@ -588,6 +601,7 @@
           "company": "Sandisk",
           "ticker": "SNDK",
           "scope": "core_tech_crypto",
+          "active": true,
           "research_hints": [
             "Evaluate SNDK directly and test NAND pricing and storage-demand read-throughs to WDC and MU."
           ],
@@ -627,6 +641,7 @@
           "company": "Western Digital",
           "ticker": "WDC",
           "scope": "core_tech_crypto",
+          "active": true,
           "research_hints": [
             "Evaluate WDC directly and test storage-demand read-throughs to SNDK and MU."
           ],
@@ -666,6 +681,7 @@
           "company": "Fluence Energy",
           "ticker": "FLNC",
           "scope": "core_tech_crypto",
+          "active": true,
           "research_hints": [
             "Evaluate FLNC directly and test grid-storage demand or pricing read-throughs to TSLA and BE."
           ],
@@ -714,6 +730,7 @@
           "company": "PENN Entertainment",
           "ticker": "PENN",
           "scope": "other",
+          "active": false,
           "research_hints": [
             "Test online sports-betting demand, promotions, and market-share read-throughs to DKNG."
           ],
@@ -761,6 +778,7 @@
           "company": "DraftKings",
           "ticker": "DKNG",
           "scope": "other",
+          "active": false,
           "research_hints": [
             "Evaluate DKNG's own tradable instrument first and reject it if the disclosure-to-price causal case is weak."
           ],
@@ -799,6 +817,7 @@
           "company": "Applied Optoelectronics",
           "ticker": "AAOI",
           "scope": "core_tech_crypto",
+          "active": true,
           "research_hints": [
             "Evaluate AAOI directly and test optical-networking demand read-throughs to CIEN and LITE."
           ],
@@ -837,6 +856,7 @@
           "company": "MARA Holdings",
           "ticker": "MARA",
           "scope": "core_tech_crypto",
+          "active": true,
           "research_hints": [
             "Test Bitcoin-mining, treasury, and crypto-market read-throughs to IREN, MSTR, and COIN."
           ],
@@ -884,6 +904,7 @@
           "company": "The Wendy's Company",
           "ticker": "WEN",
           "scope": "other",
+          "active": false,
           "research_hints": [
             "Evaluate WEN's own tradable instrument first and reject it if the disclosure-to-price causal case is weak."
           ],
@@ -923,6 +944,7 @@
           "company": "Take-Two Interactive Software",
           "ticker": "TTWO",
           "scope": "core_tech_crypto",
+          "active": true,
           "research_hints": [
             "Evaluate TTWO directly and test console and game-demand read-throughs to SONY."
           ],
@@ -970,6 +992,7 @@
           "company": "USA Rare Earth",
           "ticker": "USAR",
           "scope": "other",
+          "active": false,
           "research_hints": [
             "Evaluate USAR directly and test rare-earth supply-chain read-throughs."
           ],
@@ -1009,6 +1032,7 @@
           "company": "AST SpaceMobile",
           "ticker": "ASTS",
           "scope": "core_tech_crypto",
+          "active": true,
           "research_hints": [
             "Evaluate ASTS directly and test satellite-network read-throughs to RKLB and SPCX."
           ],
@@ -1048,6 +1072,7 @@
           "company": "Hims & Hers Health",
           "ticker": "HIMS",
           "scope": "other",
+          "active": false,
           "research_hints": [
             "Evaluate HIMS directly and reject weak cross-asset read-throughs."
           ],
@@ -1087,6 +1112,7 @@
           "company": "Rocket Lab",
           "ticker": "RKLB",
           "scope": "core_tech_crypto",
+          "active": true,
           "research_hints": [
             "Evaluate RKLB directly and test launch and space-systems read-throughs to ASTS and SPCX."
           ],
@@ -1134,6 +1160,7 @@
           "company": "CoreWeave",
           "ticker": "CRWV",
           "scope": "core_tech_crypto",
+          "active": true,
           "research_hints": [
             "Evaluate CRWV directly and test AI infrastructure demand read-throughs to NVDA, DELL and SMCI."
           ],
@@ -1173,6 +1200,7 @@
           "company": "Lumentum Holdings",
           "ticker": "LITE",
           "scope": "core_tech_crypto",
+          "active": true,
           "research_hints": [
             "Evaluate LITE directly and test optical-network demand read-throughs to COHR and AAOI."
           ],
@@ -1212,6 +1240,7 @@
           "company": "Super Micro Computer",
           "ticker": "SMCI",
           "scope": "core_tech_crypto",
+          "active": true,
           "research_hints": [
             "Evaluate SMCI directly and test AI-server demand and supply read-throughs to NVDA, DELL and CRWV."
           ],
@@ -1259,6 +1288,7 @@
           "company": "Nebius Group",
           "ticker": "NBIS",
           "scope": "core_tech_crypto",
+          "active": true,
           "research_hints": [
             "Evaluate NBIS directly and test AI-cloud capacity and demand read-throughs to CRWV and NVDA."
           ],
@@ -1305,6 +1335,7 @@
           "company": "Coherent",
           "ticker": "COHR",
           "scope": "core_tech_crypto",
+          "active": true,
           "research_hints": [
             "Evaluate COHR directly and test optical and datacenter demand read-throughs to LITE and AAOI."
           ],
@@ -1344,6 +1375,7 @@
           "company": "Forward Industries",
           "ticker": "FWDI",
           "scope": "core_tech_crypto",
+          "active": true,
           "research_hints": [
             "Evaluate FWDI directly and test crypto-treasury read-throughs only when explicitly supported by the release."
           ],
@@ -1383,6 +1415,7 @@
           "company": "Cisco Systems",
           "ticker": "CSCO",
           "scope": "core_tech_crypto",
+          "active": true,
           "research_hints": [
             "Evaluate CSCO directly and test networking and AI-infrastructure read-throughs to ANET and optical suppliers."
           ],
@@ -1430,6 +1463,7 @@
           "company": "Ondas",
           "ticker": "ONDS",
           "scope": "core_tech_crypto",
+          "active": true,
           "research_hints": [
             "Evaluate ONDS directly and test autonomous-systems read-throughs only when causally supported."
           ],
@@ -1477,6 +1511,7 @@
           "company": "Applied Materials",
           "ticker": "AMAT",
           "scope": "core_tech_crypto",
+          "active": true,
           "research_hints": [
             "Evaluate AMAT directly and test wafer-fab equipment demand read-throughs to LRCX, KLAC, TSM and memory names."
           ],
@@ -1524,6 +1559,7 @@
           "company": "The Home Depot",
           "ticker": "HD",
           "scope": "other",
+          "active": false,
           "research_hints": [
             "Evaluate HD directly."
           ],
@@ -1571,6 +1607,7 @@
           "company": "Kanzhun",
           "ticker": "BZ",
           "scope": "other",
+          "active": false,
           "research_hints": [
             "Evaluate BZ directly."
           ],
@@ -1617,6 +1654,7 @@
           "company": "Walmart",
           "ticker": "WMT",
           "scope": "other",
+          "active": false,
           "research_hints": [
             "Evaluate WMT directly."
           ],
@@ -1664,6 +1702,7 @@
           "company": "Zoom Communications",
           "ticker": "ZM",
           "scope": "core_tech_crypto",
+          "active": true,
           "research_hints": [
             "Evaluate ZM directly and test enterprise-software demand read-throughs only when supported."
           ],
@@ -1711,6 +1750,7 @@
           "company": "CrowdStrike",
           "ticker": "CRWD",
           "scope": "core_tech_crypto",
+          "active": true,
           "research_hints": [
             "Evaluate CRWD directly and test cybersecurity demand read-throughs to PANW."
           ],
@@ -1750,6 +1790,7 @@
           "company": "NVIDIA",
           "ticker": "NVDA",
           "scope": "core_tech_crypto",
+          "active": true,
           "research_hints": [
             "Evaluate NVDA directly and comprehensively map AI-compute, networking, memory, foundry and customer read-throughs."
           ],
@@ -1797,6 +1838,7 @@
           "company": "Marvell Technology",
           "ticker": "MRVL",
           "scope": "core_tech_crypto",
+          "active": true,
           "research_hints": [
             "Evaluate MRVL directly and test custom silicon, networking and storage read-throughs."
           ],
@@ -1836,6 +1878,7 @@
           "company": "Dell Technologies",
           "ticker": "DELL",
           "scope": "core_tech_crypto",
+          "active": true,
           "research_hints": [
             "Evaluate DELL directly and test AI-server and enterprise-demand read-throughs to NVDA, SMCI and CRWV."
           ],
@@ -1875,6 +1918,7 @@
           "company": "IREN",
           "ticker": "IREN",
           "scope": "core_tech_crypto",
+          "active": true,
           "research_hints": [
             "Evaluate IREN directly and separate Bitcoin-mining economics from AI-cloud capacity and contracting."
           ],

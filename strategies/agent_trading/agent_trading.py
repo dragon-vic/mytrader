@@ -6,28 +6,24 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from adapters.external_json import ExternalJson
-from adapters.external_json import external_json_type
 from nautilus_trader.config import StrategyConfig
-from nautilus_trader.model.data import CustomData
-from nautilus_trader.model.data import MarkPriceUpdate
-from nautilus_trader.model.enums import OrderSide
-from nautilus_trader.model.enums import TimeInForce
-from nautilus_trader.model.events import OrderCanceled
-from nautilus_trader.model.events import OrderDenied
-from nautilus_trader.model.events import OrderExpired
-from nautilus_trader.model.events import OrderFilled
-from nautilus_trader.model.events import OrderRejected
-from nautilus_trader.model.identifiers import ClientId
-from nautilus_trader.model.identifiers import InstrumentId
+from nautilus_trader.model.data import CustomData, MarkPriceUpdate
+from nautilus_trader.model.enums import OrderSide, TimeInForce
+from nautilus_trader.model.events import (
+    OrderCanceled,
+    OrderDenied,
+    OrderExpired,
+    OrderFilled,
+    OrderRejected,
+)
+from nautilus_trader.model.identifiers import ClientId, InstrumentId
 from nautilus_trader.model.orders import Order
 from nautilus_trader.trading.strategy import Strategy
 
+from adapters.external_json import ExternalJson, external_json_type
 from strategies.agent_trading.controller import DECISION_VALIDATOR
-from strategies.agent_trading.lifecycle import load_market_universe
-from strategies.agent_trading.lifecycle import load_schedule
-from utils.constants import EXTERNAL_JSON_CLIENT_NAME
-from utils.constants import PROJECT_ROOT
+from strategies.agent_trading.lifecycle import load_market_universe, load_schedule
+from utils.constants import EXTERNAL_JSON_CLIENT_NAME, PROJECT_ROOT
 
 MINUTE_NS = 60_000_000_000
 HOUR_NS = 60 * MINUTE_NS
@@ -64,7 +60,7 @@ class AgentTradingStrategy(Strategy):
         super().__init__(config)
         schedule_path = self._project_path(config.schedule_path)
         universe_path = self._project_path(config.market_universe_path)
-        batches = load_schedule(schedule_path)
+        schedule_groups = load_schedule(schedule_path)
         universe = load_market_universe(universe_path)
 
         self.data_client = ClientId(config.data_client)
@@ -90,24 +86,20 @@ class AgentTradingStrategy(Strategy):
         if not self.instrument_ids:
             raise ValueError("market universe has no Binance instruments")
         self.instrument_set = frozenset(self.instrument_ids)
-        self.event_batch = {
-            event.event_id: batch.batch_id
-            for batch in batches
-            for event in batch.events
-        }
-        self.windows = {
-            batch.batch_id: (
-                int(batch.watch_start_at.timestamp() * 1_000_000_000) - HOUR_NS,
-                int(batch.watch_start_at.timestamp() * 1_000_000_000),
+        self.event_windows = {
+            event.event_id: (
+                int(event.watch_plan.start_at.timestamp() * 1_000_000_000) - HOUR_NS,
+                int(event.watch_plan.start_at.timestamp() * 1_000_000_000),
             )
-            for batch in batches
+            for group in schedule_groups
+            for event in group.events
         }
-        if any(end_ns % MINUTE_NS for _start_ns, end_ns in self.windows.values()):
+        if any(end_ns % MINUTE_NS for _start_ns, end_ns in self.event_windows.values()):
             raise ValueError("schedule watch_start_at must align to a whole UTC minute")
         self.mark_minutes: dict[
             str,
             dict[InstrumentId, dict[int, MarkBucket]],
-        ] = {batch_id: {} for batch_id in self.windows}
+        ] = {event_id: {} for event_id in self.event_windows}
         self.seen_events: set[str] = set()
         self.pending: dict[str, PendingOrder] = {}
 
@@ -141,21 +133,21 @@ class AgentTradingStrategy(Strategy):
         )
         self.log.info(
             f"agent_trading started instruments={len(self.instrument_ids)} "
-            f"batches={len(self.windows)} margin_usdt={self.margin_usdt} "
+            f"events={len(self.event_windows)} margin_usdt={self.margin_usdt} "
             f"leverage={self.leverage}",
         )
 
-    # 将每秒标记价格聚合到对应批次的分钟桶中。
+    # 将每秒标记价格聚合到对应 event 的分钟桶中。
     def on_mark_price(self, mark: MarkPriceUpdate) -> None:
         if mark.instrument_id not in self.instrument_set:
             return
         ts_event = int(mark.ts_event)
         minute_ns = ts_event // MINUTE_NS * MINUTE_NS
         price = mark.value.as_decimal()
-        for batch_id, (start_ns, end_ns) in self.windows.items():
+        for event_id, (start_ns, end_ns) in self.event_windows.items():
             if not start_ns <= ts_event < end_ns:
                 continue
-            instruments = self.mark_minutes[batch_id]
+            instruments = self.mark_minutes[event_id]
             minutes = instruments.setdefault(mark.instrument_id, {})
             bucket = minutes.setdefault(minute_ns, MarkBucket())
             bucket.total += price
@@ -208,7 +200,7 @@ class AgentTradingStrategy(Strategy):
             f"{json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}",
         )
         event_id = payload["event_id"]
-        if event_id not in self.event_batch:
+        if event_id not in self.event_windows:
             raise ValueError(f"event is not active in schedule: {event_id}")
         if event_id in self.seen_events:
             self.log.warning(f"agent_json_duplicate event_id={event_id}")
@@ -254,8 +246,7 @@ class AgentTradingStrategy(Strategy):
     # 根据财报前一小时标价均值和当前标价筛选并生成市场单。
     def _judge_market(self, payload: dict[str, Any]) -> list[Order]:
         event_id = payload["event_id"]
-        batch_id = self.event_batch[event_id]
-        start_ns, end_ns = self.windows[batch_id]
+        start_ns, end_ns = self.event_windows[event_id]
         account = self._account()
         if account is None:
             self.log.error(f"market_judgment_no_account event_id={event_id}")
@@ -265,7 +256,7 @@ class AgentTradingStrategy(Strategy):
         for trade in payload["trades"]:
             instrument_id = InstrumentId.from_str(trade["instrument_id"])
             instrument = self.cache.instrument(instrument_id)
-            minutes = self.mark_minutes[batch_id].get(instrument_id, {})
+            minutes = self.mark_minutes[event_id].get(instrument_id, {})
             expected_minutes = range(start_ns, end_ns, MINUTE_NS)
             if any(minute_ns not in minutes for minute_ns in expected_minutes):
                 self.log.warning(
@@ -386,7 +377,7 @@ class AgentTradingStrategy(Strategy):
                 f"instrument={pending.instrument_id} order={order_id}",
             )
 
-    # 对60个分钟均值再次等权平均，得到批次财报前基准价。
+    # 对60个分钟均值再次等权平均，得到 event 财报前基准价。
     @staticmethod
     def _base_price(
         minutes: dict[int, MarkBucket],
