@@ -7,22 +7,23 @@ import logging
 import os
 import re
 import time
-from datetime import UTC
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
-from urllib.parse import unquote
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 import aiohttp
 import websockets
 from dotenv import load_dotenv
-from websockets.exceptions import ConnectionClosed
-from websockets.exceptions import WebSocketException
+from websockets.exceptions import ConnectionClosed, WebSocketException
 
 from strategies.agent_trading.watch.disclosure_preprocessor import DisclosureProcessor
-from strategies.agent_trading.watch.watch_data_models import DisclosurePackage
-from strategies.agent_trading.watch.watch_data_models import WatchTarget
-
+from strategies.agent_trading.watch.news_pdf_attachments import (
+    NewsPdfAttachmentCollector,
+)
+from strategies.agent_trading.watch.watch_data_models import (
+    DisclosurePackage,
+    WatchTarget,
+)
 
 LOG = logging.getLogger(__name__)
 WS_ENDPOINT = "wss://ws.rtpr.io/ws-alerts"
@@ -76,6 +77,7 @@ class RtprWebSocketWatcher:
         load_dotenv(Path(__file__).resolve().parents[3] / ".env")
         self.session = session
         self.processor = processor
+        self.pdf_attachments = NewsPdfAttachmentCollector(session, processor)
         self.api_key = (api_key or os.environ.get("RTPR_API_KEY", "")).strip()
         self.targets: dict[str, tuple[WatchTarget, str]] = {}
         self.seen_urls: set[str] = set()
@@ -240,6 +242,12 @@ class RtprWebSocketWatcher:
         )
         if processed.processing_status == "failed":
             raise ValueError(f"RTPR preprocessing failed: {source_url}")
+        attachments = await self.pdf_attachments.collect(
+            target,
+            data,
+            source_url,
+            "rtpr",
+        )
         target.trace.record(
             "rtpr",
             "disclosure_processed",
@@ -255,7 +263,7 @@ class RtprWebSocketWatcher:
             origin_url=source_url,
             published_at=published.isoformat(),
             detected_ns=time.time_ns(),
-            files=(processed,),
+            files=(processed, *attachments),
         )
 
 

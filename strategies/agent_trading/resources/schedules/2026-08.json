@@ -1053,9 +1053,9 @@
             "news_release": {
               "sources": [
                 {
-                  "url": "https://investor.coherent.com/news-events/news-releases",
+                  "url": "https://www.coherent.com/company/investor-relations/financial-releases",
                   "format": "html",
-                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
+                  "title_regex": "(?i)^(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -1083,7 +1083,7 @@
             "news_release": {
               "sources": [
                 {
-                  "url": "https://ir.forwardindustries.com/news-events/press-releases",
+                  "url": "https://forwardindustries.com/all-articles",
                   "format": "html",
                   "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
@@ -1113,8 +1113,8 @@
             "news_release": {
               "sources": [
                 {
-                  "url": "https://investor.cisco.com/news/news-details",
-                  "format": "html",
+                  "url": "https://investor.cisco.com/feed/PressRelease.svc/GetPressReleaseList?languageId=1&bodyType=0&year=2026&includeTags=true&pressReleaseDateFilter=1",
+                  "format": "q4_json",
                   "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
@@ -1151,8 +1151,8 @@
             "news_release": {
               "sources": [
                 {
-                  "url": "https://ir.ondas.com/press-releases",
-                  "format": "html",
+                  "url": "https://ir.ondas.com/rss",
+                  "format": "feed",
                   "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
@@ -1189,8 +1189,8 @@
             "news_release": {
               "sources": [
                 {
-                  "url": "https://ir.appliedmaterials.com/news-releases",
-                  "format": "html",
+                  "url": "https://ir.appliedmaterials.com/rss/news-releases.xml",
+                  "format": "feed",
                   "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
@@ -1340,8 +1340,8 @@
             "news_release": {
               "sources": [
                 {
-                  "url": "https://investors.zoom.us/news-releases",
-                  "format": "html",
+                  "url": "https://investors.zoom.us/rss/news-releases.xml",
+                  "format": "feed",
                   "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
@@ -1378,8 +1378,8 @@
             "news_release": {
               "sources": [
                 {
-                  "url": "https://ir.crowdstrike.com/news-events/press-releases",
-                  "format": "html",
+                  "url": "https://ir.crowdstrike.com/rss/news-releases.xml",
+                  "format": "feed",
                   "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
@@ -1408,8 +1408,8 @@
             "news_release": {
               "sources": [
                 {
-                  "url": "https://investor.nvidia.com/news-and-events/financial-releases/default.aspx",
-                  "format": "html",
+                  "url": "https://investor.nvidia.com/feed/PressRelease.svc/GetPressReleaseList?languageId=1&bodyType=0&year=2026&includeTags=true&pressReleaseDateFilter=1",
+                  "format": "q4_json",
                   "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
@@ -1476,8 +1476,8 @@
             "news_release": {
               "sources": [
                 {
-                  "url": "https://investors.delltechnologies.com/news-events/news-releases",
-                  "format": "html",
+                  "url": "https://investors.delltechnologies.com/rss/news-releases.xml",
+                  "format": "feed",
                   "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
@@ -1505,8 +1505,8 @@
             "news_release": {
               "sources": [
                 {
-                  "url": "https://investors.iren.com/news-and-events/news-releases",
-                  "format": "html",
+                  "url": "https://iren.gcs-web.com/rss/news-releases.xml",
+                  "format": "feed",
                   "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?|business[- ]update)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]

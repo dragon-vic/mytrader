@@ -8,28 +8,25 @@ import re
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from datetime import UTC
-from datetime import datetime
+from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import parse_qsl
-from urllib.parse import unquote
-from urllib.parse import urlencode
-from urllib.parse import urljoin
-from urllib.parse import urlsplit
-from urllib.parse import urlunsplit
+from urllib.parse import parse_qsl, unquote, urlencode, urljoin, urlsplit, urlunsplit
 
 import aiohttp
 
-from strategies.agent_trading.watch.watch_data_models import DisclosurePackage
-from strategies.agent_trading.watch.watch_data_models import NewsSource
-from strategies.agent_trading.watch.watch_data_models import WatchPlan
-from strategies.agent_trading.watch.watch_data_models import WatchTarget
 from strategies.agent_trading.watch.disclosure_preprocessor import DisclosureProcessor
-from strategies.agent_trading.watch.watch_trace import cache_metadata
-from strategies.agent_trading.watch.watch_trace import fresh_url
-
+from strategies.agent_trading.watch.news_pdf_attachments import (
+    NewsPdfAttachmentCollector,
+)
+from strategies.agent_trading.watch.watch_data_models import (
+    DisclosurePackage,
+    NewsSource,
+    WatchPlan,
+    WatchTarget,
+)
+from strategies.agent_trading.watch.watch_trace import cache_metadata, fresh_url
 
 LOG = logging.getLogger(__name__)
 MAX_RETRY_SECONDS = 10.0
@@ -77,6 +74,7 @@ class NewsReleaseWatcher:
         self.session = session
         self.poll_seconds = poll_seconds
         self.processor = processor
+        self.pdf_attachments = NewsPdfAttachmentCollector(session, processor)
         self.tasks: dict[str, set[asyncio.Task]] = {}
         self.limits: dict[str, _HostLimiter] = {}
 
@@ -261,6 +259,13 @@ class NewsReleaseWatcher:
             raise ValueError(
                 f"news release preprocessing failed: {processed.source_url}",
             )
+        attachments = await self.pdf_attachments.collect(
+            target,
+            body.data,
+            body.url,
+            "news_release",
+            source.user_agent,
+        )
         target.trace.record(
             "news_release",
             "disclosure_processed",
@@ -276,7 +281,7 @@ class NewsReleaseWatcher:
             origin_url=body.url,
             published_at=entry.published.isoformat() if entry.published else None,
             detected_ns=detected_ns,
-            files=(processed,),
+            files=(processed, *attachments),
         )
 
     async def _get(self, url: str, user_agent: str | None = None) -> _HttpBody:

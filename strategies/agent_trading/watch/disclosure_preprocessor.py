@@ -14,7 +14,6 @@ from pypdf import PdfReader
 
 from strategies.agent_trading.watch.watch_data_models import DisclosureFile
 
-
 LOG = logging.getLogger(__name__)
 __all__ = ["DisclosureProcessor"]
 
@@ -34,7 +33,10 @@ class DisclosureProcessor:
         data = raw_path.read_bytes()
         content_format = _detect_format(data, content_type, source_url)
         event_dir = analysis_input_dir.parent
-        relative_raw = (Path("..") / raw_path.relative_to(event_dir)).as_posix()
+        try:
+            relative_raw = raw_path.relative_to(analysis_input_dir).as_posix()
+        except ValueError:
+            relative_raw = (Path("..") / raw_path.relative_to(event_dir)).as_posix()
         common = {
             "document_type": document_type,
             "description": description,
@@ -94,11 +96,17 @@ class _ReadableHtmlParser(HTMLParser):
             return
         if self.skipped:
             return
-        if tag in {"p", "div", "section", "article", "blockquote", "tr"}:
-            self.parts.append("\n")
-        elif tag == "br":
-            self.parts.append("\n")
-        elif tag in {"ul", "ol"}:
+        if tag in {
+            "p",
+            "div",
+            "section",
+            "article",
+            "blockquote",
+            "tr",
+            "br",
+            "ul",
+            "ol",
+        }:
             self.parts.append("\n")
         elif tag == "li":
             self.parts.append("\n- ")
