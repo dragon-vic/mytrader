@@ -150,8 +150,6 @@ class NewsReleaseWatcher:
                         package = await self._download(target, source, entry)
                         seen.add(entry_id)
                         changed = True
-                        if not _matches_content(source, target.analysis_input_dir, package):
-                            continue
                         _save_seen(state_path, source, seen)
                         self._health(target, source_key, None)
                         if await target.ready(package):
@@ -357,37 +355,19 @@ def _parse_news(source: NewsSource, data: bytes) -> tuple[_FeedEntry, ...]:
     )
 
 
-# 新条目先通过事件时间和标题包含/排除规则。
+# 新条目先通过事件时间和 event 独立正则。
 def _matches_entry(
     source: NewsSource,
     plan: WatchPlan,
     entry: _FeedEntry,
 ) -> bool:
-    title = " ".join(entry.title.casefold().split())
-    phrases = tuple(phrase.casefold() for phrase in source.title_phrases)
-    excluded = tuple(phrase.casefold() for phrase in source.exclude_phrases)
-    if not any(phrase in title for phrase in phrases):
-        return False
-    if any(phrase in title for phrase in excluded):
+    title = " ".join(entry.title.split())
+    if re.search(source.title_regex, title) is None:
         return False
     if entry.published is None:
         return True
     published = entry.published.astimezone(UTC)
     return plan.start_at <= published <= plan.end_at
-
-
-# 下载后的正文必须包含计划指定的财务确认词。
-def _matches_content(
-    source: NewsSource,
-    context_dir: Path,
-    package: DisclosurePackage,
-) -> bool:
-    processed = package.files[0]
-    if processed.processing_status != "processed":
-        return False
-    path = context_dir / processed.analysis_path
-    text = " ".join(path.read_text(encoding="utf-8").casefold().split())
-    return all(term.casefold() in text for term in source.content_terms)
 
 
 def _entry_id(entry: _FeedEntry) -> str:

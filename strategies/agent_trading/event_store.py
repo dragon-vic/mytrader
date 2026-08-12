@@ -25,7 +25,7 @@ class EventState(StrEnum):
 
     @property
     def is_finished(self) -> bool:
-        return self in {EventState.DECISION_READY, EventState.DECISION_SENT}
+        return self is EventState.DECISION_SENT
 
 
 class FailureStage(StrEnum):
@@ -84,7 +84,6 @@ class EventStore:
         root = (self.root / "batches" / group_id).resolve()
         root.relative_to(self.root)
         events = root / "events"
-        events.mkdir(parents=True, exist_ok=True)
         return EventGroupPaths(
             root=root,
             market_universe=root / "market_universe.json",
@@ -102,8 +101,6 @@ class EventStore:
         watch = root / "watch"
         analysis_input = root / "analysis_input"
         analysis_output = root / "analysis_output"
-        for path in (research_output, watch, analysis_input, analysis_output):
-            path.mkdir(parents=True, exist_ok=True)
         return EventPaths(
             root=root,
             state=root / "state.json",
@@ -128,6 +125,7 @@ class EventStore:
         market_universe: dict[str, Any],
     ) -> None:
         paths = self.event_group_paths(group_id)
+        paths.events.mkdir(parents=True, exist_ok=True)
         if not paths.market_universe.exists():
             self._write(paths.market_universe, market_universe)
 
@@ -139,6 +137,13 @@ class EventStore:
         watch_plan: dict[str, Any],
     ) -> EventPaths:
         paths = self.event_paths(group_id, event_id)
+        for path in (
+            paths.research_output,
+            paths.watch,
+            paths.analysis_input,
+            paths.analysis_output,
+        ):
+            path.mkdir(parents=True, exist_ok=True)
         if paths.event.exists():
             stored = self._read(paths.event, "event")
             if stored.get("event_id") != event_id:
@@ -170,22 +175,29 @@ class EventStore:
         )
 
     def load_state(self, group_id: str, event_id: str) -> EventState:
+        _payload, state = self.load_record(group_id, event_id)
+        return state
+
+    def load_record(
+        self,
+        group_id: str,
+        event_id: str,
+    ) -> tuple[dict[str, Any], EventState]:
         payload = self.load(group_id, event_id)
         try:
-            return EventState(payload.get("state"))
+            state = EventState(payload.get("state"))
         except ValueError as exc:
             raise ValueError(
                 f"invalid event state for {event_id}: {payload.get('state')!r}",
             ) from exc
+        return payload, state
 
-    # research.md 是正式交接物；session_id 只决定分析是否恢复原会话。
+    # 分析阶段读取正式交接物；session_id 只决定是否恢复原预研会话。
     def load_research_handoff(
         self,
         group_id: str,
         event_id: str,
     ) -> ResearchHandoff | None:
-        if self.load_state(group_id, event_id) is not EventState.RESEARCH_READY:
-            return None
         paths = self.event_paths(group_id, event_id)
         if not paths.research.is_file():
             return None
@@ -214,8 +226,6 @@ class EventStore:
     ) -> dict[str, Any]:
         paths = self.event_paths(group_id, event_id)
         payload = self._read(paths.state, "event state")
-        payload.pop("research_complete", None)
-        payload.pop("research_error", None)
         if state is EventState.FAILED:
             failed_stage = values.get("failed_stage")
             error = values.get("error")

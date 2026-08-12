@@ -5,8 +5,8 @@ import hashlib
 import json
 import logging
 import os
-import time
 import re
+import time
 from datetime import UTC
 from datetime import datetime
 from pathlib import Path
@@ -21,7 +21,6 @@ from websockets.exceptions import WebSocketException
 
 from strategies.agent_trading.watch.disclosure_preprocessor import DisclosureProcessor
 from strategies.agent_trading.watch.watch_data_models import DisclosurePackage
-from strategies.agent_trading.watch.watch_data_models import WatchPlan
 from strategies.agent_trading.watch.watch_data_models import WatchTarget
 
 
@@ -29,6 +28,40 @@ LOG = logging.getLogger(__name__)
 WS_ENDPOINT = "wss://ws.rtpr.io/ws-alerts"
 INITIAL_BACKOFF_SECONDS = 2.0
 MAX_BACKOFF_SECONDS = 60.0
+
+_RTPR_REPORT_ACTION = re.compile(
+    r"\b(?:report(?:s|ed)?|announce(?:s|d)?|deliver(?:s|ed)?|"
+    r"provide(?:s|d)?|post(?:s|ed)?|release(?:s|d)?)\b",
+    re.IGNORECASE,
+)
+_RTPR_REPORT_TYPE = re.compile(
+    r"\b(?:result(?:s)?|earnings?|financial results?|operating results?)\b",
+    re.IGNORECASE,
+)
+_RTPR_REPORT_PERIOD = re.compile(
+    r"\b(?:q[1-4]|(?:first|second|third|fourth) quarter|"
+    r"fiscal|fy\s*\d{2,4}|full year|annual|year ended|half[- ]year)\b",
+    re.IGNORECASE,
+)
+_RTPR_REPORT_METRIC = re.compile(
+    r"\b(?:revenue|sales|income|loss|profit|eps|guidance|outlook|"
+    r"margin|growth|bookings|billings|arr|cash flow)\b",
+    re.IGNORECASE,
+)
+_RTPR_NOTICE = re.compile(
+    r"(?:\b(?:to|will|plans? to|scheduled? to|set to)\s+"
+    r"(?:report|release|announce)\b|"
+    r"\bannounce(?:s|d)?\s+(?:the\s+)?(?:date|timing)\b|"
+    r"\b(?:conference call|webcast|investor day|investor alert|"
+    r"class action|securities fraud|securities investigation)\b)",
+    re.IGNORECASE,
+)
+_RTPR_FINANCIAL_BODY = re.compile(
+    r"\b(?:financial results|quarterly results|operating results|"
+    r"quarter ended|fiscal year|shareholder letter|revenue|net income|"
+    r"net loss|earnings per share|guidance)\b",
+    re.IGNORECASE,
+)
 
 
 class RtprWebSocketWatcher:
@@ -229,14 +262,36 @@ class RtprWebSocketWatcher:
 def _matches_plan(target: WatchTarget, package: DisclosurePackage) -> bool:
     processed = package.files[0]
     path = target.analysis_input_dir / processed.analysis_path
-    text = " ".join(path.read_text(encoding="utf-8").casefold().split())
-    for source in target.plan.news_sources:
-        phrases = tuple(" ".join(item.casefold().split()) for item in source.title_phrases)
-        excludes = tuple(" ".join(item.casefold().split()) for item in source.exclude_phrases)
-        if any(phrase in text for phrase in phrases) and not any(
-            phrase in text for phrase in excludes
-        ) and all(term.casefold() in text for term in source.content_terms):
-            return True
+    title, body = _read_rtpr_title_and_body(path)
+    return _is_financial_release(title, body)
+
+
+def _read_rtpr_title_and_body(path: Path) -> tuple[str, str]:
+    """Read the article H1 separately from the processed article body."""
+    text = path.read_text(encoding="utf-8")
+    lines = [" ".join(line.split()) for line in text.splitlines()]
+    headings = [line.lstrip("# ").strip() for line in lines if line.startswith("# ")]
+    title = headings[0] if headings else (lines[0] if lines else "")
+    body = " ".join(line for line in lines if line != title)
+    return title, body
+
+
+def _is_financial_release(title: str, body: str = "") -> bool:
+    """Return whether an RTPR headline is a published financial release."""
+    title = " ".join(title.split())
+    if not title or _RTPR_NOTICE.search(title):
+        return False
+
+    has_period = bool(_RTPR_REPORT_PERIOD.search(title))
+    has_report_type = bool(_RTPR_REPORT_TYPE.search(title))
+    has_action = bool(_RTPR_REPORT_ACTION.search(title))
+    has_metric = bool(_RTPR_REPORT_METRIC.search(title))
+    is_business_update = "business update" in title.casefold()
+
+    if has_report_type and has_period and (has_action or is_business_update):
+        return True
+    if has_action and has_period and has_metric:
+        return bool(_RTPR_FINANCIAL_BODY.search(body))
     return False
 
 

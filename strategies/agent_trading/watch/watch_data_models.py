@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
@@ -26,9 +27,7 @@ class SecPlan:
 class NewsSource:
     url: str
     format: str
-    title_phrases: tuple[str, ...]
-    exclude_phrases: tuple[str, ...]
-    content_terms: tuple[str, ...]
+    title_regex: str
     user_agent: str | None = None
 
 
@@ -132,10 +131,12 @@ class WatchPlan:
                 raise ValueError(f"news source must use https: {source.url}")
             if source.format not in SOURCE_FORMATS:
                 raise ValueError(f"unsupported news source format: {source.format}")
-            if not source.title_phrases:
-                raise ValueError("news source title_phrases must not be empty")
-            if not source.content_terms:
-                raise ValueError("news source content_terms must not be empty")
+            try:
+                re.compile(source.title_regex)
+            except re.error as exc:
+                raise ValueError(
+                    f"news source title_regex is invalid: {source.url}: {exc}",
+                ) from exc
 
 
 @dataclass(frozen=True)
@@ -211,7 +212,7 @@ class WatchTarget:
 
 
 def _parse_source(payload: dict[str, Any]) -> NewsSource:
-    required = {"url", "format", "title_phrases", "exclude_phrases", "content_terms"}
+    required = {"url", "format", "title_regex"}
     actual = set(payload)
     if not required <= actual or actual - required - {"user_agent"}:
         raise ValueError(
@@ -221,18 +222,7 @@ def _parse_source(payload: dict[str, Any]) -> NewsSource:
     return NewsSource(
         url=_require_text(payload["url"], "news source url"),
         format=_require_text(payload["format"], "news source format"),
-        title_phrases=_text_tuple(
-            payload["title_phrases"],
-            "news source title_phrases",
-        ),
-        exclude_phrases=_text_tuple(
-            payload["exclude_phrases"],
-            "news source exclude_phrases",
-        ),
-        content_terms=_text_tuple(
-            payload["content_terms"],
-            "news source content_terms",
-        ),
+        title_regex=_require_text(payload["title_regex"], "news source title_regex"),
         user_agent=(
             _require_text(payload["user_agent"], "news source user_agent")
             if "user_agent" in payload
@@ -245,9 +235,7 @@ def _source_dict(source: NewsSource) -> dict[str, Any]:
     payload = {
         "url": source.url,
         "format": source.format,
-        "title_phrases": list(source.title_phrases),
-        "exclude_phrases": list(source.exclude_phrases),
-        "content_terms": list(source.content_terms),
+        "title_regex": source.title_regex,
     }
     if source.user_agent is not None:
         payload["user_agent"] = source.user_agent

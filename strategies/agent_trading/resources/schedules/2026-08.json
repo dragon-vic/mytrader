@@ -31,17 +31,7 @@
                 {
                   "url": "https://investors.cnh.com/rss/PressRelease.aspx",
                   "format": "feed",
-                  "title_phrases": [
-                    "cnh industrial n.v. reports second quarter 2026 results",
-                    "cnh reports second quarter 2026 results"
-                  ],
-                  "exclude_phrases": [
-                    "to announce"
-                  ],
-                  "content_terms": [
-                    "cnh",
-                    "net sales"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -70,16 +60,7 @@
                 {
                   "url": "https://investors.sportradar.com/rss/news-releases.xml",
                   "format": "feed",
-                  "title_phrases": [
-                    "sportradar reports second quarter 2026 financial results"
-                  ],
-                  "exclude_phrases": [
-                    "to release"
-                  ],
-                  "content_terms": [
-                    "sportradar",
-                    "revenue"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -109,16 +90,7 @@
                 {
                   "url": "https://www.abtc.com/news",
                   "format": "html",
-                  "title_phrases": [
-                    "american bitcoin reports second quarter 2026 results"
-                  ],
-                  "exclude_phrases": [
-                    "schedules"
-                  ],
-                  "content_terms": [
-                    "american bitcoin",
-                    "revenue"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -156,16 +128,7 @@
                 {
                   "url": "https://investors.palantir.com/feed/PressRelease.svc/GetPressReleaseList?languageId=1&bodyType=0&year=2026&includeTags=true&pressReleaseDateFilter=1",
                   "format": "q4_json",
-                  "title_phrases": [
-                    "palantir reports q2 2026"
-                  ],
-                  "exclude_phrases": [
-                    "announces date"
-                  ],
-                  "content_terms": [
-                    "palantir",
-                    "revenue"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results|revenue[- ]growth|guidance)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -203,17 +166,7 @@
                 {
                   "url": "https://investors.caterpillar.com/feed/PressRelease.svc/GetPressReleaseList?languageId=1&bodyType=0&year=2026&includeTags=true&pressReleaseDateFilter=1",
                   "format": "q4_json",
-                  "title_phrases": [
-                    "caterpillar reports second-quarter 2026 results",
-                    "caterpillar reports second quarter 2026 results"
-                  ],
-                  "exclude_phrases": [
-                    "to announce"
-                  ],
-                  "content_terms": [
-                    "caterpillar",
-                    "sales and revenues"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -251,17 +204,7 @@
                 {
                   "url": "https://ir.spacex.com/rss/PressRelease.aspx",
                   "format": "feed",
-                  "title_phrases": [
-                    "spacex posts second quarter 2026 results",
-                    "spacex reports second quarter 2026 results"
-                  ],
-                  "exclude_phrases": [
-                    "to post"
-                  ],
-                  "content_terms": [
-                    "spacex",
-                    "revenue"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -291,16 +234,7 @@
                 {
                   "url": "https://ir.amd.com/news-events/press-releases/rss",
                   "format": "feed",
-                  "title_phrases": [
-                    "amd reports fiscal second quarter 2026 financial results"
-                  ],
-                  "exclude_phrases": [
-                    "to report"
-                  ],
-                  "content_terms": [
-                    "amd",
-                    "revenue"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -330,16 +264,7 @@
                 {
                   "url": "https://ir.asteralabs.com/news-events/news-releases",
                   "format": "html",
-                  "title_phrases": [
-                    "astera labs reports second quarter 2026 financial results"
-                  ],
-                  "exclude_phrases": [
-                    "announces conference"
-                  ],
-                  "content_terms": [
-                    "astera labs",
-                    "revenue"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -369,17 +294,7 @@
                 {
                   "url": "https://www.arista.com/en/company/news/press-release",
                   "format": "html",
-                  "title_phrases": [
-                    "arista networks, inc. reports second quarter 2026 financial results",
-                    "arista networks reports second quarter 2026 financial results"
-                  ],
-                  "exclude_phrases": [
-                    "to announce"
-                  ],
-                  "content_terms": [
-                    "arista networks",
-                    "revenue"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -416,16 +331,7 @@
                 {
                   "url": "https://www.novonordisk.com/investors/financial-results.html",
                   "format": "html",
-                  "title_phrases": [
-                    "financial report for the first half of 2026",
-                    "financial results for the first half of 2026",
-                    "financial report for first half 2026"
-                  ],
-                  "exclude_phrases": [],
-                  "content_terms": [
-                    "novo nordisk",
-                    "sales"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -455,16 +361,7 @@
                 {
                   "url": "https://investor.lilly.com/financial-information/quarterly-results",
                   "format": "html",
-                  "title_phrases": [
-                    "q2 2026 financial results",
-                    "second-quarter 2026 financial results",
-                    "press release"
-                  ],
-                  "exclude_phrases": [],
-                  "content_terms": [
-                    "lilly",
-                    "revenue"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -494,17 +391,7 @@
                 {
                   "url": "https://investors.thewaltdisneycompany.com/rss/PressRelease.aspx",
                   "format": "feed",
-                  "title_phrases": [
-                    "the walt disney company reports third quarter",
-                    "the walt disney company reports fiscal third quarter 2026"
-                  ],
-                  "exclude_phrases": [
-                    "to report"
-                  ],
-                  "content_terms": [
-                    "the walt disney company",
-                    "revenues"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -534,15 +421,7 @@
                 {
                   "url": "https://investor.uber.com/rss/PressRelease.aspx",
                   "format": "feed",
-                  "title_phrases": [
-                    "uber announces results for second quarter 2026",
-                    "uber reports second quarter 2026 results"
-                  ],
-                  "exclude_phrases": [],
-                  "content_terms": [
-                    "uber",
-                    "revenue"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -572,16 +451,7 @@
                 {
                   "url": "https://investor.circle.com/rss/PressRelease.aspx",
                   "format": "feed",
-                  "title_phrases": [
-                    "circle reports second quarter 2026 financial results"
-                  ],
-                  "exclude_phrases": [
-                    "to announce"
-                  ],
-                  "content_terms": [
-                    "circle",
-                    "revenue"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -619,17 +489,7 @@
                 {
                   "url": "https://investor.sandisk.com/rss/news-releases.xml",
                   "format": "feed",
-                  "title_phrases": [
-                    "sandisk reports fiscal fourth quarter",
-                    "sandisk reports fourth quarter 2026"
-                  ],
-                  "exclude_phrases": [
-                    "to report"
-                  ],
-                  "content_terms": [
-                    "sandisk",
-                    "revenue"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -659,17 +519,8 @@
                 {
                   "url": "https://investor.wdc.com/rss/news-releases.xml",
                   "format": "feed",
-                  "title_phrases": [
-                    "wd reports fiscal fourth quarter 2026 financial results"
-                  ],
-                  "exclude_phrases": [
-                    "to announce"
-                  ],
-                  "content_terms": [
-                    "western digital",
-                    "revenue"
-                  ],
-                  "user_agent": "curl/8.5.0"
+                  "user_agent": "curl/8.5.0",
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -699,18 +550,7 @@
                 {
                   "url": "https://ir.fluenceenergy.com/rss/news-releases.xml",
                   "format": "feed",
-                  "title_phrases": [
-                    "fluence energy, inc. reports third quarter 2026 results",
-                    "fluence reports third quarter 2026 results"
-                  ],
-                  "exclude_phrases": [
-                    "earnings release date",
-                    "announces fiscal"
-                  ],
-                  "content_terms": [
-                    "fluence",
-                    "revenue"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -748,17 +588,7 @@
                 {
                   "url": "https://investors.pennentertainment.com/press-releases",
                   "format": "html",
-                  "title_phrases": [
-                    "penn entertainment, inc. reports second quarter results",
-                    "penn entertainment reports second quarter 2026 results"
-                  ],
-                  "exclude_phrases": [
-                    "to report"
-                  ],
-                  "content_terms": [
-                    "penn entertainment",
-                    "revenues"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -796,16 +626,7 @@
                 {
                   "url": "https://ir.aboutdraftkings.com/rss/PressRelease.aspx",
                   "format": "feed",
-                  "title_phrases": [
-                    "draftkings reports second quarter 2026 results"
-                  ],
-                  "exclude_phrases": [
-                    "to release"
-                  ],
-                  "content_terms": [
-                    "draftkings",
-                    "revenue"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -835,16 +656,7 @@
                 {
                   "url": "https://investors.ao-inc.com/rss/news-releases.xml",
                   "format": "feed",
-                  "title_phrases": [
-                    "applied optoelectronics reports second quarter 2026 financial results"
-                  ],
-                  "exclude_phrases": [
-                    "announces date"
-                  ],
-                  "content_terms": [
-                    "applied optoelectronics",
-                    "revenue"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -874,17 +686,7 @@
                 {
                   "url": "https://ir.mara.com/news-events/press-releases",
                   "format": "html",
-                  "title_phrases": [
-                    "mara announces second quarter 2026 results",
-                    "mara reports second quarter 2026 results"
-                  ],
-                  "exclude_phrases": [
-                    "schedules"
-                  ],
-                  "content_terms": [
-                    "mara",
-                    "second quarter 2026"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -922,17 +724,7 @@
                 {
                   "url": "https://www.irwendys.com/rss/PressRelease.aspx",
                   "format": "feed",
-                  "title_phrases": [
-                    "the wendy's company reports second quarter 2026 results",
-                    "wendy's reports second quarter 2026 results"
-                  ],
-                  "exclude_phrases": [
-                    "to report"
-                  ],
-                  "content_terms": [
-                    "wendy's",
-                    "revenues"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -962,17 +754,7 @@
                 {
                   "url": "https://www.take2games.com/ir/press-releases",
                   "format": "html",
-                  "title_phrases": [
-                    "take-two interactive software, inc. reports results for fiscal first quarter 2027",
-                    "take-two reports fiscal first quarter 2027 results"
-                  ],
-                  "exclude_phrases": [
-                    "to report"
-                  ],
-                  "content_terms": [
-                    "take-two interactive",
-                    "net revenue"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -1010,17 +792,7 @@
                 {
                   "url": "https://investors.usare.com/news-events/press-releases",
                   "format": "html",
-                  "title_phrases": [
-                    "usa rare earth reports",
-                    "usa rare earth announces financial results"
-                  ],
-                  "exclude_phrases": [
-                    "to report"
-                  ],
-                  "content_terms": [
-                    "usa rare earth",
-                    "financial results"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -1050,17 +822,7 @@
                 {
                   "url": "https://investors.ast-science.com/",
                   "format": "html",
-                  "title_phrases": [
-                    "ast spacemobile provides business update",
-                    "ast spacemobile reports"
-                  ],
-                  "exclude_phrases": [
-                    "to report"
-                  ],
-                  "content_terms": [
-                    "ast spacemobile",
-                    "quarter"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -1090,17 +852,7 @@
                 {
                   "url": "https://investors.hims.com/news/news-releases",
                   "format": "html",
-                  "title_phrases": [
-                    "hims & hers reports",
-                    "hims and hers reports"
-                  ],
-                  "exclude_phrases": [
-                    "to report"
-                  ],
-                  "content_terms": [
-                    "hims",
-                    "revenue"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -1130,17 +882,7 @@
                 {
                   "url": "https://investors.rocketlabusa.com/news-events/press-releases",
                   "format": "html",
-                  "title_phrases": [
-                    "rocket lab announces financial results",
-                    "rocket lab reports"
-                  ],
-                  "exclude_phrases": [
-                    "to report"
-                  ],
-                  "content_terms": [
-                    "rocket lab",
-                    "revenue"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -1178,17 +920,7 @@
                 {
                   "url": "https://investors.coreweave.com/news-events/news-releases",
                   "format": "html",
-                  "title_phrases": [
-                    "coreweave reports",
-                    "coreweave announces financial results"
-                  ],
-                  "exclude_phrases": [
-                    "to report"
-                  ],
-                  "content_terms": [
-                    "coreweave",
-                    "revenue"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -1218,17 +950,7 @@
                 {
                   "url": "https://investor.lumentum.com/financial-news-releases/default.aspx",
                   "format": "html",
-                  "title_phrases": [
-                    "lumentum announces financial results",
-                    "lumentum reports"
-                  ],
-                  "exclude_phrases": [
-                    "to report"
-                  ],
-                  "content_terms": [
-                    "lumentum",
-                    "revenue"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -1258,17 +980,7 @@
                 {
                   "url": "https://ir.supermicro.com/news/news-releases",
                   "format": "html",
-                  "title_phrases": [
-                    "supermicro announces financial results",
-                    "super micro computer reports"
-                  ],
-                  "exclude_phrases": [
-                    "to announce"
-                  ],
-                  "content_terms": [
-                    "supermicro",
-                    "net sales"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -1305,17 +1017,7 @@
                 {
                   "url": "https://nebius.com/newsroom",
                   "format": "html",
-                  "title_phrases": [
-                    "nebius group reports",
-                    "nebius announces financial results"
-                  ],
-                  "exclude_phrases": [
-                    "to report"
-                  ],
-                  "content_terms": [
-                    "nebius",
-                    "revenue"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -1353,17 +1055,7 @@
                 {
                   "url": "https://investor.coherent.com/news-events/news-releases",
                   "format": "html",
-                  "title_phrases": [
-                    "coherent reports",
-                    "coherent announces financial results"
-                  ],
-                  "exclude_phrases": [
-                    "to report"
-                  ],
-                  "content_terms": [
-                    "coherent",
-                    "revenue"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -1393,17 +1085,7 @@
                 {
                   "url": "https://ir.forwardindustries.com/news-events/press-releases",
                   "format": "html",
-                  "title_phrases": [
-                    "forward industries reports",
-                    "forward industries announces financial results"
-                  ],
-                  "exclude_phrases": [
-                    "to report"
-                  ],
-                  "content_terms": [
-                    "forward industries",
-                    "financial results"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -1433,17 +1115,7 @@
                 {
                   "url": "https://investor.cisco.com/news/news-details",
                   "format": "html",
-                  "title_phrases": [
-                    "cisco reports",
-                    "cisco announces financial results"
-                  ],
-                  "exclude_phrases": [
-                    "to report"
-                  ],
-                  "content_terms": [
-                    "cisco",
-                    "revenue"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -1481,17 +1153,7 @@
                 {
                   "url": "https://ir.ondas.com/press-releases",
                   "format": "html",
-                  "title_phrases": [
-                    "ondas reports",
-                    "ondas announces financial results"
-                  ],
-                  "exclude_phrases": [
-                    "to report"
-                  ],
-                  "content_terms": [
-                    "ondas",
-                    "revenue"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -1529,17 +1191,7 @@
                 {
                   "url": "https://ir.appliedmaterials.com/news-releases",
                   "format": "html",
-                  "title_phrases": [
-                    "applied materials announces financial results",
-                    "applied materials reports"
-                  ],
-                  "exclude_phrases": [
-                    "to announce"
-                  ],
-                  "content_terms": [
-                    "applied materials",
-                    "net revenue"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -1577,17 +1229,7 @@
                 {
                   "url": "https://ir.homedepot.com/news-releases",
                   "format": "html",
-                  "title_phrases": [
-                    "the home depot announces",
-                    "home depot reports"
-                  ],
-                  "exclude_phrases": [
-                    "to announce"
-                  ],
-                  "content_terms": [
-                    "home depot",
-                    "sales"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -1624,17 +1266,7 @@
                 {
                   "url": "https://ir.zhipin.com/news-releases",
                   "format": "html",
-                  "title_phrases": [
-                    "kanzhun limited announces",
-                    "kanzhun reports"
-                  ],
-                  "exclude_phrases": [
-                    "to report"
-                  ],
-                  "content_terms": [
-                    "kanzhun",
-                    "revenues"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -1672,17 +1304,7 @@
                 {
                   "url": "https://stock.walmart.com/news-events/newsroom",
                   "format": "html",
-                  "title_phrases": [
-                    "walmart releases",
-                    "walmart reports"
-                  ],
-                  "exclude_phrases": [
-                    "to report"
-                  ],
-                  "content_terms": [
-                    "walmart",
-                    "revenue"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -1720,17 +1342,7 @@
                 {
                   "url": "https://investors.zoom.us/news-releases",
                   "format": "html",
-                  "title_phrases": [
-                    "zoom announces financial results",
-                    "zoom reports"
-                  ],
-                  "exclude_phrases": [
-                    "to announce"
-                  ],
-                  "content_terms": [
-                    "zoom",
-                    "revenue"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -1768,17 +1380,7 @@
                 {
                   "url": "https://ir.crowdstrike.com/news-events/press-releases",
                   "format": "html",
-                  "title_phrases": [
-                    "crowdstrike reports",
-                    "crowdstrike announces financial results"
-                  ],
-                  "exclude_phrases": [
-                    "to report"
-                  ],
-                  "content_terms": [
-                    "crowdstrike",
-                    "annual recurring revenue"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -1808,17 +1410,7 @@
                 {
                   "url": "https://investor.nvidia.com/news-and-events/financial-releases/default.aspx",
                   "format": "html",
-                  "title_phrases": [
-                    "nvidia announces financial results",
-                    "nvidia reports"
-                  ],
-                  "exclude_phrases": [
-                    "to announce"
-                  ],
-                  "content_terms": [
-                    "nvidia",
-                    "data center"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -1856,17 +1448,7 @@
                 {
                   "url": "https://investor.marvell.com/news-events/press-releases",
                   "format": "html",
-                  "title_phrases": [
-                    "marvell technology reports",
-                    "marvell announces financial results"
-                  ],
-                  "exclude_phrases": [
-                    "to report"
-                  ],
-                  "content_terms": [
-                    "marvell",
-                    "net revenue"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -1896,17 +1478,7 @@
                 {
                   "url": "https://investors.delltechnologies.com/news-events/news-releases",
                   "format": "html",
-                  "title_phrases": [
-                    "dell technologies delivers",
-                    "dell technologies reports"
-                  ],
-                  "exclude_phrases": [
-                    "to hold"
-                  ],
-                  "content_terms": [
-                    "dell technologies",
-                    "revenue"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }
@@ -1935,17 +1507,7 @@
                 {
                   "url": "https://investors.iren.com/news-and-events/news-releases",
                   "format": "html",
-                  "title_phrases": [
-                    "iren reports",
-                    "iren announces financial results"
-                  ],
-                  "exclude_phrases": [
-                    "to report"
-                  ],
-                  "content_terms": [
-                    "iren",
-                    "bitcoin mining"
-                  ]
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?|business[- ]update)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
                 }
               ]
             }

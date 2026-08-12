@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -113,7 +113,7 @@ class ScheduleSnapshot:
     errors: tuple[str, ...]
 
 
-# 静态计划由人工按周或按月维护，运行时不再调用规划 Agent。
+# NT 读取整月全部 event 作为基准价时间表；active 只控制外部生命周期。
 def load_schedule(path: Path) -> tuple[BatchPlan, ...]:
     payload = _schedule_payload(path)
 
@@ -133,16 +133,7 @@ def load_schedule(path: Path) -> tuple[BatchPlan, ...]:
     if list(all_batches) != sorted(all_batches, key=lambda batch: batch.watch_start_at):
         raise ValueError("schedule batches must be ordered by watch_start_at")
 
-    # 只有 event 自身的 active=true 才进入交易侧 schedule。
-    selected: list[BatchPlan] = []
-    for batch in all_batches:
-        events = tuple(event for event in batch.events if event.active)
-        if events:
-            selected.append(replace(batch, events=events))
-    batches = tuple(selected)
-    if not batches:
-        raise ValueError("schedule has no active events")
-    return batches
+    return all_batches
 
 
 # Controller 轮询时只返回已经进入生命周期的 event。
@@ -191,7 +182,7 @@ def load_event_schedule(path: Path, now: datetime) -> ScheduleSnapshot:
             minutes=RESEARCH_MINUTES_PER_EVENT * active_event_count,
         )
         # group 只提供同一时间窗口；生命周期和状态仍然只属于 event。
-        if now < research_start_at or now >= watch_start_at:
+        if now < research_start_at or now >= watch_end_at:
             continue
         for event_index, value in enumerate(raw_events):
             event_location = f"{location}.events[{event_index}]"

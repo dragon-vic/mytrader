@@ -86,6 +86,7 @@ class AgentTradingStrategy(Strategy):
         if not self.instrument_ids:
             raise ValueError("market universe has no Binance instruments")
         self.instrument_set = frozenset(self.instrument_ids)
+        # TODO: 新增 event 或修改时间时动态重载；active 变化不影响 NT。
         self.event_windows = {
             event.event_id: (
                 int(event.watch_plan.start_at.timestamp() * 1_000_000_000) - HOUR_NS,
@@ -201,7 +202,7 @@ class AgentTradingStrategy(Strategy):
         )
         event_id = payload["event_id"]
         if event_id not in self.event_windows:
-            raise ValueError(f"event is not active in schedule: {event_id}")
+            raise ValueError(f"event is not in schedule: {event_id}")
         if event_id in self.seen_events:
             self.log.warning(f"agent_json_duplicate event_id={event_id}")
             return

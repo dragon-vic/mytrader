@@ -10,7 +10,6 @@ Your final response is a concise Markdown research memo. The complete research c
 
 The working directory is one batch root. Read only:
 
-- `batch.json`
 - `market_universe.json`
 - `events/<assigned event id>/event.json`
 - `events/<assigned event id>/watch/plan.json`
