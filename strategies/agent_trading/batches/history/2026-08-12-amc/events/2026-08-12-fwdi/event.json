@@ -1,0 +1,14 @@
+{
+  "event_id": "2026-08-12-fwdi",
+  "metadata": {
+    "schedule_group_id": "2026-08-12-amc",
+    "company": "Forward Industries",
+    "ticker": "FWDI",
+    "scope": "core_tech_crypto",
+    "active": true,
+    "confirmed": true,
+    "research_hints": [
+      "Evaluate FWDI directly and test crypto-treasury read-throughs only when explicitly supported by the release."
+    ]
+  }
+}

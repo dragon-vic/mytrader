@@ -242,30 +242,18 @@ class CodexRunner:
             )
         if request.service_tier is not None:
             command.extend(["-c", f'service_tier="{request.service_tier}"'])
+        subagent_role: dict[str, str] = {}
         if request.subagent_model is not None:
-            command.extend(
-                [
-                    "-c",
-                    f"agents.default_subagent_model={json.dumps(request.subagent_model)}",
-                ],
-            )
+            subagent_role["model"] = request.subagent_model
         if request.subagent_reasoning_effort is not None:
-            command.extend(
-                [
-                    "-c",
-                    "agents.default_subagent_reasoning_effort="
-                    + json.dumps(request.subagent_reasoning_effort),
-                ],
+            subagent_role["reasoning_effort"] = request.subagent_reasoning_effort
+        if subagent_role:
+            role_fields = ",".join(
+                f"{key}={json.dumps(value)}" for key, value in subagent_role.items()
             )
+            command.extend(["-c", f"agents.default={{{role_fields}}}"])
         if request.subagent_threads is not None:
-            command.extend(
-                [
-                    "-c",
-                    "agents.enabled=true",
-                    "-c",
-                    f"agents.max_concurrent_threads_per_session={request.subagent_threads}",
-                ],
-            )
+            command.extend(["-c", "features.multi_agent=true"])
         for override in request.config_overrides:
             command.extend(["-c", override])
         if request.session_id:

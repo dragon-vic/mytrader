@@ -1,0 +1,25 @@
+{
+  "event_id": "2026-08-11-smci",
+  "finished_at": "2026-08-11T20:07:14.249729+00:00",
+  "winner": "sec",
+  "source_status": {
+    "sec": {
+      "consecutive_failures": 0,
+      "last_error": "TimeoutError: TimeoutError()",
+      "last_error_at": "2026-08-11T20:06:40.149735+00:00",
+      "last_success_at": "2026-08-11T20:07:14.249300+00:00"
+    },
+    "rtpr": {
+      "consecutive_failures": 0,
+      "last_error": null,
+      "last_error_at": null,
+      "last_success_at": null
+    },
+    "news_release:https://ir.supermicro.com/news/news-releases": {
+      "consecutive_failures": 777,
+      "last_error": "ClientResponseError: ClientResponseError(RequestInfo(url=URL('https://ir.supermicro.com/news/news-releases/'), method='GET', headers=<CIMultiDictProxy('Host': 'ir.supermicro.com', 'User-Agent': 'nt_quant-agent-trading/1.0 victorice@yeah.net', 'Cache-Control': 'no-cache, no-store, max-age=0', 'Pragma': 'no-cache', 'Accept': '*/*', 'Accept-Encoding': 'gzip, deflate', 'Cookie': '_cfuvid=P34E47keetJVwccHjiwSgjGaSgCvkHcZmGKGVxRN69s-1786478400.7191424-1.0.1.1-mBaHgnYgCMBgKeZIZYEVEOciR.vU8PKsoX2vMoS_FEk')>, real_url=URL('https://ir.supermicro.com/news/news-releases/')), (<ClientResponse(https://ir.supermicro.com/news/news-releases?_nt=1786478833775331740) [301 Moved Permanently]>\n<CIMultiDictProxy('Date': 'Tue, 11 Aug 2026 20:07:13 GMT', 'Content-Type': 'text/html; charset=utf-8', 'Transfer-Encoding': 'chunked', 'Connection': 'keep-alive', 'Location': 'https://ir.supermicro.com/news/news-releases/', 'CF-Ray': 'a299dd872a69b9dd-NRT', 'CF-Cache-Status': 'HIT', 'Age': '432', 'Server': 'cloudflare', 'X-Content-Type-Options': 'nosniff')>\n,), status=404, message='Not Found', headers=<CIMultiDictProxy('Date': 'Tue, 11 Aug 2026 20:07:13 GMT', 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': '55208', 'Connection': 'keep-alive', 'CF-Ray': 'a299dd874a89b9dd-NRT', 'CF-Cache-Status': 'HIT', 'Age': '9', 'Cache-Control': 'public, max-age=60', 'Etag': '\"979d6f84cc22cb73f96664bfce0985c3\"', 'Server': 'cloudflare', 'Strict-Transport-Security': 'max-age=31536000; includeSubDomains; preload', 'X-Content-Type-Options': 'nosniff', 'X-Permitted-Cross-Domain-Policies': 'none', 'X-XSS-Protection': '0')>)",
+      "last_error_at": "2026-08-11T20:07:13.814643+00:00",
+      "last_success_at": null
+    }
+  }
+}

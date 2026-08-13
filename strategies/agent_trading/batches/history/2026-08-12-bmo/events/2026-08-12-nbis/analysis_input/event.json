@@ -1,0 +1,14 @@
+{
+  "event_id": "2026-08-12-nbis",
+  "metadata": {
+    "schedule_group_id": "2026-08-12-bmo",
+    "company": "Nebius Group",
+    "ticker": "NBIS",
+    "scope": "core_tech_crypto",
+    "active": true,
+    "confirmed": true,
+    "research_hints": [
+      "Evaluate NBIS directly and test AI-cloud capacity and demand read-throughs to CRWV and NVDA."
+    ]
+  }
+}

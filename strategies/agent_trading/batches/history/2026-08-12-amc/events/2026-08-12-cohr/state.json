@@ -1,0 +1,12 @@
+{
+  "event_id": "2026-08-12-cohr",
+  "state": "decision_ready",
+  "updated_at": "2026-08-13T02:19:43.049080+00:00",
+  "research_session_id": "019ff69a-df07-7540-8441-34655923d730",
+  "research_completed_at": "2026-08-12T15:49:56.009560+00:00",
+  "research_path": "research_output/research.md",
+  "decision_path": "analysis_output/decision.json",
+  "report_path": "analysis_input/report.json",
+  "report_source": "news_release",
+  "report_detected_ns": 1786587515563243653
+}

@@ -1,0 +1,25 @@
+{
+  "event_id": "2026-08-11-crwv",
+  "source": "rtpr",
+  "form": null,
+  "accession": null,
+  "items": [],
+  "origin_url": "https://rtpr.io/a/nBwTf1N0a?exp=1786479120&sig=d0f348ff47cb12620b57a72f71878763b2ca168b6aa168f015f7d9ea601e542a",
+  "published_at": "2026-08-11T20:10:00.219000+00:00",
+  "detected_ns": 1786479002220648625,
+  "files": [
+    {
+      "document_type": "NEWS_RELEASE",
+      "description": "RTPR 2026-08-11-crwv",
+      "source_url": "https://rtpr.io/a/nBwTf1N0a?exp=1786479120&sig=d0f348ff47cb12620b57a72f71878763b2ca168b6aa168f015f7d9ea601e542a",
+      "content_type": "text/html; charset=utf-8",
+      "content_format": "html",
+      "size_bytes": 59251,
+      "sha256": "ae081044338076fd0d96b2de8efa1876d5d6c25c4008a8ca4c97b3e38e041b5d",
+      "raw_path": "../watch/raw/rtpr/nBwTf1N0a-91ae55da813e.html",
+      "analysis_path": "disclosure/rtpr/processed/nBwTf1N0a-91ae55da813e.html.md",
+      "processing_status": "processed",
+      "processing_error": null
+    }
+  ]
+}

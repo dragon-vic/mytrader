@@ -1,0 +1,14 @@
+{
+  "event_id": "2026-08-11-lite",
+  "metadata": {
+    "schedule_group_id": "2026-08-11-amc",
+    "company": "Lumentum Holdings",
+    "ticker": "LITE",
+    "scope": "core_tech_crypto",
+    "active": true,
+    "confirmed": true,
+    "research_hints": [
+      "Evaluate LITE directly and test optical-network demand read-throughs to COHR and AAOI."
+    ]
+  }
+}

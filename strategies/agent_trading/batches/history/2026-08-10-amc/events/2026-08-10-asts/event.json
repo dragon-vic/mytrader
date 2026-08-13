@@ -1,0 +1,13 @@
+{
+  "event_id": "2026-08-10-asts",
+  "metadata": {
+    "batch_id": "2026-08-10-amc",
+    "company": "AST SpaceMobile",
+    "ticker": "ASTS",
+    "scope": "core_tech_crypto",
+    "confirmed": true,
+    "research_hints": [
+      "Evaluate ASTS directly and test satellite-network read-throughs to RKLB and SPCX."
+    ]
+  }
+}

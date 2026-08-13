@@ -1,0 +1,41 @@
+{
+  "event_id": "2026-08-11-smci",
+  "source": "sec",
+  "form": "8-K",
+  "accession": "0001375365-26-000021",
+  "items": [
+    "2.02",
+    "9.01"
+  ],
+  "origin_url": "https://www.sec.gov/Archives/edgar/data/1375365/000137536526000021/0001375365-26-000021-index.htm",
+  "published_at": "2026-08-11T16:06:16-04:00",
+  "detected_ns": 1786478833655329268,
+  "files": [
+    {
+      "document_type": "8-K",
+      "description": "8-K",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/1375365/000137536526000021/smci-20260811.htm",
+      "content_type": "text/html",
+      "content_format": "html",
+      "size_bytes": 31319,
+      "sha256": "c411019bb43ee96ec33f9edd46a93407321915d9b0b4dd4b0d1f218bf3e5149d",
+      "raw_path": "../watch/raw/sec/smci-20260811.htm",
+      "analysis_path": "disclosure/sec/processed/smci-20260811.htm.md",
+      "processing_status": "processed",
+      "processing_error": null
+    },
+    {
+      "document_type": "EX-99.1",
+      "description": "EX-99.1",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/1375365/000137536526000021/exhibit991_20260630.htm",
+      "content_type": "text/html",
+      "content_format": "html",
+      "size_bytes": 386787,
+      "sha256": "be2a869e0a7efdb7e171aebb92b5cb79b0e9cad1ada8e0c7dc53902c4c62eb9b",
+      "raw_path": "../watch/raw/sec/exhibit991_20260630.htm",
+      "analysis_path": "disclosure/sec/processed/exhibit991_20260630.htm.md",
+      "processing_status": "processed",
+      "processing_error": null
+    }
+  ]
+}

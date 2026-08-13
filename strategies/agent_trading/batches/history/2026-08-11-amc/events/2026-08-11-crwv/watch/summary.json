@@ -1,0 +1,25 @@
+{
+  "event_id": "2026-08-11-crwv",
+  "finished_at": "2026-08-11T20:10:02.243052+00:00",
+  "winner": "rtpr",
+  "source_status": {
+    "sec": {
+      "consecutive_failures": 1,
+      "last_error": "TimeoutError: TimeoutError()",
+      "last_error_at": "2026-08-11T20:10:00.154013+00:00",
+      "last_success_at": "2026-08-11T20:09:43.884046+00:00"
+    },
+    "rtpr": {
+      "consecutive_failures": 0,
+      "last_error": null,
+      "last_error_at": null,
+      "last_success_at": "2026-08-11T20:10:02.222652+00:00"
+    },
+    "news_release:https://investors.coreweave.com/news-events/news-releases": {
+      "consecutive_failures": 1085,
+      "last_error": "ClientResponseError: ClientResponseError(RequestInfo(url=URL('https://investors.coreweave.com/news-events/news-releases/'), method='GET', headers=<CIMultiDictProxy('Host': 'investors.coreweave.com', 'User-Agent': 'nt_quant-agent-trading/1.0 victorice@yeah.net', 'Cache-Control': 'no-cache, no-store, max-age=0', 'Pragma': 'no-cache', 'Accept': '*/*', 'Accept-Encoding': 'gzip, deflate', 'Cookie': '_cfuvid=WnrXXQKH2vvDczYX3Bp96Xe.8gL0tvMXWtvSA4aGS_4-1786478400.5661201-1.0.1.1-fOUnmF8N_XkQ3XBO1yOS0oFNnRcEezS_c6jfsZEdGoQ')>, real_url=URL('https://investors.coreweave.com/news-events/news-releases/')), (<ClientResponse(https://investors.coreweave.com/news-events/news-releases?_nt=1786479001754063834) [301 Moved Permanently]>\n<CIMultiDictProxy('Date': 'Tue, 11 Aug 2026 20:10:01 GMT', 'Content-Type': 'text/html; charset=utf-8', 'Transfer-Encoding': 'chunked', 'Connection': 'keep-alive', 'Location': 'https://investors.coreweave.com/news-events/news-releases/', 'CF-Ray': 'a299e1a10d47f6e1-NRT', 'CF-Cache-Status': 'HIT', 'Age': '601', 'Server': 'cloudflare', 'X-Content-Type-Options': 'nosniff')>\n,), status=404, message='Not Found', headers=<CIMultiDictProxy('Date': 'Tue, 11 Aug 2026 20:10:01 GMT', 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': '85994', 'Connection': 'keep-alive', 'CF-Ray': 'a299e1a15d57f6e1-NRT', 'CF-Cache-Status': 'HIT', 'Age': '57', 'Cache-Control': 'public, max-age=60', 'Etag': '\"42a4a8ea17c3e8132cb16b223abf8c02\"', 'Server': 'cloudflare', 'Strict-Transport-Security': 'max-age=31536000; includeSubDomains; preload', 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'SAMEORIGIN', 'X-Permitted-Cross-Domain-Policies': 'none', 'X-XSS-Protection': '1; mode=block')>)",
+      "last_error_at": "2026-08-11T20:10:01.845691+00:00",
+      "last_success_at": null
+    }
+  }
+}

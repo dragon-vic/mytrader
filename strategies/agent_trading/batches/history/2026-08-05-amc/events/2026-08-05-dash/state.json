@@ -1,0 +1,14 @@
+{
+  "event_id": "2026-08-05-dash",
+  "state": "decision_sent",
+  "updated_ns": 1785960786171712845,
+  "research_complete": true,
+  "research_error": null,
+  "research_path": "research_output/research.json",
+  "analysis_brief_path": "analysis_input/analysis_brief.md",
+  "manual_hold_override": true,
+  "report_path": "analysis_input/report.json",
+  "report_source": "sec",
+  "report_detected_ns": 1785960776763519792,
+  "decision_path": "analysis_output/decision.json"
+}

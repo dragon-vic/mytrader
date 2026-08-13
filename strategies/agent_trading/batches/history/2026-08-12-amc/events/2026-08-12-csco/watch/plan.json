@@ -1,0 +1,32 @@
+{
+  "event_id": "2026-08-12-csco",
+  "start_at": "2026-08-12T20:00:00+00:00",
+  "end_at": "2026-08-12T22:00:00+00:00",
+  "sec": {
+    "cik": "0000858877",
+    "forms": [
+      "8-K",
+      "10-Q",
+      "10-K"
+    ]
+  },
+  "news_release": {
+    "sources": [
+      {
+        "url": "https://investor.cisco.com/news/news-details",
+        "format": "html",
+        "title_phrases": [
+          "cisco reports",
+          "cisco announces financial results"
+        ],
+        "exclude_phrases": [
+          "to report"
+        ],
+        "content_terms": [
+          "cisco",
+          "revenue"
+        ]
+      }
+    ]
+  }
+}

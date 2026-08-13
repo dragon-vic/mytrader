@@ -1,0 +1,54 @@
+{
+  "event_id": "2026-08-10-usar",
+  "source": "sec",
+  "form": "8-K",
+  "accession": "000197062226000056",
+  "items": [
+    "2.02",
+    "9.01"
+  ],
+  "origin_url": "https://www.sec.gov/Archives/edgar/data/1970622/000197062226000056/0001970622-26-000056-index.htm",
+  "published_at": "2026-08-10T20:40:43+00:00",
+  "detected_ns": 1786425800092832583,
+  "files": [
+    {
+      "document_type": "8-K",
+      "description": "FORM 8-K - ITEM 2.02",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/1970622/000197062226000056/usar-20260810.htm",
+      "content_type": "text/html",
+      "content_format": "html",
+      "size_bytes": 28047,
+      "sha256": "5de06d6e9c4b2a43650f4ae84444f073ecf664029707820916aba2c7192d5123",
+      "raw_path": "../watch/raw/sec/usar-20260810.htm",
+      "analysis_path": "disclosure/sec/processed/usar-20260810.htm.md",
+      "processing_status": "processed",
+      "processing_error": null
+    },
+    {
+      "document_type": "EX-99.1",
+      "description": "EXHIBIT 99.1 - Q2'2026 EARNINGS RELEASE",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/1970622/000197062226000056/exhibit991-earningsrelease.htm",
+      "content_type": "text/html",
+      "content_format": "html",
+      "size_bytes": 226286,
+      "sha256": "dfccbc775136c9761f3eb0849999b9f2309e763b26c48c59654b9f05ace696e5",
+      "raw_path": "../watch/raw/sec/exhibit991-earningsrelease.htm",
+      "analysis_path": "disclosure/sec/processed/exhibit991-earningsrelease.htm.md",
+      "processing_status": "processed",
+      "processing_error": null
+    },
+    {
+      "document_type": "10-Q",
+      "description": "FORM 10-Q Q2'2026",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/1970622/000197062226000057/usar-20260630.htm",
+      "content_type": "text/html",
+      "content_format": "html",
+      "size_bytes": 2000026,
+      "sha256": "86202a5973c162f796a9cb65a317474134480c62b0c9947ab68d7778f456ee49",
+      "raw_path": "../watch/raw/sec/usar-20260630.htm",
+      "analysis_path": "disclosure/sec/processed/usar-20260630.htm.md",
+      "processing_status": "processed",
+      "processing_error": null
+    }
+  ]
+}

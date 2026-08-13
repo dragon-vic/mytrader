@@ -1,0 +1,21 @@
+{
+  "event_id": "2026-08-12-nbis",
+  "start_at": "2026-08-12T10:00:00+00:00",
+  "end_at": "2026-08-12T13:30:00+00:00",
+  "sec": {
+    "cik": "0001513845",
+    "forms": [
+      "6-K",
+      "20-F"
+    ]
+  },
+  "news_release": {
+    "sources": [
+      {
+        "url": "https://nebius.com/newsroom",
+        "format": "html",
+        "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
+      }
+    ]
+  }
+}

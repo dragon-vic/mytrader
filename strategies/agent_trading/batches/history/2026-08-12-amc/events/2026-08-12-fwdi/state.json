@@ -1,0 +1,12 @@
+{
+  "event_id": "2026-08-12-fwdi",
+  "state": "decision_ready",
+  "updated_at": "2026-08-13T02:20:47.205413+00:00",
+  "research_session_id": "019ff6aa-8078-7f53-acf4-0aea8ac86f0b",
+  "research_completed_at": "2026-08-12T16:08:15.352353+00:00",
+  "research_path": "research_output/research.md",
+  "decision_path": "analysis_output/decision.json",
+  "report_path": "analysis_input/report.json",
+  "report_source": "sec",
+  "report_detected_ns": 1786587515563243653
+}

@@ -1,0 +1,17 @@
+{
+  "event_id": "2026-08-12-fwdi",
+  "started_at": "2026-08-13T02:19:06.751475+00:00",
+  "finished_at": "2026-08-13T02:20:47.205730+00:00",
+  "duration_seconds": 100.454,
+  "decision": "TRADE",
+  "trades": [
+    {
+      "instrument_id": "FWDIUSDT-PERP.BINANCE",
+      "signal": "MEDIUM_SELL",
+      "expected_move_pct": 10,
+      "confidence": 0.87
+    }
+  ],
+  "rationale": null,
+  "output_path": "/home/ubuntu/pycharm_nt/strategies/agent_trading/batches/2026-08-12-amc/events/2026-08-12-fwdi/analysis_output/decision.json"
+}

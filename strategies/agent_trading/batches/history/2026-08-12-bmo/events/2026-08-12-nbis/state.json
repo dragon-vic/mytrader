@@ -1,0 +1,12 @@
+{
+  "event_id": "2026-08-12-nbis",
+  "state": "decision_sent",
+  "updated_at": "2026-08-12T12:27:22.664780+00:00",
+  "research_session_id": "019ff545-b5cf-7cf3-85ff-d9289e0e9d7d",
+  "research_completed_at": "2026-08-12T09:33:15.273685+00:00",
+  "research_path": "research_output/research.md",
+  "report_path": "analysis_input/report.json",
+  "report_source": "news_release",
+  "report_detected_ns": 1786537609493926216,
+  "decision_path": "analysis_output/decision.json"
+}

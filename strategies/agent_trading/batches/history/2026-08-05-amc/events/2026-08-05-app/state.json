@@ -1,0 +1,14 @@
+{
+  "event_id": "2026-08-05-app",
+  "state": "decision_sent",
+  "updated_ns": 1785960327706360236,
+  "research_complete": true,
+  "research_error": null,
+  "research_path": "research_output/research.json",
+  "analysis_brief_path": "analysis_input/analysis_brief.md",
+  "manual_hold_override": true,
+  "report_path": "analysis_input/report.json",
+  "report_source": "rtpr",
+  "report_detected_ns": 1785960313870243606,
+  "decision_path": "analysis_output/decision.json"
+}

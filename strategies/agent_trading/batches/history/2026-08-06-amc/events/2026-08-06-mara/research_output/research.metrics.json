@@ -1,0 +1,33 @@
+{
+  "event_id": "2026-08-06-mara",
+  "status": "failed",
+  "started_at": "2026-08-06T18:40:51.095987+00:00",
+  "finished_at": "2026-08-06T18:40:51.304751+00:00",
+  "elapsed_seconds": 0.209,
+  "attempts": 1,
+  "usage": {
+    "input_tokens": 0,
+    "cached_input_tokens": 0,
+    "output_tokens": 0,
+    "reasoning_output_tokens": 0,
+    "total_tokens": 0
+  },
+  "runs": [
+    {
+      "output_path": "/home/ubuntu/pycharm_nt/strategies/agent_trading/batches/2026-08-06-amc/events/2026-08-06-mara/research_output/research.json",
+      "status": "failed",
+      "started_at": "2026-08-06T18:40:51.096280+00:00",
+      "finished_at": "2026-08-06T18:40:51.304434+00:00",
+      "elapsed_seconds": 0.208,
+      "thread_ids": [],
+      "turns": [],
+      "usage": {
+        "input_tokens": 0,
+        "cached_input_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_output_tokens": 0,
+        "total_tokens": 0
+      }
+    }
+  ]
+}

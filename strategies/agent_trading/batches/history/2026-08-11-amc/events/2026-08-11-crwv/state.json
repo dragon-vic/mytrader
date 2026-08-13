@@ -1,0 +1,13 @@
+{
+  "event_id": "2026-08-11-crwv",
+  "state": "decision_sent",
+  "updated_ns": 1786358624064853451,
+  "research_path": "research_output/research.md",
+  "updated_at": "2026-08-11T20:10:48.746384+00:00",
+  "research_session_id": "019fefc0-a3d6-7af0-a2ee-1f927752f109",
+  "research_completed_at": "2026-08-11T07:51:16.883530+00:00",
+  "report_path": "analysis_input/report.json",
+  "report_source": "rtpr",
+  "report_detected_ns": 1786479002220648625,
+  "decision_path": "analysis_output/decision.json"
+}

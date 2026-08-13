@@ -1,0 +1,27 @@
+{
+  "event_id": "2026-08-12-csco",
+  "source": "news_release",
+  "form": null,
+  "accession": null,
+  "items": [
+    "news_release"
+  ],
+  "origin_url": "https://s21.q4cdn.com/812015656/files/doc_news/CISCO-REPORTS-FOURTH-QUARTER-AND-FISCAL-YEAR-2026-EARNINGS-2026.pdf",
+  "published_at": "2026-08-12T20:05:00Z",
+  "detected_ns": 1786587515563243653,
+  "files": [
+    {
+      "document_type": "news_release",
+      "description": "CISCO REPORTS FOURTH QUARTER AND FISCAL YEAR 2026 EARNINGS",
+      "source_url": "https://s21.q4cdn.com/812015656/files/doc_news/CISCO-REPORTS-FOURTH-QUARTER-AND-FISCAL-YEAR-2026-EARNINGS-2026.pdf",
+      "content_type": "application/pdf",
+      "content_format": "pdf",
+      "size_bytes": 328134,
+      "sha256": "6edea35ffff138918bed8899a513c84a26389fe6e4313a86781d74bfdbbb8b02",
+      "raw_path": "../watch/raw/manual/csco-q4-fy26.pdf",
+      "analysis_path": "disclosure/news_release/processed/csco-q4-fy26.pdf.md",
+      "processing_status": "processed",
+      "processing_error": null
+    }
+  ]
+}

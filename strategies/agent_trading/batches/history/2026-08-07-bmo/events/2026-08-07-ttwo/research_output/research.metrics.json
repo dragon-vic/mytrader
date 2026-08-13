@@ -1,0 +1,33 @@
+{
+  "event_id": "2026-08-07-ttwo",
+  "status": "failed",
+  "started_at": "2026-08-07T09:20:58.620069+00:00",
+  "finished_at": "2026-08-07T09:20:58.819708+00:00",
+  "elapsed_seconds": 0.2,
+  "attempts": 1,
+  "usage": {
+    "input_tokens": 0,
+    "cached_input_tokens": 0,
+    "output_tokens": 0,
+    "reasoning_output_tokens": 0,
+    "total_tokens": 0
+  },
+  "runs": [
+    {
+      "output_path": "/home/ubuntu/pycharm_nt/strategies/agent_trading/batches/2026-08-07-bmo/events/2026-08-07-ttwo/research_output/research.json",
+      "status": "failed",
+      "started_at": "2026-08-07T09:20:58.620969+00:00",
+      "finished_at": "2026-08-07T09:20:58.819410+00:00",
+      "elapsed_seconds": 0.198,
+      "thread_ids": [],
+      "turns": [],
+      "usage": {
+        "input_tokens": 0,
+        "cached_input_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_output_tokens": 0,
+        "total_tokens": 0
+      }
+    }
+  ]
+}

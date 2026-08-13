@@ -1,0 +1,13 @@
+{
+  "event_id": "2026-08-12-fwdi",
+  "source_first_published_at": "2026-08-12T20:02:03+00:00",
+  "source_detected_at": "2026-08-13T02:18:35.563244+00:00",
+  "source_urls": [
+    "https://www.sec.gov/Archives/edgar/data/38264/000168316826006277/forward_ex9901.htm",
+    "https://www.sec.gov/Archives/edgar/data/38264/000168316826006270/forward_i10q-063026.htm"
+  ],
+  "capture_mode": "official_source_direct_fetch",
+  "source_basis": "SEC 10-Q acceptance timestamp 16:02:03 ET normalized to UTC; 8-K at about 20:15 UTC",
+  "analysis_duration_seconds": 100.454,
+  "estimated_analysis_completion_at": "2026-08-12T20:03:43.454000+00:00"
+}

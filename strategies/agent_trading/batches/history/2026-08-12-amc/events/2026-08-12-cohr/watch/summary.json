@@ -1,0 +1,25 @@
+{
+  "event_id": "2026-08-12-cohr",
+  "finished_at": "2026-08-13T02:15:48.475230+00:00",
+  "winner": null,
+  "source_status": {
+    "sec": {
+      "consecutive_failures": 0,
+      "last_error": null,
+      "last_error_at": null,
+      "last_success_at": "2026-08-13T02:15:47.693887+00:00"
+    },
+    "rtpr": {
+      "consecutive_failures": 0,
+      "last_error": null,
+      "last_error_at": null,
+      "last_success_at": null
+    },
+    "news_release:https://www.coherent.com/company/investor-relations/financial-releases": {
+      "consecutive_failures": 0,
+      "last_error": null,
+      "last_error_at": null,
+      "last_success_at": "2026-08-13T02:15:47.932704+00:00"
+    }
+  }
+}

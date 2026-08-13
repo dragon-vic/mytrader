@@ -1,0 +1,13 @@
+{
+  "event_id": "2026-08-10-hims",
+  "metadata": {
+    "batch_id": "2026-08-10-amc",
+    "company": "Hims & Hers Health",
+    "ticker": "HIMS",
+    "scope": "other",
+    "confirmed": true,
+    "research_hints": [
+      "Evaluate HIMS directly and reject weak cross-asset read-throughs."
+    ]
+  }
+}

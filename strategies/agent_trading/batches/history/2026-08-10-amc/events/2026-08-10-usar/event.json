@@ -1,0 +1,13 @@
+{
+  "event_id": "2026-08-10-usar",
+  "metadata": {
+    "batch_id": "2026-08-10-amc",
+    "company": "USA Rare Earth",
+    "ticker": "USAR",
+    "scope": "other",
+    "confirmed": true,
+    "research_hints": [
+      "Evaluate USAR directly and test rare-earth supply-chain read-throughs."
+    ]
+  }
+}

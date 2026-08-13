@@ -1,0 +1,32 @@
+{
+  "event_id": "2026-08-10-asts",
+  "start_at": "2026-08-10T20:00:00+00:00",
+  "end_at": "2026-08-10T22:00:00+00:00",
+  "sec": {
+    "cik": "0001780312",
+    "forms": [
+      "8-K",
+      "10-Q",
+      "10-K"
+    ]
+  },
+  "news_release": {
+    "sources": [
+      {
+        "url": "https://investors.ast-science.com/",
+        "format": "html",
+        "title_phrases": [
+          "ast spacemobile provides business update",
+          "ast spacemobile reports"
+        ],
+        "exclude_phrases": [
+          "to report"
+        ],
+        "content_terms": [
+          "ast spacemobile",
+          "quarter"
+        ]
+      }
+    ]
+  }
+}

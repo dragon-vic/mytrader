@@ -27,12 +27,12 @@ from utils.constants import EXTERNAL_JSON_CLIENT_NAME, PROJECT_ROOT
 
 MINUTE_NS = 60_000_000_000
 HOUR_NS = 60 * MINUTE_NS
-PERCENT = Decimal("100")
+PERCENT = Decimal(100)
 
 
 @dataclass
 class MarkBucket:
-    total: Decimal = Decimal("0")
+    total: Decimal = Decimal(0)
     count: int = 0
 
 
@@ -41,7 +41,7 @@ class PendingOrder:
     event_id: str
     instrument_id: InstrumentId
     target_qty: Decimal
-    filled_qty: Decimal = Decimal("0")
+    filled_qty: Decimal = Decimal(0)
 
 
 class AgentTradingConfig(StrategyConfig, frozen=True):
@@ -67,7 +67,7 @@ class AgentTradingStrategy(Strategy):
         self.margin_usdt = config.margin_usdt
         self.leverage = config.leverage
         self.min_remaining = config.min_remaining_pct
-        self.max_mark_age_ns = int(config.max_mark_age_sec * Decimal("1000000000"))
+        self.max_mark_age_ns = int(config.max_mark_age_sec * Decimal(1000000000))
         if (
             self.margin_usdt < 0
             or self.leverage <= 0
@@ -86,7 +86,6 @@ class AgentTradingStrategy(Strategy):
         if not self.instrument_ids:
             raise ValueError("market universe has no Binance instruments")
         self.instrument_set = frozenset(self.instrument_ids)
-        # TODO: 新增 event 或修改时间时动态重载；active 变化不影响 NT。
         self.event_windows = {
             event.event_id: (
                 int(event.watch_plan.start_at.timestamp() * 1_000_000_000) - HOUR_NS,
@@ -202,7 +201,7 @@ class AgentTradingStrategy(Strategy):
         )
         event_id = payload["event_id"]
         if event_id not in self.event_windows:
-            raise ValueError(f"event is not in schedule: {event_id}")
+            raise ValueError(f"event is not active in schedule: {event_id}")
         if event_id in self.seen_events:
             self.log.warning(f"agent_json_duplicate event_id={event_id}")
             return
@@ -316,7 +315,7 @@ class AgentTradingStrategy(Strategy):
             return []
         currency = selected[0][1].quote_currency
         available = account.balance_free(currency)
-        free = available.as_decimal() if available is not None else Decimal("0")
+        free = available.as_decimal() if available is not None else Decimal(0)
         if free < self.margin_usdt:
             self.log.warning(
                 f"market_judgment_insufficient_balance event_id={event_id} "
@@ -389,7 +388,7 @@ class AgentTradingStrategy(Strategy):
             minutes[minute_ns].total / minutes[minute_ns].count
             for minute_ns in range(start_ns, end_ns, MINUTE_NS)
         ]
-        return sum(means, Decimal("0")) / Decimal(len(means))
+        return sum(means, Decimal(0)) / Decimal(len(means))
 
     # 按交易方向计算市场已走幅度和剩余预期空间。
     @staticmethod
@@ -399,7 +398,7 @@ class AgentTradingStrategy(Strategy):
         side: str,
         expected: Decimal,
     ) -> tuple[Decimal, Decimal]:
-        move = (current / reference - Decimal("1")) * PERCENT
+        move = (current / reference - Decimal(1)) * PERCENT
         if side == "SELL":
             move = -move
         return move, expected - move

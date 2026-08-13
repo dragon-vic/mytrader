@@ -1,0 +1,13 @@
+{
+  "event_id": "2026-08-10-hims",
+  "state": "decision_ready",
+  "updated_ns": 1786367206715888862,
+  "research_complete": true,
+  "research_error": null,
+  "research_session_id": "019febbb-9850-7b13-9534-147220f52f6b",
+  "research_completed_at": "2026-08-10T13:06:46.715486+00:00",
+  "research_path": "research_output/research.md",
+  "analysis_mode": "offline_replay",
+  "updated_at": "2026-08-11T05:26:11.742035+00:00",
+  "decision_path": "analysis_output/decision.json"
+}

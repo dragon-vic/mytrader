@@ -43,7 +43,10 @@ STRATEGY_ROOT = Path(__file__).resolve().parent
 RESOURCES_DIR = STRATEGY_ROOT / "resources"
 PROMPTS_DIR = RESOURCES_DIR / "prompts"
 SCHEMAS_DIR = RESOURCES_DIR / "schemas"
-SCHEDULES_DIR = RESOURCES_DIR / "schedules"
+SCHEDULE_PATH = RESOURCES_DIR / "schedules" / "2026-08.json"
+MARKET_UNIVERSE_PATH = SCHEDULE_PATH.with_name(
+    f"{SCHEDULE_PATH.stem}_market_universe.json",
+)
 ANALYSIS_PROMPT = PROMPTS_DIR / "analysis.md"
 DECISION_SCHEMA = SCHEMAS_DIR / "decision.json"
 EMAIL_TOOL = STRATEGY_ROOT.parents[1] / "tools" / "send_email.py"
@@ -109,17 +112,12 @@ class AgentController:
             writer.close()
             await writer.wait_closed()
 
-    # Event 到达生命周期节点时建立自己的输入和共享快照；不建立 group 状态。
+    # Event 进入研究阶段时只建立 event 元数据和状态；watch 输入稍后创建。
     def _prepare_event(
         self,
         group_id: str,
         event: EventSpec,
-        market_universe: MarketUniverse,
     ) -> None:
-        self.event_store.ensure_event_group(
-            group_id,
-            market_universe.to_dict(),
-        )
         self.event_store.create_event(
             group_id,
             event.event_id,
@@ -132,7 +130,6 @@ class AgentController:
                 "confirmed": event.confirmed,
                 "research_hints": list(event.research_hints),
             },
-            event.watch_plan.to_dict(),
         )
 
     # 持续重读现有 schedule；只有到点且校验通过的 event 才启动。
@@ -171,7 +168,6 @@ class AgentController:
                         scheduled.batch_id,
                         scheduled.event_id,
                     )
-                    market_universe = load_market_universe(market_universe_path)
                 except Exception as exc:  # noqa: BLE001 - 单个 event 不能阻塞 schedule
                     error = f"{type(exc).__name__}: {exc}"
                     if event_errors.get(scheduled.event_id) != error:
@@ -187,7 +183,8 @@ class AgentController:
                     self.run_event(
                         scheduled.batch_id,
                         event,
-                        market_universe,
+                        schedule_path,
+                        market_universe_path,
                     ),
                     name=f"agent-trading-event-{scheduled.event_id}",
                 )
@@ -215,7 +212,7 @@ class AgentController:
         group_id: str,
         event_id: str,
         outcome: ResearchOutcome,
-    ) -> bool:
+    ) -> ResearchHandoff | None:
         if not outcome.ready:
             self.event_store.update(
                 group_id,
@@ -224,157 +221,135 @@ class AgentController:
                 failed_stage=FailureStage.RESEARCH,
                 error=outcome.error or "research memo is missing",
             )
-            return False
+            return None
 
         if outcome.event_id != event_id:
             raise ValueError(
                 f"research event_id mismatch: {outcome.event_id} != {event_id}",
             )
 
+        paths = self.event_store.event_paths(group_id, event_id)
+        values: dict[str, Any] = {
+            "research_session_id": outcome.session_id,
+            "research_completed_at": datetime.now(UTC).isoformat(),
+            "research_path": paths.research.relative_to(paths.root).as_posix(),
+        }
         self.event_store.update(
             group_id,
             event_id,
             EventState.RESEARCH_READY,
-            research_session_id=outcome.session_id,
-            research_completed_at=datetime.now(UTC).isoformat(),
+            **values,
         )
-        return True
+        return self.event_store.load_research_handoff(group_id, event_id)
 
     def _prepare_analysis_input(
         self,
         group_id: str,
         event_id: str,
     ) -> bool:
-        paths = self.event_store.event_paths(group_id, event_id)
-        if not paths.analysis_event.is_file():
+        try:
+            self.event_store.prepare_analysis_event(group_id, event_id)
+        except (OSError, TypeError, ValueError) as exc:
             self.event_store.update(
                 group_id,
                 event_id,
                 EventState.FAILED,
                 failed_stage=FailureStage.LIFECYCLE,
-                error="analysis event input is missing",
+                error=f"analysis event input unavailable: {type(exc).__name__}: {exc}",
             )
             return False
 
-        if self.event_store.load_state(group_id, event_id) is not EventState.WATCHING_DISCLOSURE:
-            self.event_store.update(
-                group_id,
-                event_id,
-                EventState.ANALYSIS_INPUT_READY,
-            )
-        return True
-
-    @staticmethod
-    def _research_is_recorded(
-        state: EventState,
-        payload: dict[str, Any],
-        research_exists: bool,
-    ) -> bool:
-        if state in {
-            EventState.RESEARCH_READY,
+        self.event_store.update(
+            group_id,
+            event_id,
             EventState.ANALYSIS_INPUT_READY,
-            EventState.WATCHING_DISCLOSURE,
-            EventState.REPORT_READY,
-            EventState.ANALYZING,
-            EventState.DECISION_READY,
-            EventState.DECISION_SENT,
-        }:
-            return True
-        return (
-            state is EventState.FAILED
-            and payload.get("failed_stage") != FailureStage.RESEARCH.value
-            and research_exists
         )
-
-    async def _run_research_if_needed(
-        self,
-        group_id: str,
-        event: EventSpec,
-    ) -> bool:
-        event_id = event.event_id
-        research_path = self.event_store.event_paths(group_id, event_id).research
-        payload, state = self.event_store.load_record(group_id, event_id)
-        if self._research_is_recorded(state, payload, research_path.is_file()):
-            return False
-        async with self.research_lock:
-            payload, state = self.event_store.load_record(group_id, event_id)
-            if self._research_is_recorded(state, payload, research_path.is_file()):
-                return False
-            if datetime.now(UTC) >= event.watch_plan.start_at:
-                return False
-            self.event_store.update(
-                group_id,
-                event_id,
-                EventState.RESEARCHING,
-            )
-            outcome = await self.research_agent.run_event(
-                event_id=event_id,
-                group_dir=self.event_store.event_group_paths(group_id).root,
-                deadline=event.watch_plan.start_at,
-            )
-            return self._save_research_outcome(
-                group_id,
-                event_id,
-                outcome,
-            )
+        return True
 
     async def _wait_for_watch_start(
         self,
+        schedule_path: Path,
         group_id: str,
         event_id: str,
-    ) -> None:
-        plan_path = self.event_store.event_paths(group_id, event_id).watch_plan
+    ) -> EventSpec:
         while True:
-            plan = WatchPlan.from_dict(self._load_object(plan_path, "watch plan"))
+            event = load_event_plan(schedule_path, group_id, event_id)
             now = datetime.now(UTC)
-            if now >= plan.end_at:
+            if now >= event.watch_plan.end_at:
                 raise TimeoutError(f"event watch window expired: {event_id}")
-            if now >= plan.start_at:
-                return
+            if now >= event.watch_plan.start_at:
+                return event
             await asyncio.sleep(LIFECYCLE_POLL_SECONDS)
 
     async def run_event(
         self,
         group_id: str,
         event: EventSpec,
-        market_universe: MarketUniverse,
+        schedule_path: Path,
+        market_universe_path: Path,
     ) -> None:
         event_id = event.event_id
         email_task: asyncio.Task[None] | None = None
         try:
             paths = self.event_store.event_paths(group_id, event_id)
-            if paths.state.exists():
-                _payload, existing_state = self.event_store.load_record(group_id, event_id)
-                if existing_state.is_finished:
-                    return
-            self._prepare_event(group_id, event, market_universe)
-            payload, state = self.event_store.load_record(group_id, event_id)
-
-            if state is EventState.DECISION_READY:
-                await self._send_stored_decision(group_id, event_id)
-                return
-
-            if state in {EventState.REPORT_READY, EventState.ANALYZING} or (
-                state is EventState.FAILED
-                and payload.get("failed_stage") == FailureStage.ANALYSIS.value
+            if (
+                paths.state.exists()
+                and self.event_store.load_state(group_id, event_id).is_finished
             ):
-                await self._run_analysis_stage(group_id, event_id)
                 return
-
-            if datetime.now(UTC) < event.watch_plan.start_at:
-                generated_research = await self._run_research_if_needed(
-                    group_id,
-                    event,
-                )
+            self._prepare_event(group_id, event)
+            research = self.event_store.load_research_handoff(
+                group_id,
+                event_id,
+            )
+            generated_research = False
+            if research is None:
+                async with self.research_lock:
+                    research = self.event_store.load_research_handoff(
+                        group_id,
+                        event_id,
+                    )
+                    if research is None:
+                        self.event_store.update(
+                            group_id,
+                            event_id,
+                            EventState.RESEARCHING,
+                        )
+                        outcome = await self.research_agent.run_event(
+                            event_id=event_id,
+                            group_dir=self.event_store.event_group_paths(group_id).root,
+                            deadline=event.watch_plan.start_at,
+                        )
+                        research = self._save_research_outcome(
+                            group_id,
+                            event_id,
+                            outcome,
+                        )
+                        generated_research = research is not None
                 if generated_research:
                     email_task = asyncio.create_task(
                         self._send_research_email(group_id, event),
                         name=f"agent-trading-research-email-{event_id}",
                     )
 
-            await self._wait_for_watch_start(
+            if research is None:
+                LOG.error("event research incomplete event_id=%s", event_id)
+                return
+
+            watch_event = await self._wait_for_watch_start(
+                schedule_path,
                 group_id,
                 event_id,
+            )
+            self.event_store.save_watch_plan(
+                group_id,
+                event_id,
+                watch_event.watch_plan.to_dict(),
+            )
+            market_universe = load_market_universe(market_universe_path)
+            self.event_store.ensure_event_group(
+                group_id,
+                market_universe.to_dict(),
             )
             if not self._prepare_analysis_input(
                 group_id,
@@ -388,6 +363,8 @@ class AgentController:
             await self._run_disclosure_and_analysis(
                 group_id,
                 event_id,
+                research,
+                watch_event.watch_plan,
             )
         except Exception as exc:
             LOG.exception(
@@ -459,116 +436,61 @@ class AgentController:
         self,
         group_id: str,
         event_id: str,
+        research: ResearchHandoff,
+        watch_plan: WatchPlan,
     ) -> None:
         try:
-            await self.wait_report(group_id, event_id)
+            await self.wait_report(group_id, event_id, watch_plan)
+            await self._run_analysis_and_send(group_id, event_id, research)
         except Exception as exc:
             LOG.exception(
-                "event disclosure watch failed event_id=%s error_type=%s",
+                "agent trading event failed event_id=%s error_type=%s",
                 event_id,
                 type(exc).__name__,
             )
             details: dict[str, Any] = {}
             if isinstance(exc, DisclosureTimeoutError):
                 details["source_status"] = exc.source_status
+            state = self.event_store.load_state(group_id, event_id)
+            failed_stage = (
+                FailureStage.ANALYSIS
+                if state
+                in {
+                    EventState.REPORT_READY,
+                    EventState.ANALYZING,
+                    EventState.DECISION_READY,
+                }
+                else FailureStage.WATCH
+            )
             self.event_store.update(
                 group_id,
                 event_id,
                 EventState.FAILED,
-                failed_stage=FailureStage.WATCH,
+                failed_stage=failed_stage,
                 error=f"{type(exc).__name__}: {exc}",
                 **details,
-            )
-            return
-        await self._run_analysis_stage(group_id, event_id)
-
-    async def _run_analysis_stage(
-        self,
-        group_id: str,
-        event_id: str,
-    ) -> None:
-        try:
-            await self._run_analysis_and_send(group_id, event_id)
-        except Exception as exc:
-            LOG.exception(
-                "event analysis failed event_id=%s error_type=%s",
-                event_id,
-                type(exc).__name__,
-            )
-            self.event_store.update(
-                group_id,
-                event_id,
-                EventState.FAILED,
-                failed_stage=FailureStage.ANALYSIS,
-                error=f"{type(exc).__name__}: {exc}",
             )
 
     async def _run_analysis_and_send(
         self,
         group_id: str,
         event_id: str,
+        research: ResearchHandoff,
     ) -> None:
-        paths = self.event_store.event_paths(group_id, event_id)
-        if not paths.report.is_file():
-            raise FileNotFoundError(
-                f"completed disclosure is unavailable for analysis: {event_id}",
-            )
-        research = self.event_store.load_research_handoff(group_id, event_id)
-        if research is None:
-            raise FileNotFoundError(
-                f"completed research is unavailable for analysis: {event_id}",
-            )
         decision = await self.run_analysis(group_id, event_id, research)
-        await self._send_decision(group_id, event_id, decision)
-
-    async def _send_stored_decision(
-        self,
-        group_id: str,
-        event_id: str,
-    ) -> None:
-        decision = self._load_valid_decision(group_id, event_id)
-        await self._send_decision(group_id, event_id, decision)
-
-    async def _send_decision(
-        self,
-        group_id: str,
-        event_id: str,
-        decision: dict[str, Any],
-    ) -> None:
-        try:
-            await self.send(decision)
-        except Exception as exc:
-            LOG.exception(
-                "decision send pending event_id=%s error_type=%s",
-                event_id,
-                type(exc).__name__,
-            )
-            self.event_store.update(
-                group_id,
-                event_id,
-                EventState.DECISION_READY,
-                send_error=f"{type(exc).__name__}: {exc}",
-            )
-            return
-        self.event_store.update(
-            group_id,
-            event_id,
-            EventState.DECISION_SENT,
-            send_error=None,
-        )
+        await self.send(decision)
+        self.event_store.update(group_id, event_id, EventState.DECISION_SENT)
 
     async def wait_report(
         self,
         group_id: str,
         event_id: str,
+        plan: WatchPlan,
     ) -> DisclosurePackage:
         paths = self.event_store.event_paths(group_id, event_id)
-        plan = WatchPlan.from_dict(
-            self._load_object(paths.watch_plan, "watch plan"),
-        )
         if plan.event_id != event_id:
             raise ValueError(
-                f"stored watch plan event_id mismatch: {plan.event_id} != {event_id}",
+                f"watch plan event_id mismatch: {plan.event_id} != {event_id}",
             )
         self.event_store.update(
             group_id,
@@ -584,6 +506,7 @@ class AgentController:
             group_id,
             event_id,
             EventState.REPORT_READY,
+            report_path=paths.report.relative_to(paths.root).as_posix(),
             report_source=package.source,
             report_detected_ns=package.detected_ns,
         )
@@ -604,20 +527,6 @@ class AgentController:
             research,
             DECISION_SCHEMA,
         )
-        decision = self._load_valid_decision(group_id, event_id)
-        self.event_store.update(
-            group_id,
-            event_id,
-            EventState.DECISION_READY,
-        )
-        return decision
-
-    def _load_valid_decision(
-        self,
-        group_id: str,
-        event_id: str,
-    ) -> dict[str, Any]:
-        paths = self.event_store.event_paths(group_id, event_id)
         decision = self._load_object(paths.decision, "decision")
         DECISION_VALIDATOR.validate(decision)
         market_universe = MarketUniverse.from_dict(
@@ -627,6 +536,12 @@ class AgentController:
             ),
         )
         validate_decision(event_id, decision, market_universe)
+        self.event_store.update(
+            group_id,
+            event_id,
+            EventState.DECISION_READY,
+            decision_path=paths.decision.relative_to(paths.root).as_posix(),
+        )
         return decision
 
     @staticmethod
@@ -637,15 +552,7 @@ class AgentController:
         return payload
 
 
-def _current_schedule_paths(now: datetime | None = None) -> tuple[Path, Path]:
-    current = (now or datetime.now(UTC)).astimezone(UTC)
-    schedule = SCHEDULES_DIR / f"{current:%Y-%m}.json"
-    universe = schedule.with_name(f"{schedule.stem}_market_universe.json")
-    return schedule, universe
-
-
 async def main() -> None:
-    schedule_path, market_universe_path = _current_schedule_paths()
     runner = CodexRunner()
     research_agent = ResearchAgent(
         runner,
@@ -664,7 +571,7 @@ async def main() -> None:
             analysis_agent=AnalysisAgent(runner, profile=ANALYSIS_PROFILE),
             disclosure_watcher=watcher,
         )
-        await controller.run_schedule(schedule_path, market_universe_path)
+        await controller.run_schedule(SCHEDULE_PATH, MARKET_UNIVERSE_PATH)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,32 @@
+{
+  "event_id": "2026-08-12-cohr",
+  "start_at": "2026-08-12T20:00:00+00:00",
+  "end_at": "2026-08-12T22:00:00+00:00",
+  "sec": {
+    "cik": "0000820318",
+    "forms": [
+      "8-K",
+      "10-Q",
+      "10-K"
+    ]
+  },
+  "news_release": {
+    "sources": [
+      {
+        "url": "https://investor.coherent.com/news-events/news-releases",
+        "format": "html",
+        "title_phrases": [
+          "coherent reports",
+          "coherent announces financial results"
+        ],
+        "exclude_phrases": [
+          "to report"
+        ],
+        "content_terms": [
+          "coherent",
+          "revenue"
+        ]
+      }
+    ]
+  }
+}

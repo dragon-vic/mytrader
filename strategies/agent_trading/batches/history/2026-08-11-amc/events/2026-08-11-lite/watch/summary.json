@@ -1,0 +1,25 @@
+{
+  "event_id": "2026-08-11-lite",
+  "finished_at": "2026-08-11T20:24:46.429199+00:00",
+  "winner": "sec",
+  "source_status": {
+    "sec": {
+      "consecutive_failures": 0,
+      "last_error": "TimeoutError: TimeoutError()",
+      "last_error_at": "2026-08-11T20:24:17.150451+00:00",
+      "last_success_at": "2026-08-11T20:24:46.428788+00:00"
+    },
+    "rtpr": {
+      "consecutive_failures": 0,
+      "last_error": null,
+      "last_error_at": null,
+      "last_success_at": null
+    },
+    "news_release:https://investor.lumentum.com/financial-news-releases/default.aspx": {
+      "consecutive_failures": 0,
+      "last_error": null,
+      "last_error_at": null,
+      "last_success_at": "2026-08-11T20:24:46.098008+00:00"
+    }
+  }
+}

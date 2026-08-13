@@ -1,0 +1,27 @@
+{
+  "event_id": "2026-08-12-cohr",
+  "source": "news_release",
+  "form": "8-K",
+  "accession": "0001193125-26-346860",
+  "items": [
+    "news_release"
+  ],
+  "origin_url": "https://www.coherent.com/news/press-releases/fourth-quarter-and-fiscal-year-2026-results",
+  "published_at": "2026-08-12T20:10:13Z",
+  "detected_ns": 1786587515563243653,
+  "files": [
+    {
+      "document_type": "news_release",
+      "description": "Coherent Corp. Reports Fourth Quarter and Full Year Fiscal 2026 Results",
+      "source_url": "https://www.coherent.com/news/press-releases/fourth-quarter-and-fiscal-year-2026-results",
+      "content_type": "text/html",
+      "content_format": "html",
+      "size_bytes": 115836,
+      "sha256": "d30cfdeaf4bd65735363c82022a932328b1828beab058406de8952f382eaec32",
+      "raw_path": "../watch/raw/manual/cohr-q4-fy26.html",
+      "analysis_path": "disclosure/news_release/processed/cohr-q4-fy26.html.md",
+      "processing_status": "processed",
+      "processing_error": null
+    }
+  ]
+}

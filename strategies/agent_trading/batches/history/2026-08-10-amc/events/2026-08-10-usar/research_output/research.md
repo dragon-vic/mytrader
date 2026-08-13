@@ -1,0 +1,51 @@
+# USA Rare Earth — Q2 2026 pre-event memo
+
+*Scheduled for August 10 after market close; executable instrument: `USARUSDT-PERP.BINANCE`.* [Event calendar](https://www.tipranks.com/stocks/usar/earnings)
+
+## Thesis and the market’s real bar
+
+This is an operational-proof event, not an EPS event. USAR has assembled valuable rare-earth assets and substantial government support, but it has not yet demonstrated an integrated, repeatable commercial chain. After the cash equity rose 47.9% from July 29 through August 7—including 11.0% on the day of a White House critical-minerals roundtable—the market should require more than another recital of production targets. The meeting’s timing makes policy enthusiasm a plausible contributor to the rally, although that attribution is an inference rather than a measured sector residual. [Price history](https://chartexchange.com/symbol/nasdaq-usar/historical/), [Reuters](https://www.reuters.com/business/aerospace-defense/trump-host-mining-ceos-administration-seeks-minerals-defense-supply-chains-2026-08-07/)
+
+The true positive bar is customer-accepted Stillwater output, binding or quantified H2 orders, and evidence of repeatable yield and throughput consistent with 600 tonnes per annum by year-end. Management described Q2 magnets as qualification/customer-ready production and put customer sales in H2; therefore, recognized Q2 magnet revenue is not the base expectation. “Commercial-grade samples,” customer visits, and verbal “on track” statements are already consumed information. [Q1 call transcript](https://www.fool.com/earnings/call-transcripts/2026/05/14/usa-rare-earth-usar-q1-2026-earnings-transcript/), [Q1 release](https://www.sec.gov/Archives/edgar/data/1970622/000197062226000034/exhibit991-earningsrelease.htm)
+
+## Expectations and financial interpretation
+
+Current feeds support a narrow headline consensus of approximately **$6.4–$6.8 million revenue and adjusted EPS of –$0.09 to –$0.11**. The sample is thin: MarketBeat/Fiscal.ai has two contributors near –$0.09, while Benzinga shows –$0.11 and $6.72 million; an older –$0.14 Zacks figure is better treated as revision history. [MarketBeat](https://www.marketbeat.com/stocks/NASDAQ/USAR/earnings/), [Benzinga](https://www.benzinga.com/quote/USAR/earnings)
+
+My operating expectation is **$6.7 million and –$0.11 adjusted EPS**, with a credible range of **$5.5–$8.5 million and –$0.08 to –$0.16**. Revenue should remain overwhelmingly LCM-based. Q1 produced $5.70 million revenue, 1.9% gross margin, $38.6 million capex and $1.75 billion ending cash. The more informative Q2 disclosures will be LCM volume and margin, capex and equipment commitments, ending cash, customer acceptance, backlog, and the timing of H2 revenue. [Q1 10-Q](https://www.sec.gov/Archives/edgar/data/1970622/000197062226000038/usar-20260331.htm)
+
+GAAP EPS could be dominated by non-operating marks. Transaction accounting identifies a $71 million earnout fair-value loss and a $430.9 million initial DOC warrant liability subject to remeasurement; the falling June share price likely produced a warrant gain, but its size cannot be estimated reliably. The $174.4 million excess cost associated with DOC shares appears as an accumulated-deficit adjustment in the pro formas. The company’s GAAP-to-adjusted bridge matters more than whether GAAP EPS “beats.” [SEC transaction accounting](https://www.sec.gov/Archives/edgar/data/1970622/000121390026078763/ea029675201ex99-1.htm)
+
+Merger materials—not formal guidance—project $73–$80 million of 2026 revenue. After a consensus-like first half, that requires roughly **$60–$68 million in H2**, making evidence of order coverage decisive. The same materials contemplate exceptionally heavy capex and cash consumption. [Merger proxy](https://investors.usare.com/static-files/20ac6612-742d-4f90-a0a8-78e4786f60e2)
+
+Commerce support is capacity financing, not unrestricted cash. The final agreement provides up to $277 million of incentives and $1.3 billion of loans subject to milestones, permits, customer commitments, covenants and liens. USAR must still raise $375 million plus Serra acquisition cash costs by March 2027, another $875 million by December 2027, and establish up to a $250 million revolver. Financing progress can therefore validate the buildout while still implying material dilution and execution risk. [Final Commerce agreement](https://www.sec.gov/Archives/edgar/data/1970622/000121390026064453/ea0293402-8k_usarare.htm)
+
+## Business facts capable of changing the view
+
+Stillwater commissioning demonstrated manufacturing capability, but the last 10-K reported no committed magnet customers or definitive offtake agreements. Commercial proof requires accepted deliveries, binding volume and repeatable manufacturing statistics—not simply qualification lots. [Stillwater commissioning](https://investors.usare.com/news-releases/news-release-details/usa-rare-earth-achieves-major-operational-and-strategic), [2025 10-K](https://www.sec.gov/Archives/edgar/data/1970622/000197062226000021/usar-20251231.htm)
+
+Serra Verde would create a near-term upstream bridge, but it remains a pending, highly dilutive acquisition. Its 2025 output of 40 tonnes TREO reflected deliberate curtailment and is not a current run rate; equally, no public 2026 operating data yet bridges that trough to the projected 6,400-tpa capacity by end-2027. Current throughput, recovery, uptime and closing certainty would be incremental. [Transaction filing](https://www.sec.gov/Archives/edgar/data/1970622/000121390026055508/ea0290028-01.htm)
+
+Round Top remains exploration-stage with no declared S-K 1300 resource. The company targets a PFS by the end of Q3, DFS completion in Q4/publication in Q1 2027, and late-2028 production, but resource, recovery, capex, water and permitting remain unvalidated. Wheat Ridge oxide samples and the pending Carester minority investment add optionality, not yet demonstrated closed-loop commercial throughput. [Round Top disclosures](https://www.sec.gov/Archives/edgar/data/1970622/000197062226000021/usar-20251231.htm), [Carester investment](https://investors.usare.com/news-releases/news-release-details/usa-rare-earth-enters-definitive-agreements-strategic-investment)
+
+China’s June restriction on dual-use exports to USAR has a two-sided effect: it increases US policy value but creates immediate uncertainty around covered feedstock or equipment. MP Materials’ lawsuit seeks injunctions involving alleged process and GBD technology misuse, but no granted injunction was found; it remains contingent risk, not proven operational harm. [MOFCOM order](https://www.mofcom.gov.cn/cms_files/filemanager/policySummary/viewcore_aab677e956c943808cebf8c06a28ff0e.html), [litigation disclosure](https://www.sec.gov/Archives/edgar/data/1970622/000121390026073208/ea0290057-03.htm)
+
+## Reaction and perpetual calibration
+
+The four available public-company earnings events produced first-cash-close moves of **+23.3%, +9.7%, –7.7% and –2.3%**: mean absolute 10.8%, median 8.7%. Several subsequently reversed, showing that the initial release, call digestion and complete repricing can differ materially. [Historical earnings reactions](https://www.tipranks.com/stocks/usar/earnings)
+
+The live August 14 near-ATM Cboe straddle was approximately $2.45 against a roughly $19.5 underlying, implying an approximate **12.5% event range** before allowing for spreads and residual expiry value. [Cboe options data](https://cdn.cboe.com/api/global/delayed_quotes/options/USAR.json)
+
+`USARUSDT-PERP.BINANCE` has only one native earnings observation. In May it initially rose about 5–6% after the release, traded roughly 8% below the pre-event level during the next cash session, and finished approximately 2–3% lower—within cents of the cash close. That establishes a usable causal path but also demonstrates reversal risk.
+
+The current contract is thin: around the research snapshot, 24-hour volume was approximately $1.9 million, open interest $1.75 million, funding zero, and depth within 1% modest. It is generally anchored to cash during US hours but can overshoot off-hours. [Binance ticker](https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=USARUSDT), [mark/index](https://fapi.binance.com/fapi/v1/premiumIndex?symbol=USARUSDT), [open interest](https://fapi.binance.com/fapi/v1/openInterest?symbol=USARUSDT)
+
+## Directional framework
+
+A genuinely ordinary report—revenue around $6–7 million, another adjusted loss, target reiterations, and no quantified customer commitments—has a roughly **–6% to +3%** complete-event region after the run-up; a truly low-information outcome could remain within about ±4%, while weak wording could extend the sell-the-news response toward –8%.
+
+Accepted commercial output, binding order coverage, repeatable manufacturing yields and credible Serra metrics support approximately **+9% to +16%**; a major offtake, early production or additional government-backed surprise could squeeze beyond +20%, helped by short interest near 14% of float. A Stillwater delay, failed qualification, reduced capacity target, Serra closing/ramp problem, or materially worse financing need supports **–12% to –20%**, with impairment tails approaching –30%.
+
+The central complete-event absolute move is **8–15%**, centered near 10–13%. Downside probability is modestly higher because valuation and recent gains require execution, while the upside tail remains fat because positioning is short and genuine commercial proof would change the company’s status quickly.
+
+The strongest confirmation would be customer-accepted Stillwater deliveries at disclosed repeatable throughput using qualified non-China feedstock under binding volume commitments. The strongest falsifiers are a delay to the 600-tpa ramp, absence of commercial acceptance despite prior qualification claims, or financing/Serra developments that make the back-half plan less achievable. Principal residual uncertainties are the tiny analyst sample, noisy GAAP accounting, opaque customer funnel, and the perpetual’s single-event history and shallow off-hours liquidity.

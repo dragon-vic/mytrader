@@ -1,0 +1,14 @@
+{
+  "event_id": "2026-08-12-csco",
+  "metadata": {
+    "schedule_group_id": "2026-08-12-amc",
+    "company": "Cisco Systems",
+    "ticker": "CSCO",
+    "scope": "core_tech_crypto",
+    "active": true,
+    "confirmed": true,
+    "research_hints": [
+      "Evaluate CSCO directly and test networking and AI-infrastructure read-throughs to ANET and optical suppliers."
+    ]
+  }
+}

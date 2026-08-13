@@ -1,0 +1,57 @@
+BEGIN  2026-08-12T15:30:16Z
+Traceback (most recent call last):
+  File "/home/ubuntu/pycharm_nt/.codex/run_single_research.py", line 118, in <module>
+    asyncio.run(run(sys.argv[1]))
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/miniconda/envs/nt/lib/python3.13/asyncio/runners.py", line 196, in run
+    return runner.run(main)
+           ~~~~~~~~~~^^^^^^
+  File "/home/ubuntu/miniconda/envs/nt/lib/python3.13/asyncio/runners.py", line 119, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/home/ubuntu/miniconda/envs/nt/lib/python3.13/asyncio/base_events.py", line 725, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/home/ubuntu/pycharm_nt/.codex/run_single_research.py", line 36, in run
+    raise ValueError(f"expected one schedule group for {event_id}, got {matches}")
+ValueError: expected one schedule group for , got []
+END  status= 2026-08-12T15:30:16Z
+bash: line 1: [: -ne: unary operator expected
+BEGIN  2026-08-12T15:30:16Z
+Traceback (most recent call last):
+  File "/home/ubuntu/pycharm_nt/.codex/run_single_research.py", line 118, in <module>
+    asyncio.run(run(sys.argv[1]))
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/miniconda/envs/nt/lib/python3.13/asyncio/runners.py", line 196, in run
+    return runner.run(main)
+           ~~~~~~~~~~^^^^^^
+  File "/home/ubuntu/miniconda/envs/nt/lib/python3.13/asyncio/runners.py", line 119, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/home/ubuntu/miniconda/envs/nt/lib/python3.13/asyncio/base_events.py", line 725, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/home/ubuntu/pycharm_nt/.codex/run_single_research.py", line 36, in run
+    raise ValueError(f"expected one schedule group for {event_id}, got {matches}")
+ValueError: expected one schedule group for , got []
+END  status= 2026-08-12T15:30:16Z
+bash: line 1: [: -ne: unary operator expected
+BEGIN  2026-08-12T15:30:16Z
+Traceback (most recent call last):
+  File "/home/ubuntu/pycharm_nt/.codex/run_single_research.py", line 118, in <module>
+    asyncio.run(run(sys.argv[1]))
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/miniconda/envs/nt/lib/python3.13/asyncio/runners.py", line 196, in run
+    return runner.run(main)
+           ~~~~~~~~~~^^^^^^
+  File "/home/ubuntu/miniconda/envs/nt/lib/python3.13/asyncio/runners.py", line 119, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/home/ubuntu/miniconda/envs/nt/lib/python3.13/asyncio/base_events.py", line 725, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/home/ubuntu/pycharm_nt/.codex/run_single_research.py", line 36, in run
+    raise ValueError(f"expected one schedule group for {event_id}, got {matches}")
+ValueError: expected one schedule group for , got []
+END  status= 2026-08-12T15:30:16Z
+bash: line 1: [: -ne: unary operator expected

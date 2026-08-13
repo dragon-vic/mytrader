@@ -1,0 +1,7 @@
+{
+  "event_id": "2026-08-06-aaoi",
+  "state": "research_incomplete",
+  "updated_ns": 1786046400374117190,
+  "research_complete": false,
+  "research_error": "FileNotFoundError: [Errno 2] No such file or directory: '/home/ubuntu/pycharm_nt/strategies/agent_trading/batches/2026-08-06-amc/events/2026-08-06-aaoi/research_output/research.json'"
+}

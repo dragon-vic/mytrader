@@ -17,7 +17,7 @@ from strategies.agent_trading.controller import (
     RESOURCES_DIR,
     SCHEDULE_PATH,
 )
-from strategies.agent_trading.event_store import EventState, EventStore, FailureStage
+from strategies.agent_trading.event_store import EventStore
 from strategies.agent_trading.lifecycle import load_event_plan, load_market_universe
 from tools.codex_agent import CodexRunner
 
@@ -57,14 +57,24 @@ async def run(event_id: str) -> None:
         event.watch_plan.to_dict(),
     )
 
-    if store.load_research_handoff(group_id, event_id) is not None:
-        print(json.dumps({"event_id": event_id, "status": "reused"}))
-        return
+    if paths.research.exists():
+        state = store.load(group_id, event_id)
+        session_id = state.get("research_session_id")
+        if (
+            state.get("research_complete") is True
+            and isinstance(session_id, str)
+            and session_id.strip()
+            and paths.research.read_text(encoding="utf-8").strip()
+        ):
+            print(json.dumps({"event_id": event_id, "status": "reused"}))
+            return
 
     store.update(
         group_id,
         event_id,
-        EventState.RESEARCHING,
+        "researching",
+        research_complete=False,
+        research_error=None,
     )
     agent = ResearchAgent(
         CodexRunner(),
@@ -80,17 +90,19 @@ async def run(event_id: str) -> None:
         store.update(
             group_id,
             event_id,
-            EventState.FAILED,
-            failed_stage=FailureStage.RESEARCH,
-            error=outcome.error or "research memo is missing",
+            "research_incomplete",
+            research_complete=False,
+            research_error=outcome.error or "research memo or session id is missing",
         )
-        print(json.dumps({"event_id": event_id, "status": "failed"}))
+        print(json.dumps({"event_id": event_id, "status": "incomplete"}))
         return
 
     store.update(
         group_id,
         event_id,
-        EventState.RESEARCH_READY,
+        "research_ready",
+        research_complete=True,
+        research_error=None,
         research_session_id=outcome.session_id,
         research_completed_at=datetime.now(UTC).isoformat(),
         research_path=paths.research.relative_to(paths.root).as_posix(),

@@ -1,0 +1,20 @@
+{
+  "batch_id": "2026-08-05-amc",
+  "state": "research_finished",
+  "updated_ns": 1785953707685020169,
+  "research_start_at": "2026-08-05T16:00:00+00:00",
+  "reused_research": [
+    "2026-08-05-app",
+    "2026-08-05-dash",
+    "2026-08-05-flnc",
+    "2026-08-05-sndk",
+    "2026-08-05-wdc"
+  ],
+  "ready_events": [
+    "2026-08-05-app",
+    "2026-08-05-dash",
+    "2026-08-05-flnc",
+    "2026-08-05-sndk",
+    "2026-08-05-wdc"
+  ]
+}

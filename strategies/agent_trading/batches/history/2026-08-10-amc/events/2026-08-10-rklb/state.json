@@ -1,0 +1,17 @@
+{
+  "event_id": "2026-08-10-rklb",
+  "state": "decision_ready",
+  "updated_ns": 1786392577371221747,
+  "research_complete": true,
+  "research_error": null,
+  "research_session_id": "019febc8-d158-72f3-86f9-96d89570a476",
+  "research_completed_at": "2026-08-10T13:24:22.238750+00:00",
+  "research_path": "research_output/research.md",
+  "report_path": "analysis_input/report.json",
+  "report_source": "sec",
+  "report_detected_ns": 1786392575978678764,
+  "error": "RuntimeError: codex exec failed with code 2: error: unexpected argument '-C' found\n\n  tip: to pass '-C' as a value, use '-- -C'\n\nUsage: codex exec resume [OPTIONS] [SESSION_ID] [PROMPT]\n\nFor more information, try '--help'.",
+  "analysis_mode": "offline_replay",
+  "updated_at": "2026-08-11T05:25:43.093115+00:00",
+  "decision_path": "analysis_output/decision.json"
+}

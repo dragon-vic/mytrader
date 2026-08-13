@@ -1,0 +1,25 @@
+{
+  "output_path": "/home/ubuntu/pycharm_nt/strategies/agent_trading/batches/2026-08-13-bmo/events/2026-08-13-onds/research_output/research.md",
+  "status": "completed",
+  "started_at": "2026-08-13T09:20:17.456243+00:00",
+  "finished_at": "2026-08-13T09:38:04.773800+00:00",
+  "elapsed_seconds": 1067.318,
+  "thread_ids": [
+    "019ffa6c-2a72-7b22-b812-069436df6bbe"
+  ],
+  "turns": [
+    {
+      "input_tokens": 6380118,
+      "cached_input_tokens": 6057984,
+      "output_tokens": 24450,
+      "reasoning_output_tokens": 12176
+    }
+  ],
+  "usage": {
+    "input_tokens": 6380118,
+    "cached_input_tokens": 6057984,
+    "output_tokens": 24450,
+    "reasoning_output_tokens": 12176,
+    "total_tokens": 6404568
+  }
+}

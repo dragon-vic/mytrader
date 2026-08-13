@@ -1,0 +1,25 @@
+{
+  "event_id": "2026-08-10-rklb",
+  "finished_at": "2026-08-10T20:09:36.577146+00:00",
+  "winner": "sec",
+  "source_status": {
+    "sec": {
+      "consecutive_failures": 0,
+      "last_error": "TimeoutError: TimeoutError()",
+      "last_error_at": "2026-08-10T20:09:35.150702+00:00",
+      "last_success_at": "2026-08-10T20:09:36.576713+00:00"
+    },
+    "rtpr": {
+      "consecutive_failures": 0,
+      "last_error": null,
+      "last_error_at": null,
+      "last_success_at": null
+    },
+    "news_release:https://investors.rocketlabusa.com/news-events/press-releases": {
+      "consecutive_failures": 84,
+      "last_error": "TimeoutError: TimeoutError()",
+      "last_error_at": "2026-08-10T20:09:36.149923+00:00",
+      "last_success_at": null
+    }
+  }
+}

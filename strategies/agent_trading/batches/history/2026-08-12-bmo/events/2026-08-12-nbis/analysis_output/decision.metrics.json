@@ -1,0 +1,25 @@
+{
+  "output_path": "/home/ubuntu/pycharm_nt/strategies/agent_trading/batches/2026-08-12-bmo/events/2026-08-12-nbis/analysis_input/.decision.output.json",
+  "status": "completed",
+  "started_at": "2026-08-12T12:26:49.892774+00:00",
+  "finished_at": "2026-08-12T12:27:22.654508+00:00",
+  "elapsed_seconds": 32.762,
+  "thread_ids": [
+    "019ff545-b5cf-7cf3-85ff-d9289e0e9d7d"
+  ],
+  "turns": [
+    {
+      "input_tokens": 5537822,
+      "cached_input_tokens": 5017600,
+      "output_tokens": 22222,
+      "reasoning_output_tokens": 8535
+    }
+  ],
+  "usage": {
+    "input_tokens": 5537822,
+    "cached_input_tokens": 5017600,
+    "output_tokens": 22222,
+    "reasoning_output_tokens": 8535,
+    "total_tokens": 5560044
+  }
+}

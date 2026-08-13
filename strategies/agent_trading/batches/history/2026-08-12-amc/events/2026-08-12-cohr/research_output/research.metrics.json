@@ -1,0 +1,25 @@
+{
+  "output_path": "/home/ubuntu/pycharm_nt/strategies/agent_trading/batches/2026-08-12-amc/events/2026-08-12-cohr/research_output/research.md",
+  "status": "completed",
+  "started_at": "2026-08-12T15:32:51.059583+00:00",
+  "finished_at": "2026-08-12T15:49:56.009155+00:00",
+  "elapsed_seconds": 1024.95,
+  "thread_ids": [
+    "019ff69a-df07-7540-8441-34655923d730"
+  ],
+  "turns": [
+    {
+      "input_tokens": 7619368,
+      "cached_input_tokens": 7117312,
+      "output_tokens": 25172,
+      "reasoning_output_tokens": 9968
+    }
+  ],
+  "usage": {
+    "input_tokens": 7619368,
+    "cached_input_tokens": 7117312,
+    "output_tokens": 25172,
+    "reasoning_output_tokens": 9968,
+    "total_tokens": 7644540
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "event_id": "2026-08-10-hims",
+  "source": "sec",
+  "form": "8-K",
+  "accession": "000177375126000161",
+  "items": [
+    "2.02",
+    "9.01"
+  ],
+  "origin_url": "https://www.sec.gov/Archives/edgar/data/1773751/000177375126000161/0001773751-26-000161-index.htm",
+  "published_at": "2026-08-10T20:08:59+00:00",
+  "detected_ns": 1786425799512284015,
+  "files": [
+    {
+      "document_type": "8-K",
+      "description": "8-K",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/1773751/000177375126000161/hims-20260810.htm",
+      "content_type": "text/html",
+      "content_format": "html",
+      "size_bytes": 32587,
+      "sha256": "cac8648b7929bd645d02de3f9d8f271b9f1a11d6ee3f1d533234d1132e4224e6",
+      "raw_path": "../watch/raw/sec/hims-20260810.htm",
+      "analysis_path": "disclosure/sec/processed/hims-20260810.htm.md",
+      "processing_status": "processed",
+      "processing_error": null
+    },
+    {
+      "document_type": "EX-99.1",
+      "description": "EX-99.1",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/1773751/000177375126000161/hims-20260630x8xkearningsr.htm",
+      "content_type": "text/html",
+      "content_format": "html",
+      "size_bytes": 482821,
+      "sha256": "234554a2ccb5d8597b408d80029f09d22bf7be5a62b09425122f81196e0f5d18",
+      "raw_path": "../watch/raw/sec/hims-20260630x8xkearningsr.htm",
+      "analysis_path": "disclosure/sec/processed/hims-20260630x8xkearningsr.htm.md",
+      "processing_status": "processed",
+      "processing_error": null
+    },
+    {
+      "document_type": "10-Q",
+      "description": "10-Q",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/1773751/000177375126000163/hims-20260630.htm",
+      "content_type": "text/html",
+      "content_format": "html",
+      "size_bytes": 2203465,
+      "sha256": "c2debdfb1df6703f0c37eb49ba0855c3870a79aae80484daf3c9054abe972eaf",
+      "raw_path": "../watch/raw/sec/hims-20260630.htm",
+      "analysis_path": "disclosure/sec/processed/hims-20260630.htm.md",
+      "processing_status": "processed",
+      "processing_error": null
+    }
+  ]
+}

@@ -25,7 +25,7 @@ class EventState(StrEnum):
 
     @property
     def is_finished(self) -> bool:
-        return self is EventState.DECISION_SENT
+        return self in {EventState.DECISION_READY, EventState.DECISION_SENT}
 
 
 class FailureStage(StrEnum):
@@ -90,7 +90,7 @@ class EventStore:
             events=events,
         )
 
-    # event 始终归属于一个 schedule group，但所有生命周期数据都在 event 内。
+    # event 始终归属于一个 schedule group；这里只返回路径，不提前建目录。
     def event_paths(self, group_id: str, event_id: str) -> EventPaths:
         self._validate_id(group_id, "group_id")
         self._validate_id(event_id, "event_id")
@@ -125,7 +125,6 @@ class EventStore:
         market_universe: dict[str, Any],
     ) -> None:
         paths = self.event_group_paths(group_id)
-        paths.events.mkdir(parents=True, exist_ok=True)
         if not paths.market_universe.exists():
             self._write(paths.market_universe, market_universe)
 
@@ -134,16 +133,8 @@ class EventStore:
         group_id: str,
         event_id: str,
         metadata: dict[str, Any],
-        watch_plan: dict[str, Any],
     ) -> EventPaths:
         paths = self.event_paths(group_id, event_id)
-        for path in (
-            paths.research_output,
-            paths.watch,
-            paths.analysis_input,
-            paths.analysis_output,
-        ):
-            path.mkdir(parents=True, exist_ok=True)
         if paths.event.exists():
             stored = self._read(paths.event, "event")
             if stored.get("event_id") != event_id:
@@ -154,10 +145,6 @@ class EventStore:
                 "metadata": metadata,
             }
             self._write(paths.event, stored)
-        if not paths.analysis_event.exists():
-            self._write(paths.analysis_event, stored)
-        if not paths.watch_plan.exists():
-            self._write(paths.watch_plan, watch_plan)
         if not paths.state.exists():
             self._write(
                 paths.state,
@@ -168,6 +155,28 @@ class EventStore:
             )
         return paths
 
+    # watch 开始时把 event 输入复制到分析目录，不提前创建 analysis_input。
+    def prepare_analysis_event(
+        self,
+        group_id: str,
+        event_id: str,
+    ) -> EventPaths:
+        paths = self.event_paths(group_id, event_id)
+        stored = self._read(paths.event, "event")
+        self._write(paths.analysis_event, stored)
+        return paths
+
+    # watch 开始时保存最终采用的 schedule 快照，供审计和恢复使用。
+    def save_watch_plan(
+        self,
+        group_id: str,
+        event_id: str,
+        watch_plan: dict[str, Any],
+    ) -> EventPaths:
+        paths = self.event_paths(group_id, event_id)
+        self._write(paths.watch_plan, watch_plan)
+        return paths
+
     def load(self, group_id: str, event_id: str) -> dict[str, Any]:
         return self._read(
             self.event_paths(group_id, event_id).state,
@@ -175,29 +184,22 @@ class EventStore:
         )
 
     def load_state(self, group_id: str, event_id: str) -> EventState:
-        _payload, state = self.load_record(group_id, event_id)
-        return state
-
-    def load_record(
-        self,
-        group_id: str,
-        event_id: str,
-    ) -> tuple[dict[str, Any], EventState]:
         payload = self.load(group_id, event_id)
         try:
-            state = EventState(payload.get("state"))
+            return EventState(payload.get("state"))
         except ValueError as exc:
             raise ValueError(
                 f"invalid event state for {event_id}: {payload.get('state')!r}",
             ) from exc
-        return payload, state
 
-    # 分析阶段读取正式交接物；session_id 只决定是否恢复原预研会话。
+    # research.md 是正式交接物；session_id 只决定分析是否恢复原会话。
     def load_research_handoff(
         self,
         group_id: str,
         event_id: str,
     ) -> ResearchHandoff | None:
+        if self.load_state(group_id, event_id) is not EventState.RESEARCH_READY:
+            return None
         paths = self.event_paths(group_id, event_id)
         if not paths.research.is_file():
             return None
@@ -226,6 +228,8 @@ class EventStore:
     ) -> dict[str, Any]:
         paths = self.event_paths(group_id, event_id)
         payload = self._read(paths.state, "event state")
+        payload.pop("research_complete", None)
+        payload.pop("research_error", None)
         if state is EventState.FAILED:
             failed_stage = values.get("failed_stage")
             error = values.get("error")

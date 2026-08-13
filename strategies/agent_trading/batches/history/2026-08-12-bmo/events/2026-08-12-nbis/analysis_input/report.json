@@ -1,0 +1,25 @@
+{
+  "event_id": "2026-08-12-nbis",
+  "source": "news_release",
+  "form": null,
+  "accession": null,
+  "items": [],
+  "origin_url": "https://nebius.com/newsroom/nebius-reports-second-quarter-2026-financial-results",
+  "published_at": null,
+  "detected_ns": 1786537609493926216,
+  "files": [
+    {
+      "document_type": "NEWS_RELEASE",
+      "description": "Nebius reports second quarter 2026 financial results August 12, 2026",
+      "source_url": "https://nebius.com/newsroom/nebius-reports-second-quarter-2026-financial-results",
+      "content_type": "text/html",
+      "content_format": "html",
+      "size_bytes": 269125,
+      "sha256": "3e5e0654349e35047919b0e6f45a99c2c7f08f77d4b6f0b8b198c2e8e3aadee9",
+      "raw_path": "../watch/raw/news_release/nebius-reports-second-quarter-2026-financial-results",
+      "analysis_path": "disclosure/news_release/processed/nebius-reports-second-quarter-2026-financial-results.md",
+      "processing_status": "processed",
+      "processing_error": null
+    }
+  ]
+}

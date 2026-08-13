@@ -1,0 +1,17 @@
+{
+  "event_id": "2026-08-12-cohr",
+  "started_at": "2026-08-13T02:19:06.743475+00:00",
+  "finished_at": "2026-08-13T02:19:43.049361+00:00",
+  "duration_seconds": 36.306,
+  "decision": "TRADE",
+  "trades": [
+    {
+      "instrument_id": "COHRUSDT-PERP.BINANCE",
+      "signal": "WEAK_SELL",
+      "expected_move_pct": 6.5,
+      "confidence": 0.58
+    }
+  ],
+  "rationale": null,
+  "output_path": "/home/ubuntu/pycharm_nt/strategies/agent_trading/batches/2026-08-12-amc/events/2026-08-12-cohr/analysis_output/decision.json"
+}

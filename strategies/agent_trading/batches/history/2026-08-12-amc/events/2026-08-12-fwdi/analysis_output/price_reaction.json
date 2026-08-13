@@ -1,0 +1,42 @@
+{
+  "event_id": "2026-08-12-fwdi",
+  "symbol": "FWDIUSDT",
+  "source_first_published_at": "2026-08-12T20:02:03+00:00",
+  "source_basis": "SEC 10-Q acceptance timestamp 16:02:03 ET normalized to UTC; 8-K at about 20:15 UTC",
+  "analysis_duration_seconds": 100.454,
+  "estimated_analysis_completion_at": "2026-08-12T20:03:43.454000+00:00",
+  "price_method": "Binance USD-M perpetual 1m kline; source price is open of source minute; checkpoints use close of containing minute",
+  "source_price": 4.41,
+  "checkpoints": {
+    "estimated_analysis_completion": {
+      "time": "2026-08-12T20:03:43.454000+00:00",
+      "bar_start": "2026-08-12T20:03:00+00:00",
+      "close": 4.316,
+      "return_from_source_pct": -2.1315
+    },
+    "plus_5m": {
+      "time": "2026-08-12T20:07:03+00:00",
+      "bar_start": "2026-08-12T20:07:00+00:00",
+      "close": 4.316,
+      "return_from_source_pct": -2.1315
+    },
+    "plus_30m": {
+      "time": "2026-08-12T20:32:03+00:00",
+      "bar_start": "2026-08-12T20:32:00+00:00",
+      "close": 4.328,
+      "return_from_source_pct": -1.8594
+    },
+    "plus_90m": {
+      "time": "2026-08-12T21:32:03+00:00",
+      "bar_start": "2026-08-12T21:32:00+00:00",
+      "close": 4.321,
+      "return_from_source_pct": -2.0181
+    },
+    "extended_session_end": {
+      "time": "2026-08-13T00:00:00+00:00",
+      "bar_start": "2026-08-13T00:00:00+00:00",
+      "close": 4.342,
+      "return_from_source_pct": -1.542
+    }
+  }
+}

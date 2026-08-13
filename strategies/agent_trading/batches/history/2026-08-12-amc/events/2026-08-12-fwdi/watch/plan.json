@@ -1,0 +1,32 @@
+{
+  "event_id": "2026-08-12-fwdi",
+  "start_at": "2026-08-12T20:00:00+00:00",
+  "end_at": "2026-08-12T22:00:00+00:00",
+  "sec": {
+    "cik": "0000038264",
+    "forms": [
+      "8-K",
+      "10-Q",
+      "10-K"
+    ]
+  },
+  "news_release": {
+    "sources": [
+      {
+        "url": "https://ir.forwardindustries.com/news-events/press-releases",
+        "format": "html",
+        "title_phrases": [
+          "forward industries reports",
+          "forward industries announces financial results"
+        ],
+        "exclude_phrases": [
+          "to report"
+        ],
+        "content_terms": [
+          "forward industries",
+          "financial results"
+        ]
+      }
+    ]
+  }
+}

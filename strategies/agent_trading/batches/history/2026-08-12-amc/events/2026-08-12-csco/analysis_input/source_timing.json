@@ -1,0 +1,12 @@
+{
+  "event_id": "2026-08-12-csco",
+  "source_first_published_at": "2026-08-12T20:05:00+00:00",
+  "source_detected_at": "2026-08-13T02:18:35.563244+00:00",
+  "source_urls": [
+    "https://s21.q4cdn.com/812015656/files/doc_news/CISCO-REPORTS-FOURTH-QUARTER-AND-FISCAL-YEAR-2026-EARNINGS-2026.pdf"
+  ],
+  "capture_mode": "official_source_direct_fetch",
+  "source_basis": "Cisco IR feed PressReleaseDate 16:05 ET normalized to UTC",
+  "analysis_duration_seconds": 66.747,
+  "estimated_analysis_completion_at": "2026-08-12T20:06:06.747000+00:00"
+}

@@ -1,0 +1,42 @@
+{
+  "event_id": "2026-08-12-cohr",
+  "symbol": "COHRUSDT",
+  "source_first_published_at": "2026-08-12T20:10:13+00:00",
+  "source_basis": "SEC acceptance timestamp 16:10:13 ET normalized to UTC",
+  "analysis_duration_seconds": 36.306,
+  "estimated_analysis_completion_at": "2026-08-12T20:10:49.306000+00:00",
+  "price_method": "Binance USD-M perpetual 1m kline; source price is open of source minute; checkpoints use close of containing minute",
+  "source_price": 352.6,
+  "checkpoints": {
+    "estimated_analysis_completion": {
+      "time": "2026-08-12T20:10:49.306000+00:00",
+      "bar_start": "2026-08-12T20:10:00+00:00",
+      "close": 345.6,
+      "return_from_source_pct": -1.9853
+    },
+    "plus_5m": {
+      "time": "2026-08-12T20:15:13+00:00",
+      "bar_start": "2026-08-12T20:15:00+00:00",
+      "close": 342.31,
+      "return_from_source_pct": -2.9183
+    },
+    "plus_30m": {
+      "time": "2026-08-12T20:40:13+00:00",
+      "bar_start": "2026-08-12T20:40:00+00:00",
+      "close": 343.75,
+      "return_from_source_pct": -2.5099
+    },
+    "plus_90m": {
+      "time": "2026-08-12T21:40:13+00:00",
+      "bar_start": "2026-08-12T21:40:00+00:00",
+      "close": 345.86,
+      "return_from_source_pct": -1.9115
+    },
+    "extended_session_end": {
+      "time": "2026-08-13T00:00:00+00:00",
+      "bar_start": "2026-08-13T00:00:00+00:00",
+      "close": 348.86,
+      "return_from_source_pct": -1.0607
+    }
+  }
+}

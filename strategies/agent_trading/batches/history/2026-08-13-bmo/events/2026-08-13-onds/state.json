@@ -1,0 +1,10 @@
+{
+  "event_id": "2026-08-13-onds",
+  "state": "failed",
+  "updated_at": "2026-08-13T09:38:04.782563+00:00",
+  "research_session_id": "019ffa6c-2a72-7b22-b812-069436df6bbe",
+  "research_completed_at": "2026-08-13T09:38:04.774730+00:00",
+  "research_path": "research_output/research.md",
+  "failed_stage": "lifecycle",
+  "error": "ValueError: news_release.sources[] fields must contain ['format', 'title_regex', 'url'] with optional user_agent, got ['content_terms', 'exclude_phrases', 'format', 'title_phrases', 'url']"
+}

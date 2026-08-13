@@ -1,0 +1,12 @@
+{
+  "event_id": "2026-08-12-cohr",
+  "source_first_published_at": "2026-08-12T20:10:13+00:00",
+  "source_detected_at": "2026-08-13T02:18:35.563244+00:00",
+  "source_urls": [
+    "https://www.coherent.com/news/press-releases/fourth-quarter-and-fiscal-year-2026-results"
+  ],
+  "capture_mode": "official_source_direct_fetch",
+  "source_basis": "SEC acceptance timestamp 16:10:13 ET normalized to UTC",
+  "analysis_duration_seconds": 36.306,
+  "estimated_analysis_completion_at": "2026-08-12T20:10:49.306000+00:00"
+}

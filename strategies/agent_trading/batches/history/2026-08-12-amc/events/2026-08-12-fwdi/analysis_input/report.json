@@ -1,0 +1,41 @@
+{
+  "event_id": "2026-08-12-fwdi",
+  "source": "sec",
+  "form": "8-K",
+  "accession": "0001683168-26-006277",
+  "items": [
+    "news_release",
+    "10-Q"
+  ],
+  "origin_url": "https://www.sec.gov/Archives/edgar/data/38264/000168316826006277/forward_ex9901.htm",
+  "published_at": "2026-08-12T20:02:03Z",
+  "detected_ns": 1786587515563243653,
+  "files": [
+    {
+      "document_type": "news_release",
+      "description": "Forward Industries Reports Fiscal Third Quarter 2026 Financial and Operating Results",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/38264/000168316826006277/forward_ex9901.htm",
+      "content_type": "text/html",
+      "content_format": "html",
+      "size_bytes": 115699,
+      "sha256": "9eb5392e8e897b553319d3c43e1a3d9061c99920e4d00d6cd17ed7c075d96a0c",
+      "raw_path": "../watch/raw/manual/fwdi-q3-fy26-ex99-1.html",
+      "analysis_path": "disclosure/sec/processed/fwdi-q3-fy26-ex99-1.html.md",
+      "processing_status": "processed",
+      "processing_error": null
+    },
+    {
+      "document_type": "10-Q",
+      "description": "Forward Industries Form 10-Q quarter ended June 30, 2026",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/38264/000168316826006270/forward_i10q-063026.htm",
+      "content_type": "text/html",
+      "content_format": "html",
+      "size_bytes": 1177092,
+      "sha256": "1ba1a076ee4224ac4aed71b3cf62b3f67eb7387fdfae4332f5c1426bde18d9d2",
+      "raw_path": "../watch/raw/manual/fwdi-q3-fy26-10q.html",
+      "analysis_path": "disclosure/sec/processed/fwdi-q3-fy26-10q.html.md",
+      "processing_status": "processed",
+      "processing_error": null
+    }
+  ]
+}

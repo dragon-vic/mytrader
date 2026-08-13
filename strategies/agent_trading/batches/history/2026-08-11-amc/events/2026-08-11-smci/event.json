@@ -1,0 +1,14 @@
+{
+  "event_id": "2026-08-11-smci",
+  "metadata": {
+    "schedule_group_id": "2026-08-11-amc",
+    "company": "Super Micro Computer",
+    "ticker": "SMCI",
+    "scope": "core_tech_crypto",
+    "active": true,
+    "confirmed": true,
+    "research_hints": [
+      "Evaluate SMCI directly and test AI-server demand and supply read-throughs to NVDA, DELL and CRWV."
+    ]
+  }
+}

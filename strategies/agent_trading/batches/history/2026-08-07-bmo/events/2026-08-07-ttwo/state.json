@@ -1,0 +1,7 @@
+{
+  "event_id": "2026-08-07-ttwo",
+  "state": "research_incomplete",
+  "updated_ns": 1786096800043811615,
+  "research_complete": false,
+  "research_error": "FileNotFoundError: [Errno 2] No such file or directory: '/home/ubuntu/pycharm_nt/strategies/agent_trading/batches/2026-08-07-bmo/events/2026-08-07-ttwo/research_output/research.json'"
+}

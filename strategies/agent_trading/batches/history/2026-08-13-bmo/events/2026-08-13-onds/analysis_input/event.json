@@ -1,0 +1,14 @@
+{
+  "event_id": "2026-08-13-onds",
+  "metadata": {
+    "schedule_group_id": "2026-08-13-bmo",
+    "company": "Ondas",
+    "ticker": "ONDS",
+    "scope": "core_tech_crypto",
+    "active": true,
+    "confirmed": true,
+    "research_hints": [
+      "Evaluate ONDS directly and test autonomous-systems read-throughs only when causally supported."
+    ]
+  }
+}

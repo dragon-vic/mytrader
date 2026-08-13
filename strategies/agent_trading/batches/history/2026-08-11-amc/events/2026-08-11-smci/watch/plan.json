@@ -1,0 +1,32 @@
+{
+  "event_id": "2026-08-11-smci",
+  "start_at": "2026-08-11T20:00:00+00:00",
+  "end_at": "2026-08-11T22:00:00+00:00",
+  "sec": {
+    "cik": "0001375365",
+    "forms": [
+      "8-K",
+      "10-Q",
+      "10-K"
+    ]
+  },
+  "news_release": {
+    "sources": [
+      {
+        "url": "https://ir.supermicro.com/news/news-releases",
+        "format": "html",
+        "title_phrases": [
+          "supermicro announces financial results",
+          "super micro computer reports"
+        ],
+        "exclude_phrases": [
+          "to announce"
+        ],
+        "content_terms": [
+          "supermicro",
+          "net sales"
+        ]
+      }
+    ]
+  }
+}

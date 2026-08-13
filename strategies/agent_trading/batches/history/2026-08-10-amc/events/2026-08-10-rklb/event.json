@@ -1,0 +1,13 @@
+{
+  "event_id": "2026-08-10-rklb",
+  "metadata": {
+    "batch_id": "2026-08-10-amc",
+    "company": "Rocket Lab",
+    "ticker": "RKLB",
+    "scope": "core_tech_crypto",
+    "confirmed": true,
+    "research_hints": [
+      "Evaluate RKLB directly and test launch and space-systems read-throughs to ASTS and SPCX."
+    ]
+  }
+}

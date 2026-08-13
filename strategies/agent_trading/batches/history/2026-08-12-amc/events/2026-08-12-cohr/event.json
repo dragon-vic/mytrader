@@ -1,0 +1,14 @@
+{
+  "event_id": "2026-08-12-cohr",
+  "metadata": {
+    "schedule_group_id": "2026-08-12-amc",
+    "company": "Coherent",
+    "ticker": "COHR",
+    "scope": "core_tech_crypto",
+    "active": true,
+    "confirmed": true,
+    "research_hints": [
+      "Evaluate COHR directly and test optical and datacenter demand read-throughs to LITE and AAOI."
+    ]
+  }
+}

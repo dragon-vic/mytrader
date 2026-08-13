@@ -1,0 +1,164 @@
+{
+  "batch_id": "2026-08-10-amc",
+  "session": "AMC",
+  "watch_start_at": "2026-08-10T20:00:00+00:00",
+  "watch_end_at": "2026-08-10T22:00:00+00:00",
+  "events": [
+    {
+      "event_id": "2026-08-10-usar",
+      "company": "USA Rare Earth",
+      "ticker": "USAR",
+      "scope": "other",
+      "confirmed": true,
+      "research_hints": [
+        "Evaluate USAR directly and test rare-earth supply-chain read-throughs."
+      ],
+      "watch": {
+        "sec": {
+          "cik": "0001970622",
+          "forms": [
+            "8-K",
+            "10-Q",
+            "10-K"
+          ]
+        },
+        "news_release": {
+          "sources": [
+            {
+              "url": "https://investors.usare.com/news-events/press-releases",
+              "format": "html",
+              "title_phrases": [
+                "usa rare earth reports",
+                "usa rare earth announces financial results"
+              ],
+              "exclude_phrases": [
+                "to report"
+              ],
+              "content_terms": [
+                "usa rare earth",
+                "financial results"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "event_id": "2026-08-10-asts",
+      "company": "AST SpaceMobile",
+      "ticker": "ASTS",
+      "scope": "core_tech_crypto",
+      "confirmed": true,
+      "research_hints": [
+        "Evaluate ASTS directly and test satellite-network read-throughs to RKLB and SPCX."
+      ],
+      "watch": {
+        "sec": {
+          "cik": "0001780312",
+          "forms": [
+            "8-K",
+            "10-Q",
+            "10-K"
+          ]
+        },
+        "news_release": {
+          "sources": [
+            {
+              "url": "https://investors.ast-science.com/",
+              "format": "html",
+              "title_phrases": [
+                "ast spacemobile provides business update",
+                "ast spacemobile reports"
+              ],
+              "exclude_phrases": [
+                "to report"
+              ],
+              "content_terms": [
+                "ast spacemobile",
+                "quarter"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "event_id": "2026-08-10-hims",
+      "company": "Hims & Hers Health",
+      "ticker": "HIMS",
+      "scope": "other",
+      "confirmed": true,
+      "research_hints": [
+        "Evaluate HIMS directly and reject weak cross-asset read-throughs."
+      ],
+      "watch": {
+        "sec": {
+          "cik": "0001773751",
+          "forms": [
+            "8-K",
+            "10-Q",
+            "10-K"
+          ]
+        },
+        "news_release": {
+          "sources": [
+            {
+              "url": "https://investors.hims.com/news/news-releases",
+              "format": "html",
+              "title_phrases": [
+                "hims & hers reports",
+                "hims and hers reports"
+              ],
+              "exclude_phrases": [
+                "to report"
+              ],
+              "content_terms": [
+                "hims",
+                "revenue"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "event_id": "2026-08-10-rklb",
+      "company": "Rocket Lab",
+      "ticker": "RKLB",
+      "scope": "core_tech_crypto",
+      "confirmed": true,
+      "research_hints": [
+        "Evaluate RKLB directly and test launch and space-systems read-throughs to ASTS and SPCX."
+      ],
+      "watch": {
+        "sec": {
+          "cik": "0001819994",
+          "forms": [
+            "8-K",
+            "10-Q",
+            "10-K"
+          ]
+        },
+        "news_release": {
+          "sources": [
+            {
+              "url": "https://investors.rocketlabusa.com/news-events/press-releases",
+              "format": "html",
+              "title_phrases": [
+                "rocket lab announces financial results",
+                "rocket lab reports"
+              ],
+              "exclude_phrases": [
+                "to report"
+              ],
+              "content_terms": [
+                "rocket lab",
+                "revenue"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

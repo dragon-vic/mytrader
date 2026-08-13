@@ -1,0 +1,25 @@
+{
+  "output_path": "/home/ubuntu/pycharm_nt/strategies/agent_trading/batches/2026-08-12-amc/events/2026-08-12-fwdi/analysis_input/.decision.output.json",
+  "status": "completed",
+  "started_at": "2026-08-13T02:19:06.754918+00:00",
+  "finished_at": "2026-08-13T02:20:47.202238+00:00",
+  "elapsed_seconds": 100.447,
+  "thread_ids": [
+    "019ff6aa-8078-7f53-acf4-0aea8ac86f0b"
+  ],
+  "turns": [
+    {
+      "input_tokens": 13204690,
+      "cached_input_tokens": 12649216,
+      "output_tokens": 29065,
+      "reasoning_output_tokens": 14031
+    }
+  ],
+  "usage": {
+    "input_tokens": 13204690,
+    "cached_input_tokens": 12649216,
+    "output_tokens": 29065,
+    "reasoning_output_tokens": 14031,
+    "total_tokens": 13233755
+  }
+}

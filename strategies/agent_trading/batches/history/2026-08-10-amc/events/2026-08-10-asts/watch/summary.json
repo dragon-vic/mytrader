@@ -1,0 +1,25 @@
+{
+  "event_id": "2026-08-10-asts",
+  "finished_at": "2026-08-10T20:30:04.508747+00:00",
+  "winner": "rtpr",
+  "source_status": {
+    "sec": {
+      "consecutive_failures": 0,
+      "last_error": "TimeoutError: TimeoutError()",
+      "last_error_at": "2026-08-10T20:29:39.150023+00:00",
+      "last_success_at": "2026-08-10T20:29:59.901019+00:00"
+    },
+    "rtpr": {
+      "consecutive_failures": 0,
+      "last_error": null,
+      "last_error_at": null,
+      "last_success_at": "2026-08-10T20:30:04.503604+00:00"
+    },
+    "news_release:https://investors.ast-science.com/": {
+      "consecutive_failures": 0,
+      "last_error": null,
+      "last_error_at": null,
+      "last_success_at": "2026-08-10T20:30:04.047478+00:00"
+    }
+  }
+}

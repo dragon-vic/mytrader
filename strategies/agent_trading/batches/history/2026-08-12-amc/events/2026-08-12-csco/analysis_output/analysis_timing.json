@@ -1,0 +1,17 @@
+{
+  "event_id": "2026-08-12-csco",
+  "started_at": "2026-08-13T02:19:06.747017+00:00",
+  "finished_at": "2026-08-13T02:20:13.493703+00:00",
+  "duration_seconds": 66.747,
+  "decision": "TRADE",
+  "trades": [
+    {
+      "instrument_id": "CSCOUSDT-PERP.BINANCE",
+      "signal": "STRONG_BUY",
+      "expected_move_pct": 16.0,
+      "confidence": 0.97
+    }
+  ],
+  "rationale": null,
+  "output_path": "/home/ubuntu/pycharm_nt/strategies/agent_trading/batches/2026-08-12-amc/events/2026-08-12-csco/analysis_output/decision.json"
+}

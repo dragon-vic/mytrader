@@ -1,0 +1,42 @@
+{
+  "event_id": "2026-08-12-csco",
+  "symbol": "CSCOUSDT",
+  "source_first_published_at": "2026-08-12T20:05:00+00:00",
+  "source_basis": "Cisco IR feed PressReleaseDate 16:05 ET normalized to UTC",
+  "analysis_duration_seconds": 66.747,
+  "estimated_analysis_completion_at": "2026-08-12T20:06:06.747000+00:00",
+  "price_method": "Binance USD-M perpetual 1m kline; source price is open of source minute; checkpoints use close of containing minute",
+  "source_price": 124.8,
+  "checkpoints": {
+    "estimated_analysis_completion": {
+      "time": "2026-08-12T20:06:06.747000+00:00",
+      "bar_start": "2026-08-12T20:06:00+00:00",
+      "close": 130.32,
+      "return_from_source_pct": 4.4231
+    },
+    "plus_5m": {
+      "time": "2026-08-12T20:10:00+00:00",
+      "bar_start": "2026-08-12T20:10:00+00:00",
+      "close": 127.65,
+      "return_from_source_pct": 2.2837
+    },
+    "plus_30m": {
+      "time": "2026-08-12T20:35:00+00:00",
+      "bar_start": "2026-08-12T20:35:00+00:00",
+      "close": 117.47,
+      "return_from_source_pct": -5.8734
+    },
+    "plus_90m": {
+      "time": "2026-08-12T21:35:00+00:00",
+      "bar_start": "2026-08-12T21:35:00+00:00",
+      "close": 119.45,
+      "return_from_source_pct": -4.2869
+    },
+    "extended_session_end": {
+      "time": "2026-08-13T00:00:00+00:00",
+      "bar_start": "2026-08-13T00:00:00+00:00",
+      "close": 118.79,
+      "return_from_source_pct": -4.8157
+    }
+  }
+}

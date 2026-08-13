@@ -1,0 +1,32 @@
+{
+  "event_id": "2026-08-10-hims",
+  "start_at": "2026-08-10T20:00:00+00:00",
+  "end_at": "2026-08-10T22:00:00+00:00",
+  "sec": {
+    "cik": "0001773751",
+    "forms": [
+      "8-K",
+      "10-Q",
+      "10-K"
+    ]
+  },
+  "news_release": {
+    "sources": [
+      {
+        "url": "https://investors.hims.com/news/news-releases",
+        "format": "html",
+        "title_phrases": [
+          "hims & hers reports",
+          "hims and hers reports"
+        ],
+        "exclude_phrases": [
+          "to report"
+        ],
+        "content_terms": [
+          "hims",
+          "revenue"
+        ]
+      }
+    ]
+  }
+}

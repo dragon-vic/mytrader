@@ -1,0 +1,25 @@
+{
+  "output_path": "/home/ubuntu/pycharm_nt/strategies/agent_trading/batches/2026-08-10-amc/events/2026-08-10-rklb/research_output/research.md",
+  "status": "completed",
+  "started_at": "2026-08-10T13:07:13.796075+00:00",
+  "finished_at": "2026-08-10T13:24:22.237998+00:00",
+  "elapsed_seconds": 1028.442,
+  "thread_ids": [
+    "019febc8-d158-72f3-86f9-96d89570a476"
+  ],
+  "turns": [
+    {
+      "input_tokens": 6336543,
+      "cached_input_tokens": 6007040,
+      "output_tokens": 24946,
+      "reasoning_output_tokens": 12356
+    }
+  ],
+  "usage": {
+    "input_tokens": 6336543,
+    "cached_input_tokens": 6007040,
+    "output_tokens": 24946,
+    "reasoning_output_tokens": 12356,
+    "total_tokens": 6361489
+  }
+}

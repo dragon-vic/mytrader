@@ -1,0 +1,32 @@
+{
+  "event_id": "2026-08-07-ttwo",
+  "start_at": "2026-08-07T10:00:00+00:00",
+  "end_at": "2026-08-07T13:30:00+00:00",
+  "sec": {
+    "cik": "0000946581",
+    "forms": [
+      "8-K",
+      "10-Q",
+      "10-K"
+    ]
+  },
+  "news_release": {
+    "sources": [
+      {
+        "url": "https://www.take2games.com/ir/press-releases",
+        "format": "html",
+        "title_phrases": [
+          "take-two interactive software, inc. reports results for fiscal first quarter 2027",
+          "take-two reports fiscal first quarter 2027 results"
+        ],
+        "exclude_phrases": [
+          "to report"
+        ],
+        "content_terms": [
+          "take-two interactive",
+          "net revenue"
+        ]
+      }
+    ]
+  }
+}

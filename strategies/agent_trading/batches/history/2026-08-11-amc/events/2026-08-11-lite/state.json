@@ -1,0 +1,12 @@
+{
+  "event_id": "2026-08-11-lite",
+  "state": "decision_sent",
+  "updated_at": "2026-08-11T20:25:28.920890+00:00",
+  "research_session_id": "019ff1fb-d1d1-7aa3-a232-ff3f0b37dbb4",
+  "research_completed_at": "2026-08-11T18:14:40.821225+00:00",
+  "research_path": "research_output/research.md",
+  "report_path": "analysis_input/report.json",
+  "report_source": "sec",
+  "report_detected_ns": 1786479878632663381,
+  "decision_path": "analysis_output/decision.json"
+}
