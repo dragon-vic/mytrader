@@ -8,22 +8,20 @@ strategy:
       sk_instrument: SKHYNIXUSDT-PERP.BINANCE
       adr_instrument: SKHYUSDT-PERP.BINANCE
       leverage: 10
-      add_step_notional: 500
-      tier_target_notional: 12000
-      max_target_notional: 16000
-      final_target_notional: 20000
-      tier_one_premium: 0.36
-      tier_two_premium: 0.40
-      tier_three_premium: 0.45
-      close_premium: 0.25
-      close_full_premium: 0.15
-      close_round_ratio: 0.10
-      close_rounds: 5
-      retry_delay_sec: 10
+      # 最后完整完成的加仓阈值；0 表示 40% 档尚未执行。每次启动前人工确认。
+      current_add_position: 0
+      first_add_position: 40
+      large_add_position: 43
+      max_add_position: 50
+      # 40%~42% 每档每腿加 2,000U；43%~50% 每档每腿加 4,000U。
+      standard_stage_notional: 2000
+      large_stage_notional: 4000
+      # 所有金额均为单腿名义价值；每组双腿完全成交后等待 5 秒。
+      order_notional: 1000
+      retry_delay_sec: 5
       price_check_interval_sec: 1
       max_mark_age_sec: 5
       telegram_notify_step: 0.01
-      initial_completed_stage: 3
 
 node:
   logging:

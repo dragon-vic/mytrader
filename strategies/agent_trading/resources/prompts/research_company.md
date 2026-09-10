@@ -52,6 +52,10 @@ Research broadly enough to understand the event rather than collecting a few hea
 
 Treat consensus values as evidence, not the answer. When sources conflict, investigate date, metric definition, period, GAAP versus adjusted treatment, contributor quality and whether estimates have moved. Use primary sources for facts and diverse credible market sources for expectations. Then state your own conclusion and why it is better supported.
 
+For an event whose plausible complete repricing exceeds roughly 5%, recent price behavior and price-in analysis are mandatory. Study the issuer's 1-day, 5-day and 20-day performance and its move since the previous material event. Compare those moves with relevant peers and a sector benchmark, identify the catalysts behind any issuer-specific run-up or de-risking, and determine whether estimate revisions plausibly justify the price change. Do not merely report that the stock rose or fell. Reach an explicit view on whether expectations appear underpriced, reasonably reflected or crowded, and explain what level of financial or forward surprise the current price appears to require.
+
+Separate published consensus, the latest credible sell-side range, and the inferred buy-side or whisper bar. Do not call a number the market's true bar merely because it is the highest available public estimate. When the buy-side bar cannot be established reliably, say so and use a reasoned range rather than manufacturing a precise threshold from scattered sources. Short interest alone is not evidence that long positioning is uncrowded.
+
 ## Market-reaction calibration
 
 This strategy trades Binance or Hyperliquid 24-hour contracts, not US cash equities during regular hours only. You may use the perpetual contract, the underlying cash equity, or both; there is no forced source priority. Under normal conditions, treat an eligible equity perpetual as accurately tracking its underlying equity. Do not spend research effort estimating contract-specific amplification, basis, overnight liquidity or liquidation effects. When the perpetual listed recently or lacks comparable event history, use cash-equity event history directly without reducing research confidence, lowering trading value or increasing the likelihood of HOLD merely for that reason.
@@ -86,5 +90,7 @@ Write one self-contained Markdown memo for the assigned event. Keep it compact e
 - the likely directional scenarios, full-event magnitude and asymmetry;
 - the few disclosure facts that would most strongly confirm or falsify the thesis;
 - material contrary evidence and unresolved uncertainty.
+
+End with a short natural-language handoff for the resumed analysis turn. State the base interpretation, the quantitative or discrete new information required to upgrade or reverse it, which likely management statements would merely confirm already-priced expectations, and which unanticipated facts would invalidate the framework. This is a concise synthesis, not a rule table or trade decision.
 
 Use inline source links near the claims they support. Distinguish fact, market expectation and your inference. Do not dump an exhaustive source register, reproduce the internal debate, prescribe orders, or encode fixed trading rules. For events that pass the trading-value screen, finish only when additional reasonable research is unlikely to change the directional and impact framework materially.

@@ -1347,7 +1347,7 @@
               ]
             }
           },
-          "confirmed": false
+          "confirmed": true
         }
       ]
     },
@@ -1385,7 +1385,37 @@
               ]
             }
           },
-          "confirmed": false
+          "confirmed": true
+        },
+        {
+          "event_id": "2026-08-26-crm",
+          "company": "Salesforce",
+          "ticker": "CRM",
+          "scope": "core_tech_crypto",
+          "active": true,
+          "research_hints": [
+            "Evaluate CRM directly and test enterprise-software and agentic-AI demand read-throughs to NOW, ORCL, MSFT, SNOW and ZM."
+          ],
+          "watch": {
+            "sec": {
+              "cik": "0001108524",
+              "forms": [
+                "8-K",
+                "10-Q",
+                "10-K"
+              ]
+            },
+            "news_release": {
+              "sources": [
+                {
+                  "url": "https://investor.salesforce.com/feed/PressRelease.svc/GetPressReleaseList?languageId=1&bodyType=0&year=2026&includeTags=true&pressReleaseDateFilter=1",
+                  "format": "q4_json",
+                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
+                }
+              ]
+            }
+          },
+          "confirmed": true
         },
         {
           "event_id": "2026-08-26-nvda",
@@ -1453,37 +1483,7 @@
               ]
             }
           },
-          "confirmed": false
-        },
-        {
-          "event_id": "2026-08-27-dell",
-          "company": "Dell Technologies",
-          "ticker": "DELL",
-          "scope": "core_tech_crypto",
-          "active": true,
-          "research_hints": [
-            "Evaluate DELL directly and test AI-server and enterprise-demand read-throughs to NVDA, SMCI and CRWV."
-          ],
-          "watch": {
-            "sec": {
-              "cik": "0001571996",
-              "forms": [
-                "8-K",
-                "10-Q",
-                "10-K"
-              ]
-            },
-            "news_release": {
-              "sources": [
-                {
-                  "url": "https://investors.delltechnologies.com/rss/news-releases.xml",
-                  "format": "feed",
-                  "title_regex": "(?i)^(?=.*\\b(?:reports?|announces?|delivers?|provides?|posts?|issues?|releases?)\\b)(?=.*\\b(?:q[1-4]|(?:fiscal[- ]+)?(?:first|second|third|fourth)[- ]quarter|(?:first|second|third|fourth)[- ]fiscal[- ]quarter|first[- ]half|half[- ]year|full[- ]year|fiscal[- ]year|fy\\s*\\d{2,4}|quarter[- ]ended|year[- ]ended|annual)\\b)(?=.*\\b(?:results?|earnings?|financial[- ]report|operating[- ]results)\\b)(?!.*\\b(?:to report|to release|to announce|reporting date|announces? date|conference call|webcast|investor day|investor alert)\\b).*$"
-                }
-              ]
-            }
-          },
-          "confirmed": false
+          "confirmed": true
         },
         {
           "event_id": "2026-08-27-iren",
@@ -1512,7 +1512,7 @@
               ]
             }
           },
-          "confirmed": false
+          "confirmed": true
         }
       ]
     }

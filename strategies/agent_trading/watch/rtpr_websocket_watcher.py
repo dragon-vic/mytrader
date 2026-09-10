@@ -78,7 +78,8 @@ class RtprWebSocketWatcher:
         self.session = session
         self.processor = processor
         self.pdf_attachments = NewsPdfAttachmentCollector(session, processor)
-        self.api_key = (api_key or os.environ.get("RTPR_API_KEY", "")).strip()
+        configured_key = os.environ.get("RTPR_API_KEY", "") if api_key is None else api_key
+        self.api_key = configured_key.strip()
         self.targets: dict[str, tuple[WatchTarget, str]] = {}
         self.seen_urls: set[str] = set()
         self.closed = False

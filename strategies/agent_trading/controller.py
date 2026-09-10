@@ -43,7 +43,7 @@ STRATEGY_ROOT = Path(__file__).resolve().parent
 RESOURCES_DIR = STRATEGY_ROOT / "resources"
 PROMPTS_DIR = RESOURCES_DIR / "prompts"
 SCHEMAS_DIR = RESOURCES_DIR / "schemas"
-SCHEDULE_PATH = RESOURCES_DIR / "schedules" / "2026-08.json"
+SCHEDULE_PATH = RESOURCES_DIR / "schedules" / "2026-09.json"
 MARKET_UNIVERSE_PATH = SCHEDULE_PATH.with_name(
     f"{SCHEDULE_PATH.stem}_market_universe.json",
 )
@@ -57,10 +57,10 @@ LIFECYCLE_POLL_SECONDS = 1.0
 # Codex 是 controller 的外部依赖，不从 NT 的 live_config.yaml 读取参数。
 RESEARCH_PROFILE = CodexProfile(
     model="gpt-5.6-sol",
-    reasoning_effort="xhigh",
+    reasoning_effort="high",
     subagent_threads=3,
-    subagent_model="gpt-5.6-terra",
-    subagent_reasoning_effort="high",
+    subagent_model="gpt-5.6-luna",
+    subagent_reasoning_effort="xhigh",
 )
 ANALYSIS_PROFILE = CodexProfile(
     model="gpt-5.6-sol",

@@ -5,8 +5,8 @@ strategy:
     config_path: strategies.agent_trading.agent_trading:AgentTradingConfig
     config:
       order_id_tag: AGENT
-      schedule_path: strategies/agent_trading/resources/schedules/2026-08.json
-      market_universe_path: strategies/agent_trading/resources/schedules/2026-08_market_universe.json
+      schedule_path: strategies/agent_trading/resources/schedules/2026-09.json
+      market_universe_path: strategies/agent_trading/resources/schedules/2026-09_market_universe.json
       data_client: BINANCE_USDT_FUTURES
       margin_usdt: 100
       leverage: 10

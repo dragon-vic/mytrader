@@ -85,6 +85,7 @@ class DisclosureWatcher:
         self.rtpr = RtprWebSocketWatcher(
             session=self.session,
             processor=processor,
+            api_key="",
         )
         self.rtpr.start()
 
