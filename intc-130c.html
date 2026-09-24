@@ -2,39 +2,73 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=yes">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>INTC 130C 3D P/L</title>
-<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <style>
-html,body{margin:0;padding:0;background:#fff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;color:#111}
-#top{padding:12px 14px 4px;font-size:14px;line-height:1.45}
-#chart{width:100vw;height:76vh;min-height:520px}
-.small{font-size:12px;color:#666}.k{font-weight:600}
-#err{display:none;padding:16px;color:#b00020}
+html,body{margin:0;padding:0;background:#fff;color:#111;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}
+#top{padding:12px 14px 8px;line-height:1.45}
+#top b{font-size:16px}
+#sub{font-size:12px;color:#666}
+#wrap{position:relative;width:100vw;height:72vh;min-height:520px}
+canvas{display:block;width:100%;height:100%;touch-action:none;background:#fff}
+#hint{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);font-size:11px;color:#666;background:rgba(255,255,255,.85);padding:5px 8px;border-radius:8px;border:1px solid #ddd}
+#fallback{padding:10px 14px 20px;font-size:12px;color:#444}
 </style>
 </head>
 <body>
 <div id="top">
-<div><span class="k">INTC 2026-10-16 $130 Call</span></div>
-<div>Spot $122.60 · Ask $5.45 · Break-even $135.45 · OI 45,792</div>
-<div class="small">Z 轴：每张合约理论 P/L；X：经过天数；Y：INTC 股价。模型固定 IV≈69.0%，未计点差、滑点与 IV 变化。</div>
+  <b>INTC 2026-10-16 $130 Call — 3D P/L</b><br>
+  Spot $122.60 · Ask $5.45 · Break-even $135.45 · OI 45,792
+  <div id="sub">X = 已经过天数 · Y = INTC 股价 · Z = 每张合约理论 P/L。固定 IV≈69.0%，未计点差、滑点和 IV 变化。</div>
 </div>
-<div id="err">图表库未加载。请检查网络后刷新。</div>
-<div id="chart"></div>
+<div id="wrap"><canvas id="c"></canvas><div id="hint">单指拖动旋转 · 双指缩放</div></div>
+<div id="fallback">如果你能看到这行文字但图没有出现，说明浏览器禁用了 Canvas/JavaScript；页面本身已正常加载。</div>
 <script>
 (function(){
+const c=document.getElementById('c'),ctx=c.getContext('2d');
 const S0=122.60,K=130,premium=5.45,r=0.045,iv=0.6902,D=22;
-function ncdf(x){const t=1/(1+0.2316419*Math.abs(x));const d=0.3989423*Math.exp(-x*x/2);let p=1-d*t*(0.319381530+t*(-0.356563782+t*(1.781477937+t*(-1.821255978+t*1.330274429))));return x>=0?p:1-p}
-function call(S,T){if(T<=0)return Math.max(S-K,0);const sq=Math.sqrt(T),d1=(Math.log(S/K)+(r+0.5*iv*iv)*T)/(iv*sq),d2=d1-iv*sq;return S*ncdf(d1)-K*Math.exp(-r*T)*ncdf(d2)}
-const x=[],y=[],z=[];
-for(let i=0;i<=60;i++)x.push(D*i/60);
-for(let j=0;j<=100;j++)y.push(90+80*j/100);
-for(let j=0;j<y.length;j++){const row=[];for(let i=0;i<x.length;i++){const T=Math.max((D-x[i])/365,0);row.push((call(y[j],T)-premium)*100)}z.push(row)}
-if(!window.Plotly){document.getElementById('err').style.display='block';return}
-const data=[{type:'surface',x:x,y:y,z:z,colorscale:'Viridis',colorbar:{title:'P/L $'},hovertemplate:'Days elapsed: %{x:.1f}<br>INTC: $%{y:.2f}<br>P/L: $%{z:.0f}<extra></extra>'}];
-const layout={margin:{l:0,r:0,b:0,t:15},autosize:true,scene:{xaxis:{title:'Time elapsed (days)'},yaxis:{title:'INTC price ($)'},zaxis:{title:'P/L per contract ($)'},camera:{eye:{x:1.35,y:1.35,z:1.05}}}};
-Plotly.newPlot('chart',data,layout,{responsive:true,displaylogo:false,scrollZoom:true});
-window.addEventListener('resize',()=>Plotly.Plots.resize('chart'));
+let W=0,H=0,dpr=1,yaw=-0.82,pitch=0.60,zoom=1;
+const sMin=90,sMax=170,zMin=-545,zMax=3600;
+function ncdf(x){const t=1/(1+0.2316419*Math.abs(x)),d=0.3989423*Math.exp(-x*x/2);let p=1-d*t*(0.319381530+t*(-0.356563782+t*(1.781477937+t*(-1.821255978+t*1.330274429))));return x>=0?p:1-p}
+function call(S,T){if(T<=0)return Math.max(S-K,0);const q=Math.sqrt(T),d1=(Math.log(S/K)+(r+.5*iv*iv)*T)/(iv*q),d2=d1-iv*q;return S*ncdf(d1)-K*Math.exp(-r*T)*ncdf(d2)}
+function pnl(S,d){return (call(S,Math.max((D-d)/365,0))-premium)*100}
+function resize(){dpr=Math.min(devicePixelRatio||1,2);W=innerWidth;H=document.getElementById('wrap').clientHeight;c.width=W*dpr;c.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);draw()}
+function project(x,y,z){
+ let X=(x-D/2)/(D/2),Y=(y-(sMin+sMax)/2)/((sMax-sMin)/2),Z=((z-(zMin+zMax)/2)/((zMax-zMin)/2))*1.18;
+ const cy=Math.cos(yaw),sy=Math.sin(yaw);let x1=X*cy-Y*sy,y1=X*sy+Y*cy;
+ const cp=Math.cos(pitch),sp=Math.sin(pitch);let y2=y1*cp-Z*sp,z2=y1*sp+Z*cp;
+ const sc=Math.min(W,H)*.30*zoom;return [W*.52+x1*sc,H*.57-y2*sc,z2]
+}
+function color(v){const t=Math.max(0,Math.min(1,(v-zMin)/(zMax-zMin)));return 'hsl('+(250-215*t)+',72%,'+(48+8*t)+'%)'}
+function line(a,b,col,w){const p=project(...a),q=project(...b);ctx.beginPath();ctx.moveTo(p[0],p[1]);ctx.lineTo(q[0],q[1]);ctx.strokeStyle=col;ctx.lineWidth=w;ctx.stroke()}
+function axes(){
+ ctx.font='11px -apple-system,BlinkMacSystemFont,"Segoe UI",Arial';ctx.fillStyle='#333';
+ line([0,sMin,zMin],[D,sMin,zMin],'#555',1.2);line([0,sMin,zMin],[0,sMax,zMin],'#555',1.2);line([0,sMin,zMin],[0,sMin,zMax],'#555',1.2);
+ for(let d=0;d<=20;d+=5){line([d,sMin,zMin],[d,sMax,zMin],'#e6e6e6',.6);let p=project(d,sMin,zMin);ctx.fillText(String(d),p[0]-6,p[1]+14)}
+ for(let s=90;s<=170;s+=20){line([0,s,zMin],[D,s,zMin],'#e6e6e6',.6);let p=project(0,s,zMin);ctx.fillText('$'+s,p[0]-30,p[1]+4)}
+ for(let z=-500;z<=3500;z+=1000){line([0,sMin,z],[D,sMin,z],'#ededed',.6);let p=project(0,sMin,z);ctx.fillText('$'+z,p[0]-42,p[1]+4)}
+ let p=project(D,sMin,zMin);ctx.fillText('Days',p[0]+5,p[1]+4);p=project(0,sMax,zMin);ctx.fillText('INTC',p[0]-6,p[1]-8);p=project(0,sMin,zMax);ctx.fillText('P/L',p[0]-8,p[1]-8)
+}
+function draw(){
+ ctx.clearRect(0,0,W,H);ctx.fillStyle='#fff';ctx.fillRect(0,0,W,H);axes();
+ const nx=34,ny=46,cells=[];
+ for(let i=0;i<nx-1;i++){const d0=D*i/(nx-1),d1=D*(i+1)/(nx-1);
+  for(let j=0;j<ny-1;j++){const s0=sMin+(sMax-sMin)*j/(ny-1),s1=sMin+(sMax-sMin)*(j+1)/(ny-1);
+   const a=pnl(s0,d0),b=pnl(s0,d1),cc=pnl(s1,d1),dd=pnl(s1,d0);
+   const p0=project(d0,s0,a),p1=project(d1,s0,b),p2=project(d1,s1,cc),p3=project(d0,s1,dd);
+   cells.push({p:[p0,p1,p2,p3],depth:(p0[2]+p1[2]+p2[2]+p3[2])/4,v:(a+b+cc+dd)/4});
+  }}
+ cells.sort((a,b)=>a.depth-b.depth);
+ for(const e of cells){ctx.beginPath();ctx.moveTo(e.p[0][0],e.p[0][1]);for(let k=1;k<4;k++)ctx.lineTo(e.p[k][0],e.p[k][1]);ctx.closePath();ctx.fillStyle=color(e.v);ctx.fill();ctx.strokeStyle='rgba(255,255,255,.18)';ctx.lineWidth=.3;ctx.stroke()}
+}
+let drag=false,lx=0,ly=0,dist=null;
+c.addEventListener('pointerdown',e=>{drag=true;lx=e.clientX;ly=e.clientY;c.setPointerCapture(e.pointerId)});
+c.addEventListener('pointermove',e=>{if(!drag)return;yaw+=(e.clientX-lx)*.009;pitch=Math.max(-1.2,Math.min(1.2,pitch+(e.clientY-ly)*.007));lx=e.clientX;ly=e.clientY;draw()});
+c.addEventListener('pointerup',()=>drag=false);c.addEventListener('pointercancel',()=>drag=false);
+c.addEventListener('touchstart',e=>{if(e.touches.length===2){const a=e.touches[0],b=e.touches[1];dist=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY)}},{passive:false});
+c.addEventListener('touchmove',e=>{if(e.touches.length===2){e.preventDefault();const a=e.touches[0],b=e.touches[1],nd=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);if(dist){zoom=Math.max(.5,Math.min(2.5,zoom*nd/dist));draw()}dist=nd}},{passive:false});
+c.addEventListener('touchend',()=>dist=null);
+addEventListener('resize',resize);resize();
 })();
 </script>
 </body>
