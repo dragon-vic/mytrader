@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=yes">
+<title>INTC 130C 3D P/L</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+html,body{margin:0;padding:0;background:#fff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;color:#111}
+#top{padding:12px 14px 4px;font-size:14px;line-height:1.45}
+#chart{width:100vw;height:76vh;min-height:520px}
+.small{font-size:12px;color:#666}.k{font-weight:600}
+#err{display:none;padding:16px;color:#b00020}
+</style>
+</head>
+<body>
+<div id="top">
+<div><span class="k">INTC 2026-10-16 $130 Call</span></div>
+<div>Spot $122.60 · Ask $5.45 · Break-even $135.45 · OI 45,792</div>
+<div class="small">Z 轴：每张合约理论 P/L；X：经过天数；Y：INTC 股价。模型固定 IV≈69.0%，未计点差、滑点与 IV 变化。</div>
+</div>
+<div id="err">图表库未加载。请检查网络后刷新。</div>
+<div id="chart"></div>
+<script>
+(function(){
+const S0=122.60,K=130,premium=5.45,r=0.045,iv=0.6902,D=22;
+function ncdf(x){const t=1/(1+0.2316419*Math.abs(x));const d=0.3989423*Math.exp(-x*x/2);let p=1-d*t*(0.319381530+t*(-0.356563782+t*(1.781477937+t*(-1.821255978+t*1.330274429))));return x>=0?p:1-p}
+function call(S,T){if(T<=0)return Math.max(S-K,0);const sq=Math.sqrt(T),d1=(Math.log(S/K)+(r+0.5*iv*iv)*T)/(iv*sq),d2=d1-iv*sq;return S*ncdf(d1)-K*Math.exp(-r*T)*ncdf(d2)}
+const x=[],y=[],z=[];
+for(let i=0;i<=60;i++)x.push(D*i/60);
+for(let j=0;j<=100;j++)y.push(90+80*j/100);
+for(let j=0;j<y.length;j++){const row=[];for(let i=0;i<x.length;i++){const T=Math.max((D-x[i])/365,0);row.push((call(y[j],T)-premium)*100)}z.push(row)}
+if(!window.Plotly){document.getElementById('err').style.display='block';return}
+const data=[{type:'surface',x:x,y:y,z:z,colorscale:'Viridis',colorbar:{title:'P/L $'},hovertemplate:'Days elapsed: %{x:.1f}<br>INTC: $%{y:.2f}<br>P/L: $%{z:.0f}<extra></extra>'}];
+const layout={margin:{l:0,r:0,b:0,t:15},autosize:true,scene:{xaxis:{title:'Time elapsed (days)'},yaxis:{title:'INTC price ($)'},zaxis:{title:'P/L per contract ($)'},camera:{eye:{x:1.35,y:1.35,z:1.05}}}};
+Plotly.newPlot('chart',data,layout,{responsive:true,displaylogo:false,scrollZoom:true});
+window.addEventListener('resize',()=>Plotly.Plots.resize('chart'));
+})();
+</script>
+</body>
+</html>
