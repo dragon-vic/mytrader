@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>INTC Call Visual</title>
+<style>
+:root{--bg:#f4f6f8;--card:#fff;--ink:#111318;--muted:#737983;--line:#e6e9ee;--blue:#2f6fed;--orange:#f59e0b;--red:#df4b4b;--green:#199a6b;--purple:#7657d5}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Arial,sans-serif;-webkit-font-smoothing:antialiased}
+.wrap{max-width:720px;margin:0 auto;padding-bottom:28px}.hero{background:linear-gradient(160deg,#111827,#1f2937);color:#fff;padding:20px 16px 17px;border-radius:0 0 22px 22px}
+.kicker{font-size:10px;letter-spacing:.08em;color:#aab4c3}.title{font-size:24px;line-height:1.12;font-weight:800;margin:5px 0}.sub{font-size:11px;color:#cbd5e1;line-height:1.45}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:14px}
+.stat{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.08);padding:9px;border-radius:12px}.stat b{display:block;font-size:16px}.stat span{font-size:8.5px;color:#cbd5e1}
+main{padding:11px}.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:13px;margin:10px 0;box-shadow:0 2px 8px rgba(15,23,42,.035)}
+h2{font-size:16px;margin:0 0 5px}p{font-size:12.5px;line-height:1.52;color:#394150;margin:6px 0}.mini{font-size:10px;color:var(--muted)}.callout{padding:10px 11px;border-radius:12px;background:#f7f9fc;margin-top:8px}
+.callout b{color:#111318}.levels{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:10px}.level{border:1px solid var(--line);border-radius:12px;padding:9px;background:#fff}.level b{font-size:14px;display:block}.level span{font-size:9px;color:var(--muted)}
+canvas{width:100%;height:240px;display:block}.legend{display:flex;gap:12px;flex-wrap:wrap;font-size:9px;color:#5f6670;margin:7px 0 4px}.dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:4px}
+.pill{display:inline-block;padding:3px 7px;border-radius:999px;font-size:9px;font-weight:700}.pblue{background:#e8f0ff;color:#2458c5}.porange{background:#fff2da;color:#a96000}.pgray{background:#eef0f3;color:#59616d}
+.tableWrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px}table{border-collapse:collapse;width:100%;min-width:490px;font-size:10.5px}th,td{padding:7px 8px;border-bottom:1px solid #f0f2f5;text-align:right;white-space:nowrap}th{color:#6b7280;background:#fafbfc;font-weight:600}th:first-child,td:first-child{text-align:left;position:sticky;left:0;background:white}
+.note{border-left:3px solid var(--blue);padding-left:9px}.warn{border-left-color:var(--orange)}.foot{font-size:9.5px;color:#7b828d;line-height:1.5}
+@media(min-width:620px){main{padding:16px}.levels{grid-template-columns:repeat(4,1fr)}}
+</style></head>
+<body><div class="wrap">
+<header class="hero">
+<div class="kicker">INTC · MOBILE OPTION VIEW</div>
+<div class="title">Call 现在该不该追？</div>
+<div class="sub">IBKR REALTIME / actual bid-ask · 2026-09-24 intraday</div>
+<div class="grid3">
+<div class="stat"><b>$125.32</b><span>INTC last</span></div>
+<div class="stat"><b>+15.4%</b><span>vs Sep 18 close</span></div>
+<div class="stat"><b>65.9%</b><span>underlying IV now</span></div>
+</div></header>
+<main>
+<section class="card">
+<h2>先看结论</h2>
+<p><b>我不会在 $125 附近直接扫 Dec 18 130C 的 Ask。</b>它现在 $15.25 / $15.50。更舒服的买点是 <b>$14 以下</b>；如果股价回到 $120–123，同时 IV 回到 65–67%，130C 理论价大约落在 <b>$13–14</b>。</p>
+<div class="levels">
+<div class="level"><b>$13–14</b><span>Dec18 130C 理想区</span></div>
+<div class="level"><b>$9.5–10.5</b><span>Dec18 140C 理想区</span></div>
+<div class="level"><b>$120–122</b><span>股票较强支撑区</span></div>
+<div class="level"><b>$126–127</b><span>短线突破确认区</span></div>
+</div>
+</section>
+
+<section class="card">
+<h2>INTC 近三个月：最近几天拉得太快</h2>
+<canvas id="price"></canvas>
+<div class="legend">
+<span><i class="dot" style="background:var(--blue)"></i>INTC close</span>
+<span><i class="dot" style="background:var(--green)"></i>$120–122 支撑</span>
+<span><i class="dot" style="background:var(--orange)"></i>$126–127 突破区</span>
+</div>
+<p class="mini">Sep 18 $108.60 → Sep 21 $121.78 → Sep 24 $125.24。短期方向很强，但追 Call 同时承担股价回撤和 IV 回落。</p>
+</section>
+
+<section class="card">
+<h2>Dec 18 Call：实际 Ask 曲线</h2>
+<canvas id="ask"></canvas>
+<p class="mini">全部是 IBKR 实际 Ask。130C / 140C 是当前我最关注的两档；150C 以后更依赖“年底大幅上涨”而不是一般上涨。</p>
+</section>
+
+<section class="card">
+<h2>130C：期限越长，不一定越贵得离谱</h2>
+<canvas id="term"></canvas>
+<p class="mini">Oct 30 明显比相邻期限贵。对纯买方而言，Nov 20 / Dec 18 跨过事件窗口的时间成本反而更合理。</p>
+</section>
+
+<section class="card">
+<h2>为什么我不追现在的 130C</h2>
+<div class="callout note">
+<p><b>Dec18 130C 当前 $15.25 / $15.50。</b>按当前期限，Vega 约 $24/张/1 vol point，Theta 约 -$10/张/天。若股价横盘、IV 从约 70% 回到 65%，理论上光 IV 收缩就可能损失约 $120/张。</p>
+</div>
+<div class="callout warn">
+<p><b>因此我更喜欢两种买法：</b>一是等 INTC 回踩 120–123、130C 回到 $13–14；二是等股票直接有效突破 127–130，再接受稍贵一点的 Call，换趋势确认。</p>
+</div>
+</section>
+
+<section class="card">
+<h2>真实 Dec 18 报价</h2>
+<div class="tableWrap"><table>
+<thead><tr><th>Strike</th><th>Bid</th><th>Ask</th><th>OI</th><th>定位</th></tr></thead>
+<tbody>
+<tr><td>120C</td><td>$19.55</td><td>$19.80</td><td>10.1k</td><td><span class="pill pgray">偏稳</span></td></tr>
+<tr><td>125C</td><td>$17.30</td><td>$17.50</td><td>8.8k</td><td><span class="pill pgray">近 ATM</span></td></tr>
+<tr><td><b>130C</b></td><td><b>$15.25</b></td><td><b>$15.50</b></td><td><b>11.7k</b></td><td><span class="pill pblue">首选</span></td></tr>
+<tr><td><b>140C</b></td><td><b>$11.90</b></td><td><b>$12.15</b></td><td><b>12.0k</b></td><td><span class="pill porange">进取</span></td></tr>
+<tr><td>150C</td><td>$9.00</td><td>$9.15</td><td>11.7k</td><td><span class="pill pgray">高凸性</span></td></tr>
+<tr><td>160C</td><td>$7.05</td><td>$7.25</td><td>6.2k</td><td><span class="pill pgray">彩票化</span></td></tr>
+</tbody></table></div>
+</section>
+
+<section class="card foot">Price / bid / ask / OI：IBKR REALTIME 快照。130C 期限 IV 为基于实际 mid 报价反推的近似值；用于比较相对期限结构，不把它当作交易所原始字段。</section>
+</main></div>
+
+<script>
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function setup(id,h=240){const c=document.getElementById(id),d=Math.min(devicePixelRatio||1,2),w=c.clientWidth;c.width=w*d;c.height=h*d;const x=c.getContext('2d');x.setTransform(d,0,0,d,0,0);return {c,x,w,h}}
+function grid(x,L,R,T,B,w,h,min,max,fmt){x.font='9px -apple-system';x.fillStyle='#777';x.textAlign='right';x.textBaseline='middle';for(let i=0;i<5;i++){const v=min+(max-min)*i/4,y=h-B-(v-min)/(max-min)*(h-T-B);x.strokeStyle='#e9ecf0';x.beginPath();x.moveTo(L,y);x.lineTo(w-R,y);x.stroke();x.fillText(fmt(v),L-5,y)}}
+const dates=["6/29","6/30","7/1","7/2","7/6","7/7","7/8","7/9","7/10","7/13","7/14","7/15","7/16","7/17","7/20","7/21","7/22","7/23","7/24","7/27","7/28","7/29","7/30","7/31","8/3","8/4","8/5","8/6","8/7","8/10","8/11","8/12","8/13","8/14","8/17","8/18","8/19","8/20","8/21","8/24","8/25","8/26","8/27","8/28","8/31","9/1","9/2","9/3","9/4","9/8","9/9","9/10","9/11","9/14","9/15","9/16","9/17","9/18","9/21","9/22","9/23","9/24"];
+const closes=[131.72,139.63,127.02,120.35,122.2,110.39,110.24,112.54,109.84,103.12,107.76,102.99,96.98,95.04,97.06,105.45,102.62,100.23,92.32,91.67,86.3,81.88,91.13,90.2,91,100.86,101.06,99.81,101.65,97.52,97.71,100.95,104.56,102.5,103.49,96.69,92.8,92.13,90.07,87.26,87.48,88.24,92.09,89.47,89.51,88.97,90.05,91.67,95.8,104.47,106.24,100.32,102.94,97.19,97.14,101.05,108.8,108.6,121.78,123.86,122.6,125.24];
+
+function drawPrice(){
+ const {x,w,h}=setup('price');const L=38,R=8,T=10,B=24,min=78,max=143;grid(x,L,R,T,B,w,h,min,max,v=>'$'+v.toFixed(0));
+ const X=i=>L+i/(closes.length-1)*(w-L-R),Y=v=>h-B-(v-min)/(max-min)*(h-T-B);
+ function band(a,b,col){x.fillStyle=col;x.globalAlpha=.11;x.fillRect(L,Y(b),w-L-R,Y(a)-Y(b));x.globalAlpha=1}
+ band(120,122,css('--green'));band(126,127,css('--orange'));
+ x.strokeStyle=css('--blue');x.lineWidth=2.2;x.beginPath();closes.forEach((v,i)=>i?x.lineTo(X(i),Y(v)):x.moveTo(X(i),Y(v)));x.stroke();
+ [0,22,44,57,61].forEach(i=>{x.fillStyle='#737983';x.font='9px -apple-system';x.textAlign='center';x.fillText(dates[i],X(i),h-8)});
+ x.fillStyle=css('--blue');x.beginPath();x.arc(X(closes.length-1),Y(closes.at(-1)),3.5,0,Math.PI*2);x.fill();
+ x.fillStyle='#111';x.font='10px -apple-system';x.textAlign='right';x.fillText('$125.24',X(closes.length-1)-4,Y(closes.at(-1))-8)
+}
+const asks=[[120,19.8],[125,17.5],[130,15.5],[135,13.7],[140,12.15],[145,10.35],[150,9.15],[155,8.2],[160,7.25],[165,6.45],[170,5.75]];
+function drawAsk(){
+ const {x,w,h}=setup('ask');const L=38,R=8,T=10,B=25,min=5,max=21;grid(x,L,R,T,B,w,h,min,max,v=>'$'+v.toFixed(0));
+ const X=k=>L+(k-120)/50*(w-L-R),Y=v=>h-B-(v-min)/(max-min)*(h-T-B);
+ x.strokeStyle=css('--blue');x.lineWidth=2.5;x.beginPath();asks.forEach((p,i)=>i?x.lineTo(X(p[0]),Y(p[1])):x.moveTo(X(p[0]),Y(p[1])));x.stroke();
+ asks.forEach(p=>{x.fillStyle=[130,140].includes(p[0])?(p[0]===130?css('--blue'):css('--orange')):'#aab1bb';x.beginPath();x.arc(X(p[0]),Y(p[1]),[130,140].includes(p[0])?4:2.5,0,Math.PI*2);x.fill()});
+ [120,130,140,150,160,170].forEach(k=>{x.fillStyle='#737983';x.font='9px -apple-system';x.textAlign='center';x.fillText(k+'C',X(k),h-8)});
+ [[130,15.5],[140,12.15]].forEach(p=>{x.fillStyle='#111';x.font='10px -apple-system';x.textAlign='center';x.fillText('$'+p[1].toFixed(2),X(p[0]),Y(p[1])-10)})
+}
+const term=[["10/16",6.20,66.9],["10/30",10.00,75.3],["11/20",12.45,72.6],["12/18",15.50,69.9]];
+function drawTerm(){
+ const {x,w,h}=setup('term');const L=38,R=32,T=12,B=28,min=64,max=78;grid(x,L,R,T,B,w,h,min,max,v=>v.toFixed(0)+'%');
+ const X=i=>L+i/(term.length-1)*(w-L-R),Y=v=>h-B-(v-min)/(max-min)*(h-T-B);
+ x.strokeStyle=css('--purple');x.lineWidth=2.4;x.beginPath();term.forEach((p,i)=>i?x.lineTo(X(i),Y(p[2])):x.moveTo(X(i),Y(p[2])));x.stroke();
+ term.forEach((p,i)=>{x.fillStyle=i===1?css('--red'):css('--purple');x.beginPath();x.arc(X(i),Y(p[2]),i===1?4.5:3.3,0,Math.PI*2);x.fill();x.fillStyle='#111';x.font='9px -apple-system';x.textAlign='center';x.fillText(p[0],X(i),h-10);x.fillText(p[2].toFixed(1)+'%',X(i),Y(p[2])-10);x.fillStyle='#737983';x.fillText('$'+p[1].toFixed(2),X(i),Y(p[2])+14)})
+}
+function redraw(){drawPrice();drawAsk();drawTerm()}redraw();addEventListener('resize',redraw);
+</script>
+</body></html>
