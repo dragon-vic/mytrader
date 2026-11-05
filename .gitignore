@@ -21,4 +21,7 @@ strategies/*/*_snapshot.json
 .env
 .venv/
 .ipynb_checkpoints/
+output/
+strategies/*/runtime/
+tools/.telegram_codex_session
 strategies/max_funding/data/

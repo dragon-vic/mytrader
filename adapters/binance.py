@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from decimal import Decimal
 from typing import Any
 
 from dotenv import load_dotenv
@@ -34,6 +35,20 @@ BINANCE_ENVS = {
         "api_secret": "BINANCE_FUTURES_API_SECRET",
     },
 }
+
+
+# NT通用数量字段使用LOT_SIZE；市价单额外检查MARKET_LOT_SIZE。
+def market_order_limits(instrument) -> tuple[float, float]:
+    filters = {item['filterType']: item for item in instrument.info['filters']}
+    market = filters['MARKET_LOT_SIZE']
+    step = Decimal(market['stepSize'])
+    if step and step != instrument.size_increment.as_decimal():
+        raise ValueError(f'{instrument.id}: market and limit quantity increments differ')
+    minimum = max(float(instrument.min_quantity), float(market['minQty']))
+    maximum = min(float(instrument.max_quantity), float(market['maxQty']))
+    if not 0 < minimum <= maximum:
+        raise ValueError(f'{instrument.id}: invalid market quantity bounds')
+    return minimum, maximum
 
 
 # 根据运行模式推导 Binance 环境。

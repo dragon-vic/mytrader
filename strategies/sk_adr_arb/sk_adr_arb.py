@@ -22,6 +22,9 @@ from nautilus_trader.model.events import (
 from nautilus_trader.model.identifiers import InstrumentId
 from nautilus_trader.trading.strategy import Strategy
 
+from utils.constants import NODE_STOP_TOPIC
+from utils.live_control import NodeStopRequest
+
 ADR_COMMON_SHARE_RATIO = Decimal("0.1")
 NANOSECONDS_PER_SECOND = 1_000_000_000
 ROOT = Path(__file__).resolve().parents[2]
@@ -89,6 +92,7 @@ class SkAdrArbConfig(StrategyConfig, frozen=True):
     price_check_interval_sec: Decimal
     max_mark_age_sec: Decimal
     telegram_notify_step: Decimal
+    exit_premium: Decimal
 
 
 class SkAdrArbStrategy(Strategy):
@@ -111,6 +115,9 @@ class SkAdrArbStrategy(Strategy):
         )
         self.max_mark_age_ns = int(Decimal(str(config.max_mark_age_sec)) * NANOSECONDS_PER_SECOND)
         self.telegram_notify_step = Decimal(str(config.telegram_notify_step))
+        self.exit_premium = Decimal(str(config.exit_premium))
+        if not Decimal(0) <= self.exit_premium < Decimal(self.first_add_position) / 100:
+            raise ValueError("exit_premium must be below the first add threshold")
         notionals = (
             self.leverage,
             self.standard_stage_notional,
@@ -146,6 +153,12 @@ class SkAdrArbStrategy(Strategy):
         self.round_count = 0
         self.telegram: TelegramSender | None = None
         self.last_notify_premium: Decimal | None = None
+        self.exit_requested = False
+        self.exit_orders: list = []
+        self.stop_requested = False
+        self.flat_checks = 0
+        self.next_exit_attempt_ns = 0
+        self.next_add_attempt_ns = 0
 
     def on_start(self) -> None:
         self._check_startup()
@@ -163,11 +176,11 @@ class SkAdrArbStrategy(Strategy):
             f"large_add_position={self.large_add_position} max_add_position={self.max_add_position} "
             f"standard_stage_notional={self.standard_stage_notional} "
             f"large_stage_notional={self.large_stage_notional} "
-            f"order_notional={self.order_notional}",
+            f"order_notional={self.order_notional} exit_premium={self.exit_premium:.2%}",
         )
 
     def on_stop(self) -> None:
-        # 停止策略时只退出，不自动平仓；现有仓位由人工处理。
+        # 人工停止不自动平仓；阈值退出路径在两腿归零后才请求停止 node。
         if self.alert_name is not None:
             self.clock.cancel_timer(self.alert_name)
             self.alert_name = None
@@ -203,8 +216,9 @@ class SkAdrArbStrategy(Strategy):
             self.stage_round = 0
             self.stage_rounds = 0
             self.log.warning(f"add_stage_completed add_position={self.add_position}")
-        # 任意两组订单之间至少等待五秒，包括跨档位连续补仓。
-        self._schedule_attempt(self.retry_delay_ns)
+        # 加仓仍间隔五秒，但等待期间继续检查退出阈值。
+        self.next_add_attempt_ns = self.clock.timestamp_ns() + self.retry_delay_ns
+        self._schedule_attempt(self.price_check_interval_ns)
 
     def on_order_rejected(self, event: OrderRejected) -> None:
         self._handle_order_failure(str(event.client_order_id), "rejected")
@@ -263,7 +277,10 @@ class SkAdrArbStrategy(Strategy):
             raise RuntimeError(f"startup_wrong_position_sides sk_qty={sk_qty} adr_qty={adr_qty}")
 
     def _try_submit_pair(self) -> None:
-        if self.halted or not self.ready or self.pending is not None or not self._marks_are_current():
+        if self.exit_requested:
+            self._try_exit()
+            return
+        if not self._marks_are_current():
             return
         sk_mark = self.marks[self.sk_id]
         adr_mark = self.marks[self.adr_id]
@@ -275,6 +292,23 @@ class SkAdrArbStrategy(Strategy):
         premium = adr_price / ADR_COMMON_SHARE_RATIO / sk_price - Decimal(1)
         self._notify_market(sk_price, adr_price, premium)
 
+        # 退出优先于在途加仓、加仓等待和暂停状态；触发后不可恢复加仓。
+        if premium <= self.exit_premium:
+            self.exit_requested = True
+            self.log.warning(
+                f"exit_triggered premium={premium:.4%} threshold={self.exit_premium:.2%}",
+            )
+            for instrument_id in self.instrument_ids:
+                self.cancel_all_orders(instrument_id)
+            self._try_exit()
+            return
+        if (
+            self.halted
+            or not self.ready
+            or self.pending is not None
+            or self.clock.timestamp_ns() < self.next_add_attempt_ns
+        ):
+            return
         if not self._prepare_add_stage(premium):
             return
 
@@ -321,6 +355,66 @@ class SkAdrArbStrategy(Strategy):
                 break
             self.submit_order(order)
 
+    def _try_exit(self) -> None:
+        if self.stop_requested:
+            return
+        # 等待上一批及正在撤销的加仓订单进入终态，避免重复平仓。
+        if any(not order.is_closed for order in self.exit_orders):
+            return
+        for instrument_id in self.instrument_ids:
+            if (
+                self.cache.orders_open(instrument_id=instrument_id)
+                or self.cache.orders_inflight(instrument_id=instrument_id)
+            ):
+                return
+        positions = [
+            position
+            for instrument_id in self.instrument_ids
+            for position in self.cache.positions_open(instrument_id=instrument_id)
+            if position.signed_decimal_qty() != 0
+        ]
+        if not positions:
+            # 成交回调之后再核对两次缓存，确认两腿均无仓位、无在途订单。
+            self.flat_checks += 1
+            if self.flat_checks >= 2:
+                self.stop_requested = True
+                self.log.warning("exit_completed both_legs_flat; stopping node")
+                self.msgbus.publish(
+                    NODE_STOP_TOPIC,
+                    NodeStopRequest(source="sk_adr_arb", reason="exit_premium_both_legs_flat"),
+                )
+            return
+        self.flat_checks = 0
+        if self.clock.timestamp_ns() < self.next_exit_attempt_ns:
+            return
+
+        # 同一事件循环内提交两腿；按缓存 position_id 逐笔关闭，兼容重启对账拆仓。
+        orders = []
+        for position in positions:
+            signed_qty = position.signed_decimal_qty()
+            instrument = self.cache.instrument(position.instrument_id)
+            quantity = instrument.make_qty(abs(signed_qty))
+            if quantity.as_decimal() != abs(signed_qty):
+                self.log.error(f"exit_quantity_not_exact position={position.id}")
+                self.next_exit_attempt_ns = self.clock.timestamp_ns() + self.retry_delay_ns
+                return
+            order = self.order_factory.market(
+                instrument_id=position.instrument_id,
+                order_side=OrderSide.SELL if signed_qty > 0 else OrderSide.BUY,
+                quantity=quantity,
+                time_in_force=TimeInForce.GTC,
+                reduce_only=True,
+            )
+            orders.append((order, position.id))
+        self.exit_orders = [order for order, _ in orders]
+        self.next_exit_attempt_ns = self.clock.timestamp_ns() + self.retry_delay_ns
+        for order, position_id in orders:
+            self.log.warning(
+                f"exit_submit instrument={order.instrument_id} qty={order.quantity} "
+                f"position={position_id} reduce_only=True",
+            )
+            self.submit_order(order, position_id=position_id)
+
     def _prepare_add_stage(self, premium: Decimal) -> bool:
         if self.active_add_position is not None:
             return True
@@ -357,8 +451,10 @@ class SkAdrArbStrategy(Strategy):
 
     # 用单次 alert 控制下一次价格检查，避免按行情事件运行策略逻辑。
     def _schedule_attempt(self, delay_ns: int) -> None:
-        if self.halted:
+        if self.stop_requested:
             return
+        if self.alert_name is not None:
+            self.clock.cancel_timer(self.alert_name)
         self.alert_seq += 1
         self.alert_name = f"sk_adr_price_check_{self.alert_seq}"
         self.clock.set_time_alert_ns(
@@ -368,20 +464,22 @@ class SkAdrArbStrategy(Strategy):
             allow_past=True,
         )
 
-    # alert 到点后只从 NT cache 读取最新标记价格；未触发交易则一秒后再检查。
+    # 每秒监控退出条件，包括在途订单、加仓等待或已暂停加仓时。
     def _on_attempt_alert(self) -> None:
         self.alert_name = None
-        marks = {
-            instrument_id: self.cache.mark_price(instrument_id)
-            for instrument_id in self.instrument_ids
-        }
-        if any(mark is None for mark in marks.values()):
-            self._schedule_attempt(self.price_check_interval_ns)
-            return
-        self.marks = marks
-        self.ready = True
-        self._try_submit_pair()
-        if self.ready and self.pending is None and not self.halted:
+        if self.exit_requested:
+            # 触发后不再依赖行情；断流或溢价回升都不能中断平仓。
+            self._try_exit()
+        else:
+            marks = {
+                instrument_id: self.cache.mark_price(instrument_id)
+                for instrument_id in self.instrument_ids
+            }
+            if all(mark is not None for mark in marks.values()):
+                self.marks = marks
+                self.ready = True
+                self._try_submit_pair()
+        if not self.stop_requested:
             self._schedule_attempt(self.price_check_interval_ns)
 
     def _marks_are_current(self) -> bool:
@@ -457,17 +555,24 @@ class SkAdrArbStrategy(Strategy):
         return minimum is None or instrument.notional_value(quantity, price) >= minimum
 
     def _handle_order_failure(self, order_id: str, status: str) -> None:
+        if self.exit_requested:
+            self.log.warning(
+                f"exit_order_{status} order={order_id}; recheck remaining positions before retry",
+            )
+            self.next_exit_attempt_ns = self.clock.timestamp_ns() + self.retry_delay_ns
+            return
         if self.halted or self.pending is None or order_id not in self.pending:
             return
         self._pause(f"pair_order_{status} order={order_id}")
         for instrument_id in self.instrument_ids:
             self.cancel_all_orders(instrument_id)
 
-    # 订单异常时只暂停本策略并保留 node，等待人工处理现有敞口。
+    # 订单异常暂停加仓，但保持退出阈值监控。
     def _pause(self, reason: str) -> None:
         self.halted = True
         self.ready = False
         if self.alert_name is not None:
             self.clock.cancel_timer(self.alert_name)
             self.alert_name = None
-        self.log.error(f"strategy_paused reason={reason}; manual intervention required")
+        self.log.error(f"strategy_paused reason={reason}; exit monitoring remains active")
+        self._schedule_attempt(self.price_check_interval_ns)

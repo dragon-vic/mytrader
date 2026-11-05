@@ -1,0 +1,104 @@
+strategy:
+  etf_arb:
+    enabled: true
+    strategy_path: strategies.etf_arb.etf_arb:EtfArbStrategy
+    config_path: strategies.etf_arb.config:EtfArbConfig
+    artifacts:
+      audit_path: etf_events.jsonl
+    config:
+      order_id_tag: ETFARB
+      use_uuid_client_order_ids: true
+      oms_type: NETTING
+      manage_stop: true
+      market_exit_interval_ms: 100
+      market_exit_max_attempts: 300
+      market_exit_reduce_only: true
+      pairs:
+        - {name: SNXX, etf: SNXXUSDT-PERP.BINANCE, underlying: SNDKUSDT-PERP.BINANCE, multiple: 2}
+        - {name: INTW, etf: INTWUSDT-PERP.BINANCE, underlying: INTCUSDT-PERP.BINANCE, multiple: 2}
+        - {name: MVLL, etf: MVLLUSDT-PERP.BINANCE, underlying: MRVLUSDT-PERP.BINANCE, multiple: 2}
+        - {name: MUU, etf: MUUUSDT-PERP.BINANCE, underlying: MUUSDT-PERP.BINANCE, multiple: 2}
+        - {name: SKUU, etf: SKUUUSDT-PERP.BINANCE, underlying: SKHYUSDT-PERP.BINANCE, multiple: 2}
+        - {name: SKDD, etf: SKDDUSDT-PERP.BINANCE, underlying: SKHYUSDT-PERP.BINANCE, multiple: -2}
+        - {name: KORU, etf: KORUUSDT-PERP.BINANCE, underlying: EWYUSDT-PERP.BINANCE, multiple: 3}
+      external_order_claims:
+        - SNXXUSDT-PERP.BINANCE
+        - SNDKUSDT-PERP.BINANCE
+        - INTWUSDT-PERP.BINANCE
+        - INTCUSDT-PERP.BINANCE
+        - MVLLUSDT-PERP.BINANCE
+        - MRVLUSDT-PERP.BINANCE
+        - MUUUSDT-PERP.BINANCE
+        - MUUSDT-PERP.BINANCE
+        - SKUUUSDT-PERP.BINANCE
+        - SKDDUSDT-PERP.BINANCE
+        - SKHYUSDT-PERP.BINANCE
+        - KORUUSDT-PERP.BINANCE
+        - EWYUSDT-PERP.BINANCE
+      capital: "7000"
+      gross_leverage: "5"
+      entry_gap: 0.02
+      confirmation_ms: 100
+      batches: 10
+      exit_gap: 0.002
+      exit_hour_step: 0.001
+      exit_gap_cap: 0.005
+      open_block_minutes: 5
+      close_block_minutes: 30
+      close_flatten_minutes: 5
+      funding_block_minutes: 5
+      calibration_minutes: 5
+      calibration_cap: 0.003
+      calibration_iqr: 0.0015
+      calibration_history_range: 0.002
+      calibration_history_distance: 0.0015
+      calibration_history_weight: 0.75
+      history_days: 28
+      anchor_window_minutes: 30
+      anchor_basis_days: 5
+      anchor_basis_cap: 0.01
+      anchor_reference_cap: 0.01
+      reference_path: strategies/etf_arb/runtime/close_references.json
+      max_quote_age_ms: 1000
+      max_depth_age_ms: 250
+      max_funding_age_ms: 10000
+      depth_levels: 5
+      depth_update_ms: 100
+      order_timeout_ms: 1000
+      hedge_timeout_ms: 3000
+      retry_interval_ms: 100
+      watchdog_ms: 50
+      taker_fee: 0.0004
+      minimum_net_edge: 0.0
+      execution_depth_fraction: 0.8
+      max_execution_gap_slippage: 0.001
+      state_path: strategies/etf_arb/runtime/state.json
+      data_client: BINANCE_USDT_FUTURES
+      exec_client: BINANCE_USDT_FUTURES
+      account_id: BINANCE_USDT_FUTURES-USDT_FUTURES-master
+      bootstrap: true
+      capture_pre_seconds: 10
+      capture_post_seconds: 60
+      capture_ring_records: 20000
+      capture_queue_batches: 1024
+      capture_file_mb: 64
+      capture_max_disk_mb: 5120
+      capture_min_free_mb: 2048
+
+node:
+  logging:
+    strategy_log_level: INFO
+  data:
+    clients:
+      binance_futures:
+        enabled: true
+        markets: [SNXX/USDT, SNDK/USDT, INTW/USDT, INTC/USDT, MVLL/USDT, MRVL/USDT, MUU/USDT, MU/USDT, SKUU/USDT, SKDD/USDT, SKHY/USDT, KORU/USDT, EWY/USDT]
+  exec:
+    engine:
+      reconciliation_scope: configured_markets
+    clients:
+      binance_futures:
+        enabled: true
+        margin_type: CROSS
+        leverage: 5
+        markets: [SNXX/USDT, SNDK/USDT, INTW/USDT, INTC/USDT, MVLL/USDT, MRVL/USDT, MUU/USDT, MU/USDT, SKUU/USDT, SKDD/USDT, SKHY/USDT, KORU/USDT, EWY/USDT]

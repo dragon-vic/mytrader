@@ -1,4 +1,4 @@
-nautilus-trader
+nautilus-trader==1.230.0
 py-clob-client-v2
 pandas
 requests
@@ -12,3 +12,4 @@ ccxt
 websockets
 pypdf==6.14.2
 jsonschema>=4.26.0
+exchange-calendars

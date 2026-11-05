@@ -9,7 +9,7 @@ strategy:
       adr_instrument: SKHYUSDT-PERP.BINANCE
       leverage: 10
       # 最后完整完成的加仓阈值；0 表示 40% 档尚未执行。每次启动前人工确认。
-      current_add_position: 0
+      current_add_position: 42
       first_add_position: 40
       large_add_position: 43
       max_add_position: 50
@@ -22,6 +22,8 @@ strategy:
       price_check_interval_sec: 1
       max_mark_age_sec: 5
       telegram_notify_step: 0.01
+      # 标记价溢价 <=35% 时只减仓平掉两腿；确认归零后停止 node。
+      exit_premium: 0.35
 
 node:
   logging:
