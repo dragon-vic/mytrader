@@ -36,7 +36,7 @@ description: nt_quant 项目的用途、架构、目录、环境、运行方式�
 策略自己的配置、运行数据、报告和策略私有工具放在对应策略目录内。
 与策略运行无关的研究代码、研究数据、分析图和研究笔记放在对应策略的 `research/` 目录。
 
-`etf_arb` 交易 Binance 杠杆 ETF 永续与对应标的的价差回归。初步研究位于 `strategies/etf_arb/research/20261031/`，包括逐笔成交、深度、资金费、标记价和研究结果。独立逐笔回测位于 `research/backtest_20261031/`：Python 下载与核算，Node 合并逐笔回放，`run_backtest.ps1` 为研究入口。实盘由 `etf_arb.py`、`config.py`、`baseline.py`、`market.py`、`runtime_lock.py` 和 `live_config.yaml` 组成，使用通用入口 `python run.py etf_arb live background`。当前七组合共享 7000 USDT、5倍总敞口，一次一个阶段；2%盘口阈值、100ms快照复查、十份预算按深度串行分批。开盘后5分钟、收盘前30分钟及资金费前后5分钟禁开/加仓，收盘前5分钟发起退出。`OPERATIONS.md` 记录完整流程和运维方式。运行状态保存在 `runtime/state.json`，每次运行的事件与30秒心跳保存在独立report目录的 `etf_events.jsonl`。相关资源不放在 `sk_adr_arb` 目录。
+`etf_arb` 交易 Binance 杠杆 ETF 永续与对应标的的价差回归。初步研究位于 `strategies/etf_arb/research/20261031/`，包括逐笔成交、深度、资金费、标记价和研究结果。独立逐笔回测位于 `research/backtest_20261031/`，Python下载与核算，Node合并逐笔回放，`run_backtest.ps1`为研究入口。实盘由 `etf_arb.py`、`config.py`、`baseline.py`、`market.py`、`capital.py`、`special_events.py`、`runtime_lock.py` 和 `live_config.yaml` 组成，使用通用入口 `python run.py etf_arb live background`。七组合共享原生可用保证金，每个新阶段异步读取一次，10倍交易所杠杆、90%资金使用率，以双腿合计9倍名义额为目标，并受交易所各腿限额约束。一次一个阶段，2%盘口阈值、100ms快照复查，按深度串行分批，每批每腿最多1000 USDT，批次数由流动性和剩余预算决定。开盘后5分钟、收盘前30分钟及资金费前后5分钟禁开/加仓，收盘前5分钟发起退出。`OPERATIONS.md`记录完整流程和运维方式。运行状态保存在 `runtime/state.json`，每次运行的事件与30秒心跳保存在独立report目录的 `etf_events.jsonl`。相关资源不放在 `sk_adr_arb` 目录。
 
 `research/snxx_full_20261101/` 为 SNXX/SNDK 连续全历史研究，`run_full.ps1` 调用共享逐笔引擎并使用独立研究配置；跳过上线前14天交易，持仓期间的理论价跨每日重置保持连续。完整日成交缓存与前一研究批次共享，所有数据保存在D盘。
 
@@ -44,7 +44,9 @@ description: nt_quant 项目的用途、架构、目录、环境、运行方式�
 
 `etf_arb/monitor.py` 是独立的按需监控查询入口，只读实时日志与JSON检查点，输出中文摘要并原子写入 `monitor/status.json` 和 `monitor/status.md`。不接入策略生命周期、不启动交易客户端；每次查询刷新，文件不是持续推送。固定使用说明为 `MONITORING.md`，供手机端已具备服务器访问能力的助手读取。报告区分30秒采样峰值、数据年龄、报价新鲜度、运行覆盖、检查点持仓和交易所真实仓位；无盈亏来源时保留空值。
 
-`etf_arb` 开仓、补齐、平仓全部使用市价单，预算分十份，每批合计最多3500 USDT，每腿使用可见深度最多80%，预计价差损耗上限0.1个百分点，超限共同缩量。正常平仓还要求预计均价偏离≤当前退出阈值，每批重新判断；部分平仓后偏离再次达到2%允许再加仓，保持阶段原基线和原计时。累计批数可超过十批，实际敞口预算限制为35000 USDT，并检查可用保证金。只有收盘/异常/恢复清仓锁定退出。平仓单腿成交不足时仅减仓修复；成交后等待新L1并排除成交前的旧L5。记录计划均价、实际成交和滑点。`adapters/binance.py` 的 `market_order_limits` 解释Binance原始MARKET_LOT_SIZE，校验市价数量上下限和步长。
+`etf_arb` 开仓、补齐、平仓全部使用市价单，每批每腿最多1000 USDT，每腿使用可见深度最多80%，预计价差损耗上限0.1个百分点，超限共同缩量。正常平仓要求预计均价偏离≤当前退出阈值，每批重新判断。部分平仓后偏离再次达到2%允许再加仓，保持阶段原基线和原计时，额度按实际成交、费用、盈亏与在途预留计算。`adapters/binance_account.py`直接读取原生账户、持仓模式及各腿杠杆与限额，框架余额不参与策略资金判断。常见网络故障、陈旧行情及只读接口失败暂停新增风险并保留匹配对冲，订单超时先查询核单。明确收盘/公司行动窗口、无法修复单腿及关键状态故障锁定退出。平仓单腿成交不足时仅减仓修复，成交后等待新L1并排除成交前的旧L5。记录计划均价、实际成交和滑点。`adapters/binance.py`的`market_order_limits`解释Binance原始MARKET_LOT_SIZE，校验市价数量上下限和步长。
+
+`special_events.yaml`是公司行动事件表，后台每15秒校验文件并读取exchangeInfo，状态超过45秒失效时暂停新开/加仓。按受影响组合禁开和提前清仓，确认交易所调整安排后设置重建边界，丢弃旧单位的基线样本及参考，用新单位下的完整收盘重新建锚。已生效事件与重建边界保存到检查点，阻止重启绕过事件。临时停牌保留匹配对冲并减掉可交易腿的多余敞口，恢复后按新鲜盘口及正常回归条件继续。合约规格变化暂停相关交易，核实并通过受控重启刷新NT instrument后恢复。SNDK 2026-11-20拆股事件已登记，交易所调整时刻与恢复参数需根据专项公告确认。
 
 `research/snxx_tuning_20261101/` 为SNXX参数研究，`run_tuning.ps1`运行批量逐笔回放。当前候选基线为时段前5分钟一次小幅校准、随后固定，校准不确定时正常使用理论零基线；已比较连续确认与上一批双腿成交后立即复查的串行分段开仓。结果是研究模型，未实现订单簿消耗或实盘下单。
 
@@ -54,7 +56,7 @@ description: nt_quant 项目的用途、架构、目录、环境、运行方式�
 
 ## 主要目录
 
-`etf_arb/close_reference.py`在后台维护七组美股ETF与标的的Yahoo日线实际收盘价，使用`quote.close`，缓存`runtime/close_references.json`并记录首次可见时间；按美东日期及XNYS日历排除尚未收盘的日线。基线仅使用实际价格。收盘前30分钟两腿关系形成稳健锚，保留标的合约收盘价；过去5次收盘正常组合基差稳定时，以同日美股ETF/标的收盘校验异常锚。参考要求的调整超过0.3%且不超过1%时采用价格参考锚，超过1%标记`close_conflict`并采用稳健合约锚。盘前中后等分段前5分钟校准后冻结，后到收盘参考等下一段；持仓FairValue持续冻结。参考缺失/不稳定使用合约理论锚并暴露状态。后台每10分钟更新，盘口路径无HTTP。health与monitor的每组`baseline`提供锚、调整、分段修正、参考锚及参考差值。旧NAV研究保存在`research/nav_reference_20261103/`。公司行动仍按OPERATIONS人工核对与停用。
+`etf_arb/close_reference.py`在后台维护七组美股ETF与标的的Yahoo日线实际收盘价，使用`quote.close`，缓存`runtime/close_references.json`并记录首次可见时间；按美东日期及XNYS日历排除尚未收盘的日线。基线仅使用实际价格。收盘前30分钟两腿关系形成稳健锚，保留标的合约收盘价；过去5次收盘正常组合基差稳定时，以同日美股ETF/标的收盘校验异常锚。参考要求的调整超过0.3%且不超过1%时采用价格参考锚，超过1%标记`close_conflict`并采用稳健合约锚。盘前中后等分段前5分钟校准后冻结，后到收盘参考等下一段；持仓FairValue持续冻结。参考缺失/不稳定使用合约理论锚并暴露状态。后台每10分钟更新，盘口路径无HTTP。health与monitor的每组`baseline`提供锚、调整、分段修正、参考锚及参考差值。旧NAV研究保存在`research/nav_reference_20261103/`。公司行动按special_events.yaml与OPERATIONS事件流程管理。
 
 ```text
 backtest.py                 回测入口

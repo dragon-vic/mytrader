@@ -1,0 +1,11 @@
+version: 1
+events:
+  - id: sndk-split-20261120
+    symbols: [SNDKUSDT, SNXXUSDT]
+    block_at: '2026-11-19T20:30:00Z'
+    flatten_at: '2026-11-19T20:55:00Z'
+    cash_effective_at: '2026-11-20T14:30:00Z'
+    reset_after: null
+    resume_after: null
+    source: https://www.sandisk.com/company/newsroom/press-releases/2026/2026-10-29-sandisk-reports-fiscal-first-quarter-2027-financial-results
+    exchange_source: null

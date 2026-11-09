@@ -13,11 +13,16 @@ class PairConfig(NautilusConfig, frozen=True):
 
 class EtfArbConfig(StrategyConfig, frozen=True):
     pairs: list[PairConfig]
-    capital: Decimal
     gross_leverage: Decimal
+    capital_fraction: Decimal
+    batch_notional: Decimal
+    account_environment: str
+    capital_timeout_ms: int
+    venue_poll_seconds: int
+    venue_max_age_seconds: int
+    special_events_path: str
     entry_gap: float
     confirmation_ms: int
-    batches: int
     exit_gap: float
     exit_hour_step: float
     exit_gap_cap: float
@@ -54,7 +59,6 @@ class EtfArbConfig(StrategyConfig, frozen=True):
     audit_path: str
     data_client: str
     exec_client: str
-    account_id: str
     bootstrap: bool
     capture_pre_seconds: int
     capture_post_seconds: int
@@ -69,8 +73,12 @@ class EtfArbConfig(StrategyConfig, frozen=True):
             raise ValueError('pairs must contain unique names')
         if any(p.etf == p.underlying or p.multiple == 0 for p in self.pairs):
             raise ValueError('invalid ETF pair')
-        if self.capital <= 0 or self.gross_leverage <= 0 or self.batches <= 0:
-            raise ValueError('capital, leverage and batches must be positive')
+        if self.gross_leverage <= 0 or self.batch_notional <= 0 or not 0 < self.capital_fraction < 1:
+            raise ValueError('invalid leverage, batch notional or capital fraction')
+        if self.account_environment not in ('live', 'testnet') or self.capital_timeout_ms <= self.confirmation_ms:
+            raise ValueError('invalid native account environment or timeout')
+        if not 0 < self.venue_poll_seconds < self.venue_max_age_seconds or not self.special_events_path:
+            raise ValueError('invalid venue monitor configuration')
         if not 0 < self.exit_gap <= self.exit_gap_cap < self.entry_gap:
             raise ValueError('exit thresholds must be below entry_gap')
         if not 0 < self.close_flatten_minutes < self.close_block_minutes:

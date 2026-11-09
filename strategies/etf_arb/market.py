@@ -22,6 +22,7 @@ class Market:
     last_funding_ns: int = 0
     funding_history_ready: bool = False
     funding_rate: float = 0.
+    mark: float = 0.
     book: OrderBook = field(init=False)
 
     def __post_init__(self):

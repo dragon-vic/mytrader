@@ -108,6 +108,7 @@ def collect(root=ROOT):
                       'fees_by_currency': {k: str(v) for k, v in fees.items()}, 'coverage': coverage},
             'latency_ms': health['quote_age_ms'], 'market_freshness': health['markets'], 'capture': health.get('capture'),
             'references': health.get('references'),
+            'capital': health.get('capital'), 'venue': health.get('venue'),
             'fault': fault,
             'recent_events': issues[-20:], 'latest_log_error_count_in_last_2mb': error_count,
             'pnl': {'value': None, 'reason': 'query exchange reports for verified realized and unrealized PnL'}}
@@ -127,11 +128,15 @@ def markdown(data):
     lines += ['', f"持仓阶段：{json.dumps(stage, ensure_ascii=False) if stage else '空阶段'}。",
               f"未完成订单：{len(data['pending_orders'])}；暂停组合：{data['paused_pairs']}。",
               f"今日开/闭阶段：{data['today']['stages_opened']}/{data['today']['stages_closed']}；成交回报：{data['today']['fill_events']}；手续费：{data['today']['fees_by_currency']}。",
-              f"可用USDT（心跳缓存）：{data['available_usdt']}；行情延迟ms：{data['latency_ms']}。",
+              f"本地资金余量USDT {data['available_usdt']}，行情延迟ms {data['latency_ms']}。",
               f"采集状态：{json.dumps(capture, ensure_ascii=False)}。",
               f"最近2MB节点日志ERROR/CRITICAL行数：{data['latest_log_error_count_in_last_2mb']}。", '',
               '峰值口径：北京时间当日、30秒心跳、双腿报价新鲜样本；统计范围以JSON中的coverage为准。',
               '文件按查询命令更新。持仓来自策略检查点；交易所持仓、挂单和盈亏需另行账户核对。']
+    if data.get('capital'):
+        capital = data['capital']
+        lines += ['', f"资金快照时间 {timestamp(capital['checked_ns'])}，原生可用USDT {capital['available_at_check']}。",
+                  f"读取规则 {capital['refresh_policy']}，资金错误 {capital['error']}。"]
     return '\n'.join(lines) + '\n'
 
 
