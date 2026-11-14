@@ -73,7 +73,7 @@ def capital_headroom(capital, stages, orders, markets, pairs, realized, fees, fr
     if capital is None:
         return 0.
     pnl, margin = portfolio_risk(stages, markets, pairs)
-    equity = capital.cash + realized - capital.realized - (fees - capital.fees) + min(0., pnl) - min(0., capital.pnl)
+    equity = capital.cash + realized - capital.realized - (fees - capital.fees) + pnl - capital.pnl
     reserved = sum(p.reserved_margin * max(0., 1 - p.filled / abs(p.quantity))
                    for p in orders.values() if not p.terminal)
     return max(0., equity * fraction - margin - reserved)
