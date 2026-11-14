@@ -1623,6 +1623,11 @@ class EtfArbStrategy(Strategy):
                 self.stages[name] = Stage(**saved)
             self.executing_pair = payload.get('executing_pair') if payload['version'] == 2 else next(iter(self.stages), None)
             if self.stages:
+                # 清仓已完成但最后检查点未落盘时，以已核对的空仓结束旧阶段。
+                if not live_orders and all(abs(q) < float(self.instruments[iid].size_increment) / 2
+                                           for iid, q in positions.items()):
+                    for stage in self.stages.values():
+                        stage.quantities = [0., 0.]
                 if self.executing_pair:
                     if self.executing_pair not in self.stages:
                         raise RuntimeError('recovered batch owner absent from stages')

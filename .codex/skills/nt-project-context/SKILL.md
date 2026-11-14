@@ -36,11 +36,11 @@ description: nt_quant 项目的用途、架构、目录、环境、运行方式�
 策略自己的配置、运行数据、报告和策略私有工具放在对应策略目录内。
 与策略运行无关的研究代码、研究数据、分析图和研究笔记放在对应策略的 `research/` 目录。
 
-`etf_arb` 交易 Binance 杠杆 ETF 永续与对应标的的价差回归。初步研究位于 `strategies/etf_arb/research/20261031/`，包括逐笔成交、深度、资金费、标记价和研究结果。独立逐笔回测位于 `research/backtest_20261031/`，Python下载与核算，Node合并逐笔回放，`run_backtest.ps1`为研究入口。实盘由 `etf_arb.py`、`config.py`、`baseline.py`、`market.py`、`capital.py`、`special_events.py`、`runtime_lock.py` 和 `live_config.yaml` 组成，使用通用入口 `python run.py etf_arb live background`。七组合共享原生可用保证金，每个新阶段异步读取一次，10倍交易所杠杆、90%资金使用率，以双腿合计9倍名义额为目标，并受交易所各腿限额约束。一次一个阶段，2%盘口阈值、100ms快照复查，按深度串行分批，每批每腿最多1000 USDT，批次数由流动性和剩余预算决定。开盘后5分钟、收盘前30分钟及资金费前后5分钟禁开/加仓，收盘前5分钟发起退出。`OPERATIONS.md`记录完整流程和运维方式。运行状态保存在 `runtime/state.json`，每次运行的事件与30秒心跳保存在独立report目录的 `etf_events.jsonl`。相关资源不放在 `sk_adr_arb` 目录。
+`etf_arb` 交易 Binance 杠杆 ETF 永续与对应标的的价差回归。初步研究位于 `strategies/etf_arb/research/20261031/`，包括逐笔成交、深度、资金费、标记价和研究结果。独立逐笔回测位于 `research/backtest_20261031/`，Python下载与核算，Node合并逐笔回放，`run_backtest.ps1`为研究入口。实盘由 `etf_arb.py`、`config.py`、`baseline.py`、`market.py`、`capital.py`、`special_events.py`、`runtime_lock.py` 和 `live_config.yaml` 组成，使用通用入口 `python run.py etf_arb live background`。八组合（新增NVDL/NVDA，+2倍）共享原生可用保证金，每个新阶段异步读取一次，10倍交易所杠杆、90%资金使用率，以双腿合计9倍名义额为目标，并受交易所各腿限额约束。多组合分别维护阶段，全局每次一批双腿订单；批次完成并对冲后按最新可成交偏离择组。2%盘口阈值、100ms快照复查，按深度串行分批，每批每腿最多1000 USDT，批次数由流动性和剩余预算决定。开盘后5分钟、收盘前30分钟及资金费前后5分钟禁开/加仓，收盘前5分钟发起退出。`OPERATIONS.md`记录完整流程和运维方式。运行状态保存在 `runtime/state.json`，每次运行的事件与30秒心跳保存在独立report目录的 `etf_events.jsonl`。相关资源不放在 `sk_adr_arb` 目录。
 
 `research/snxx_full_20261101/` 为 SNXX/SNDK 连续全历史研究，`run_full.ps1` 调用共享逐笔引擎并使用独立研究配置；跳过上线前14天交易，持仓期间的理论价跨每日重置保持连续。完整日成交缓存与前一研究批次共享，所有数据保存在D盘。
 
-`etf_arb/recorder.py` 为实盘事件盘口采集模块：13合约有界字节环形缓存，2%触发保存前10秒、偏离/持仓全过程和结束后60秒，记录L1、L5、标记价资金费与策略决策状态。后台批量gzip写入当前report目录的`capture/`，逐次跨阈值独立标记。每合约20000条缓存、1024批队列、5GiB运行磁盘预算及2GiB剩余空间保护；采集拥堵/失败记录缺口并上报，交易线程不等磁盘。
+`etf_arb/recorder.py` 为实盘事件盘口采集模块：15合约有界字节环形缓存，2%触发保存前10秒、偏离/持仓全过程和结束后60秒，记录L1、L5、标记价资金费与策略决策状态。后台批量gzip写入当前report目录的`capture/`，逐次跨阈值独立标记。每合约20000条缓存、1024批队列、5GiB运行磁盘预算及2GiB剩余空间保护；采集拥堵/失败记录缺口并上报，交易线程不等磁盘。
 
 `etf_arb/monitor.py` 是独立的按需监控查询入口，只读实时日志与JSON检查点，输出中文摘要并原子写入 `monitor/status.json` 和 `monitor/status.md`。不接入策略生命周期、不启动交易客户端；每次查询刷新，文件不是持续推送。固定使用说明为 `MONITORING.md`，供手机端已具备服务器访问能力的助手读取。报告区分30秒采样峰值、数据年龄、报价新鲜度、运行覆盖、检查点持仓和交易所真实仓位；无盈亏来源时保留空值。
 
@@ -56,7 +56,7 @@ description: nt_quant 项目的用途、架构、目录、环境、运行方式�
 
 ## 主要目录
 
-`etf_arb/close_reference.py`在后台维护七组美股ETF与标的的Yahoo日线实际收盘价，使用`quote.close`，缓存`runtime/close_references.json`并记录首次可见时间；按美东日期及XNYS日历排除尚未收盘的日线。基线仅使用实际价格。收盘前30分钟两腿关系形成稳健锚，保留标的合约收盘价；过去5次收盘正常组合基差稳定时，以同日美股ETF/标的收盘校验异常锚。参考要求的调整超过0.3%且不超过1%时采用价格参考锚，超过1%标记`close_conflict`并采用稳健合约锚。盘前中后等分段前5分钟校准后冻结，后到收盘参考等下一段；持仓FairValue持续冻结。参考缺失/不稳定使用合约理论锚并暴露状态。后台每10分钟更新，盘口路径无HTTP。health与monitor的每组`baseline`提供锚、调整、分段修正、参考锚及参考差值。旧NAV研究保存在`research/nav_reference_20261103/`。公司行动按special_events.yaml与OPERATIONS事件流程管理。
+`etf_arb/close_reference.py`在后台维护八组美股ETF与标的的Yahoo日线实际收盘价，使用`quote.close`，缓存`runtime/close_references.json`并记录首次可见时间；按美东日期及XNYS日历排除尚未收盘的日线。基线仅使用实际价格。收盘前30分钟两腿关系形成稳健锚，保留标的合约收盘价；过去5次收盘正常组合基差稳定时，以同日美股ETF/标的收盘校验异常锚。参考要求的调整超过0.3%且不超过1%时采用价格参考锚，超过1%标记`close_conflict`并采用稳健合约锚。盘前中后等分段前5分钟校准后冻结，后到收盘参考等下一段；持仓FairValue持续冻结。参考缺失/不稳定使用合约理论锚并暴露状态。后台每10分钟更新，盘口路径无HTTP。health与monitor的每组`baseline`提供锚、调整、分段修正、参考锚及参考差值。旧NAV研究保存在`research/nav_reference_20261103/`。公司行动按special_events.yaml与OPERATIONS事件流程管理。
 
 ```text
 backtest.py                 回测入口
