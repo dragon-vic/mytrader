@@ -771,8 +771,10 @@ class EtfArbStrategy(Strategy):
                 self._drive()
             return
         now = self.clock.timestamp_ns()
+        drive = False
         for name in self.by_instrument[iid]:
-            fair = self.stages[name].fair if name in self.stages else self._fair(name, now)
+            stage = self.stages.get(name)
+            fair = stage.fair if stage else self._fair(name, now)
             if fair is None:
                 continue
             etf, under = (self.markets[i] for i in self._ids(name))
@@ -781,12 +783,23 @@ class EtfArbStrategy(Strategy):
             plus, minus = entry_gap(fair, etf, under, 1), entry_gap(fair, etf, under, -1)
             if self.recorder:
                 self._observe_capture(name, now, max(plus, minus))
+            if stage:
+                target = min(self.config.exit_gap_cap,
+                             self.config.exit_gap + ((now - stage.started_ns) // HOUR) * self.config.exit_hour_step)
+                entry_ready = (plus if stage.side > 0 else minus) >= self.config.entry_gap and not stage.adding_error
+                if entry_ready:
+                    used = sum(abs(q) * max(m.ask, m.mark) for q, m in zip(stage.quantities, (etf, under)))
+                    entry_ready = used < stage.budget and self._available_capital() > 0
+                drive |= (stage.phase != 'holding' or bool(stage.exit_reason) or
+                          entry_ready or
+                          exit_gap(fair, etf, under, stage.side) <= target)
             candidate = self.confirmations.get(name)
             if name in self.confirmed and (candidate[1] != fair or not self._fresh(name, now) or
                     self._blocked(name, now) or entry_gap(fair, etf, under, candidate[0]) < self.config.entry_gap):
                 self.confirmations.pop(name)
                 self.confirmed.discard(name)
                 self._decision(name, 'confirmation_failed', reason='signal_changed_while_waiting_for_batch')
+            drive |= name in self.confirmed
             if name in self.stages or self.exiting or self.fault_reason or name in self.paused or name in self.confirmations or not self._fresh(name, now) or self._blocked(name, now):
                 continue
             side = 1 if plus >= minus else -1
@@ -800,7 +813,7 @@ class EtfArbStrategy(Strategy):
             self._decision(name, 'confirmation_started', side=side, deadline_ns=now + self.config.confirmation_ms * 1_000_000)
             self.clock.set_time_alert_ns(f'etf.confirm.{name}.{now}', now + self.config.confirmation_ms * 1_000_000,
                                          callback=self._timer_event)
-        if any(name in self.stages or name in self.confirmed for name in self.by_instrument[iid]):
+        if drive:
             self._drive()
 
     def _confirm(self, name):
