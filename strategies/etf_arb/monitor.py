@@ -101,7 +101,10 @@ def collect(root=ROOT):
             'sources': {'report_dir': str(folders[-1]), 'checkpoint': str(checkpoint),
                         'current_gap': 'latest_30_second_health', 'daily_peak': '30_second_health_samples_fresh_quotes_only',
                         'positions': 'strategy_checkpoint_not_exchange_query', 'timezone': 'Asia/Shanghai'},
-            'pairs': pairs, 'stage': state['stage'], 'pending_orders': {k: v for k, v in state['orders'].items() if not v['terminal']},
+            'pairs': pairs, 'stages': state['stages'] if state['version'] == 2 else (
+                {state['stage']['pair']: state['stage']} if state['stage'] else {}),
+            'executing_pair': state.get('executing_pair'),
+            'pending_orders': {k: v for k, v in state['orders'].items() if not v['terminal']},
             'paused_pairs': state['paused'], 'available_usdt': health['available_usdt'],
             'today': {'date': midnight.date().isoformat(), 'stages_opened': counts['stage_open'], 'stages_closed': counts['stage_closed'],
                       'order_batches_sent': counts['orders_sent'], 'fill_events': counts['fill'],
@@ -124,8 +127,9 @@ def markdown(data):
     for name, pair in data['pairs'].items():
         gap, peak = pair['current_gap_pct'], pair['today_sampled_peak']
         lines.append(f"| {name} | {f'{gap:.3f}%' if gap is not None else '无实时数据'} | {'是' if pair['quote_fresh'] else '否'} | {'是' if pair['entry_blocked'] else '否'} | {str(round(peak['gap_pct'], 3))+'%' if peak else '无样本'} | {peak['time'] if peak else '—'} |")
-    stage, capture = data['stage'], data['capture']
-    lines += ['', f"持仓阶段：{json.dumps(stage, ensure_ascii=False) if stage else '空阶段'}。",
+    stages, capture = data['stages'], data['capture']
+    lines += ['', f"持仓阶段：{json.dumps(stages, ensure_ascii=False) if stages else '空阶段'}。",
+              f"当前执行组合：{data['executing_pair'] or '空闲'}。",
               f"未完成订单：{len(data['pending_orders'])}；暂停组合：{data['paused_pairs']}。",
               f"今日开/闭阶段：{data['today']['stages_opened']}/{data['today']['stages_closed']}；成交回报：{data['today']['fill_events']}；手续费：{data['today']['fees_by_currency']}。",
               f"本地资金余量USDT {data['available_usdt']}，行情延迟ms {data['latency_ms']}。",

@@ -21,6 +21,7 @@ strategy:
         - {name: SKUU, etf: SKUUUSDT-PERP.BINANCE, underlying: SKHYUSDT-PERP.BINANCE, multiple: 2}
         - {name: SKDD, etf: SKDDUSDT-PERP.BINANCE, underlying: SKHYUSDT-PERP.BINANCE, multiple: -2}
         - {name: KORU, etf: KORUUSDT-PERP.BINANCE, underlying: EWYUSDT-PERP.BINANCE, multiple: 3}
+        - {name: NVDL, etf: NVDLUSDT-PERP.BINANCE, underlying: NVDAUSDT-PERP.BINANCE, multiple: 2}
       external_order_claims:
         - SNXXUSDT-PERP.BINANCE
         - SNDKUSDT-PERP.BINANCE
@@ -35,6 +36,8 @@ strategy:
         - SKHYUSDT-PERP.BINANCE
         - KORUUSDT-PERP.BINANCE
         - EWYUSDT-PERP.BINANCE
+        - NVDLUSDT-PERP.BINANCE
+        - NVDAUSDT-PERP.BINANCE
       gross_leverage: "10"
       capital_fraction: "0.9"
       batch_notional: "1000"
@@ -96,7 +99,7 @@ node:
     clients:
       binance_futures:
         enabled: true
-        markets: [SNXX/USDT, SNDK/USDT, INTW/USDT, INTC/USDT, MVLL/USDT, MRVL/USDT, MUU/USDT, MU/USDT, SKUU/USDT, SKDD/USDT, SKHY/USDT, KORU/USDT, EWY/USDT]
+        markets: [SNXX/USDT, SNDK/USDT, INTW/USDT, INTC/USDT, MVLL/USDT, MRVL/USDT, MUU/USDT, MU/USDT, SKUU/USDT, SKDD/USDT, SKHY/USDT, KORU/USDT, EWY/USDT, NVDL/USDT, NVDA/USDT]
   exec:
     engine:
       reconciliation_scope: configured_markets
@@ -105,4 +108,4 @@ node:
         enabled: true
         margin_type: CROSS
         leverage: 10
-        markets: [SNXX/USDT, SNDK/USDT, INTW/USDT, INTC/USDT, MVLL/USDT, MRVL/USDT, MUU/USDT, MU/USDT, SKUU/USDT, SKDD/USDT, SKHY/USDT, KORU/USDT, EWY/USDT]
+        markets: [SNXX/USDT, SNDK/USDT, INTW/USDT, INTC/USDT, MVLL/USDT, MRVL/USDT, MUU/USDT, MU/USDT, SKUU/USDT, SKDD/USDT, SKHY/USDT, KORU/USDT, EWY/USDT, NVDL/USDT, NVDA/USDT]

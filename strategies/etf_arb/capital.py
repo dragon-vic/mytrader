@@ -1,6 +1,7 @@
 """每阶段一次账户读取，阶段内使用成交与在途预留记账。"""
 import queue
 import threading
+from dataclasses import dataclass
 
 from adapters.binance_account import BinanceAccountReader
 
@@ -42,19 +43,40 @@ class CapitalReader:
         self.stop.set()
 
 
-def capital_headroom(stage, orders, markets):
+@dataclass
+class CapitalState:
+    cash: float
+    pnl: float
+    realized: float
+    fees: float
+    checked_ns: int
+
+
+def portfolio_risk(stages, markets, pairs):
     pnl, margin = 0., 0.
-    for quantity, average, market, leverage in zip(stage.quantities, stage.average_prices, markets, stage.native_leverages):
-        if not quantity:
-            continue
-        if min(market.bid, market.ask) <= 0:
-            return 0.
-        price = market.bid if quantity > 0 else market.ask
-        pnl += quantity * (price - average)
-        margin += abs(quantity) * max(average, market.ask, market.mark) / leverage
+    for stage in stages.values():
+        pair = pairs[stage.pair]
+        for quantity, average, iid, leverage in zip(stage.quantities, stage.average_prices,
+                                                    (pair.etf, pair.underlying), stage.native_leverages):
+            if not quantity:
+                continue
+            market = markets[iid]
+            if min(market.bid, market.ask) <= 0:
+                return float('-inf'), float('inf')
+            price = market.bid if quantity > 0 else market.ask
+            pnl += quantity * (price - average)
+            margin += abs(quantity) * max(average, market.ask, market.mark) / leverage
+    return pnl, margin
+
+
+def capital_headroom(capital, stages, orders, markets, pairs, realized, fees, fraction):
+    if capital is None:
+        return 0.
+    pnl, margin = portfolio_risk(stages, markets, pairs)
+    equity = capital.cash + realized - capital.realized - (fees - capital.fees) + min(0., pnl) - min(0., capital.pnl)
     reserved = sum(p.reserved_margin * max(0., 1 - p.filled / abs(p.quantity))
                    for p in orders.values() if not p.terminal)
-    return max(0., stage.available_at_start + stage.realized_pnl - stage.fees + min(0., pnl) - margin - reserved)
+    return max(0., equity * fraction - margin - reserved)
 
 
 def account_fill(stage, leg, signed, price, fee):

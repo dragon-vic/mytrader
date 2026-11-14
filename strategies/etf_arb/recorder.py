@@ -93,9 +93,9 @@ class EventRecorder:
         if name in self.active:
             self.active[name]['until'] = now + self.post_ns
 
-    def end_due(self, now, held_pair):
+    def end_due(self, now, held_pairs):
         for name, case in list(self.active.items()):
-            if name == held_pair:
+            if name in held_pairs:
                 self.touch(name, now)
             elif now >= case['until']:
                 self.event('capture_end', now, case=case['id'], pair=name, reason='quiet_tail_completed')

@@ -28,7 +28,7 @@ AWS项目：`/home/ubuntu/pycharm_nt`。此说明供用户和已经具备服务�
 - `status=running`表示最新实例有90秒以内的健康心跳且基线已就绪；`stopped`表示日志记录正常停止，`heartbeat_stale`表示心跳超过90秒。
 - 偏离是策略基线修正后的双向bid/ask开仓偏离较大值。负数表示盘口价差已经覆盖偏离，不能据此判断ETF涨跌方向。
 - `daily_peak`使用30秒心跳中双腿报价新鲜的样本；记录覆盖见`today.coverage`，停机期间没有数据。秒内精确峰值需逐报价累计指标；当前摘要不会把采样峰值标为全量峰值。
-- `stage`和`pending_orders`来自策略检查点；`available_usdt`来自最近健康心跳。它们用于策略监控；需要核对交易所真实仓位和挂单时，另行调用已有只读账户接口。
+- `stages`、`executing_pair`和`pending_orders`来自策略检查点；`available_usdt`来自最近健康心跳。它们用于策略监控；需要核对交易所真实仓位和挂单时，另行调用已有只读账户接口。
 - `order_batches_sent`是双腿发单动作数，`fill_events`是成交回报条数，一个订单可以有多条成交回报。手续费按原币种列出。
 - 盈亏字段当前为空并说明来源需求；不要把账户余额变化或订单名义额当成策略净利润。
 - `recent_events`包含退出请求和异常事件，正常计划退出也会出现在这里；结合reason判断。

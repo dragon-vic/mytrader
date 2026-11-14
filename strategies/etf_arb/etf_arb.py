@@ -12,7 +12,7 @@ from pathlib import Path
 
 from nautilus_trader.adapters.binance.futures.types import BinanceFuturesMarkPriceUpdate
 from nautilus_trader.model.data import Bar, BarType, CustomData, DataType
-from nautilus_trader.model.enums import BookType, OrderSide
+from nautilus_trader.model.enums import BookType, OrderSide, TimeInForce
 from nautilus_trader.model.identifiers import ClientId, ClientOrderId
 from nautilus_trader.trading.strategy import Strategy
 from nautilus_trader.common.component import LiveClock
@@ -28,7 +28,7 @@ from .runtime_lock import RuntimeLock
 from .recorder import EventRecorder
 from .close_reference import read_cache, refresh as refresh_references
 from .state import read_state, write_state
-from .capital import CapitalReader, account_fill, capital_headroom
+from .capital import CapitalReader, CapitalState, account_fill, capital_headroom, portfolio_risk
 from .special_events import VenueMonitor, load_events, specification
 
 
@@ -56,11 +56,13 @@ class Stage:
     reconciled_epoch_ns: int = 0
     native_limits: list[float | None] = field(default_factory=lambda: [None, None])
     adding_error: str = ''
+    wait_reason: str = ''
     native_leverages: list[float] = field(default_factory=lambda: [1., 1.])
 
 
 @dataclass
 class Pending:
+    pair: str
     instrument: str
     leg: int
     quantity: float
@@ -96,9 +98,17 @@ class EtfArbStrategy(Strategy):
         self.market_limits = {}
         self.baselines = {}
         self.calendar = None
-        self.stage: Stage | None = None
+        self.stages: dict[str, Stage] = {}
+        self.executing_pair: str | None = None
         self.orders: dict[str, Pending] = {}
         self.confirmations: dict[str, tuple[int, FairValue, int]] = {}
+        self.confirmed: set[str] = set()
+        self.capital_state: CapitalState | None = None
+        self.realized_pnl = 0.
+        self.fees = 0.
+        self.execution_revision = 0
+        self.capital_request_revision = 0
+        self.capital_event_pair = None
         self.paused: set[str] = set()
         self.ready = False
         self.dispatching = False
@@ -141,7 +151,6 @@ class EtfArbStrategy(Strategy):
         self.last_capture_state_ns = 0
         self.capture_issue = None
         self.last_capture_issue_ns = 0
-        self.add_wait_reason = None
         self.capital_reader = None
         self.capital_token = 0
         self.capital_requested_ns = 0
@@ -241,7 +250,7 @@ class EtfArbStrategy(Strategy):
             self.reference_worker.start()
         self.clock.set_timer_ns('etf.watchdog', self.config.watchdog_ms * 1_000_000, now, 0,
                                 callback=self._timer_event)
-        self._record('started', pairs=list(self.pairs), recovered=self.stage is not None)
+        self._record('started', pairs=list(self.pairs), recovered=list(self.stages))
 
     def _assert_thread(self):
         if self.owner_thread != threading.get_ident():
@@ -282,11 +291,14 @@ class EtfArbStrategy(Strategy):
         if not self.fault_reason:
             self.fault_reason = reason
             self.confirmations.clear()
+            self.confirmed.clear()
             self._record('strategy_fault', reason=reason)
         if self.stopping:
             return
-        if self.stage:
-            self._exit(reason, pause=True)
+        if self.stages:
+            for stage in list(self.stages.values()):
+                self._exit(stage, reason, pause=True)
+            self._drive()
         else:
             self._request_node_stop()
 
@@ -323,7 +335,7 @@ class EtfArbStrategy(Strategy):
                 if not self.stopping:
                     raise
 
-    def _request_capital(self, now, purpose='new_stage'):
+    def _request_capital(self, now, purpose='new_stage', pair=None):
         if self.capital_inflight or now < self.capital_retry_ns:
             return
         if (purpose == 'new_stage' and self.capital_snapshot is not None and
@@ -333,10 +345,11 @@ class EtfArbStrategy(Strategy):
             raise RuntimeError('native capital worker stopped')
         self.capital_token += 1
         self.capital_snapshot = None
-        self.capital_error = None
         self.capital_inflight = True
         self.capital_requested_ns = now
         self.capital_purpose = purpose
+        self.capital_event_pair = pair
+        self.capital_request_revision = self.execution_revision
         self.capital_reader.request(self.capital_token)
         self._record('capital_requested', token=self.capital_token, purpose=purpose)
 
@@ -352,6 +365,30 @@ class EtfArbStrategy(Strategy):
                     self.clock.timestamp_ns() - self.capital_requested_ns >= self.config.capital_timeout_ms * 1_000_000):
                 snapshot, error = None, 'capital_read_timeout'
             self.capital_inflight = False
+            if error:
+                snapshot = None
+            if error is None and self.capital_purpose == 'new_stage':
+                stable = not self._pending() and self.execution_revision == self.capital_request_revision
+                matches = True
+                for iid in self.markets:
+                    position = snapshot.positions.get(self._symbol(iid), {})
+                    matches &= abs(float(position.get('positionAmt', 0)) - self._instrument_quantity(iid)) < float(self.instruments[iid].size_increment) / 2
+                    matches &= not float(position.get('openOrderInitialMargin', 0))
+                if not stable or not matches:
+                    self.capital_snapshot = None
+                    if stable and not matches:
+                        self.capital_error = 'native_positions_or_orders_unreconciled'
+                        self.capital_retry_ns = self.clock.timestamp_ns() + 5_000_000_000
+                    self._record('capital_snapshot_discarded', reason='orders_or_positions_changed_during_read')
+                    continue
+                pnl, margin = portfolio_risk(self.stages, self.markets, self.pairs)
+                if not math.isfinite(pnl + margin):
+                    snapshot, error = None, 'capital_market_price_unavailable'
+                else:
+                    owned = {iid for stage in self.stages.values() for iid in self._ids(stage.pair)}
+                    credit = sum(float(snapshot.positions.get(self._symbol(iid), {}).get('initialMargin', 0)) for iid in owned)
+                    self.capital_state = CapitalState(snapshot.available + min(credit, margin), pnl,
+                                                      self.realized_pnl, self.fees, snapshot.received_ns)
             self.capital_snapshot, self.capital_error = snapshot, error
             if error:
                 self.capital_retry_ns = self.clock.timestamp_ns() + 5_000_000_000
@@ -360,49 +397,51 @@ class EtfArbStrategy(Strategy):
                 self.last_capital_snapshot = snapshot
                 self._record('capital_updated', token=token, available=snapshot.available, wallet=snapshot.wallet,
                              requested_ns=snapshot.requested_ns, received_ns=snapshot.received_ns)
-                if self.capital_purpose == 'event_reconciliation' and self.stage and not self._pending():
-                    positions = [snapshot.positions.get(self._symbol(iid), {}) for iid in self._ids(self.stage.pair)]
+                stage = self.stages.get(self.capital_event_pair)
+                if self.capital_purpose == 'event_reconciliation':
+                    self.capital_snapshot = None
+                if self.capital_purpose == 'event_reconciliation' and stage and not self._pending():
+                    positions = [snapshot.positions.get(self._symbol(iid), {}) for iid in self._ids(stage.pair)]
                     if not any(float(p.get('openOrderInitialMargin', 0)) for p in positions):
-                        quantities = [float(p.get('positionAmt', 0)) for p in positions]
-                        cached = self._position_quantities(self.stage.pair)
+                        quantities = [float(p.get('positionAmt', 0)) - self._instrument_quantity(iid, excluding=stage.pair)
+                                      for p, iid in zip(positions, self._ids(stage.pair))]
+                        cached = self._position_quantities(stage.pair)
                         if any(abs(actual - local) >= float(self.instruments[iid].size_increment) / 2
-                               for actual, local, iid in zip(quantities, cached, self._ids(self.stage.pair))):
-                            self.stage.adding_error = 'event_position_cache_reconciliation_required'
+                               for actual, local, iid in zip(quantities, cached, self._ids(stage.pair))):
+                            stage.adding_error = 'event_position_cache_reconciliation_required'
                             self.capital_retry_ns = self.clock.timestamp_ns() + 30_000_000_000
-                            self._record('event_position_mismatch', pair=self.stage.pair, native=quantities, cached=cached)
+                            self._record('event_position_mismatch', pair=stage.pair, native=quantities, cached=cached)
                             self._save()
                             continue
-                        self.stage.quantities = quantities
-                        self.stage.average_prices = [float(p.get('entryPrice', 0)) for p in positions]
-                        self.stage.reconciled_epoch_ns = self.pair_epochs[self.stage.pair]
-                        self._record('event_positions_reconciled', pair=self.stage.pair,
-                                     quantities=self.stage.quantities, epoch_ns=self.stage.reconciled_epoch_ns)
+                        stage.quantities = quantities
+                        stage.average_prices = [float(p.get('entryPrice', 0)) for p in positions]
+                        stage.reconciled_epoch_ns = self.pair_epochs[stage.pair]
+                        self._record('event_positions_reconciled', pair=stage.pair,
+                                     quantities=stage.quantities, epoch_ns=stage.reconciled_epoch_ns)
                         self._save()
                         self.capital_snapshot = None
                         self._drive()
         now = self.clock.timestamp_ns()
         for name, (_, _, triggered) in list(self.confirmations.items()):
-            if now - triggered >= self.config.confirmation_ms * 1_000_000:
+            if name not in self.confirmed and now - triggered >= self.config.confirmation_ms * 1_000_000:
                 self._confirm(name)
+        self._drive()
 
     def _available_capital(self):
-        if self.stage:
-            return capital_headroom(self.stage, self.orders, [self.markets[i] for i in self._ids(self.stage.pair)])
-        return self.capital_snapshot.available if self.capital_snapshot else None
+        return capital_headroom(self.capital_state, self.stages, self.orders, self.markets, self.pairs,
+                                self.realized_pnl, self.fees, float(self.config.capital_fraction))
 
     def _capital_status(self, now):
         latest = self.last_capital_snapshot
-        stamp = self.stage.capital_checked_ns if self.stage else (
-            latest.received_ns if latest else None)
+        stamp = self.capital_state.checked_ns if self.capital_state else None
         return {'source': 'Binance REST /fapi/v2/account USDT availableBalance',
                 'checked_ns': stamp, 'age_seconds': (now - stamp) / 1e9 if stamp else None,
-                'stage_available_at_start': self.stage.available_at_start if self.stage else None,
+                'stage_available_at_start': {name: s.available_at_start for name, s in self.stages.items()},
                 'available_at_check': latest.available if latest else None,
-                'local_headroom': self._available_capital(), 'inflight': self.capital_inflight,
+                'local_headroom': self._available_capital() if self.capital_state else None, 'inflight': self.capital_inflight,
                 'worker_alive': self.capital_reader.worker.is_alive() if self.capital_reader else False,
                 'error': self.capital_error, 'refresh_policy': 'once_per_stage',
-                'realized_pnl': self.stage.realized_pnl if self.stage else None,
-                'fees': self.stage.fees if self.stage else None}
+                'realized_pnl': self.realized_pnl, 'fees': self.fees}
 
     def _validate_events(self, events, now):
         new = {e.id: e for e in events}
@@ -424,6 +463,7 @@ class EtfArbStrategy(Strategy):
                 self.pair_epochs[name] = epoch
                 self.baselines[name] = Baseline(pair.multiple, self.calendar, self.config)
                 self.confirmations.pop(name, None)
+                self.confirmed.discard(name)
                 self._record('event_baseline_reset', pair=name, epoch_ns=epoch)
                 self._save()
 
@@ -478,18 +518,18 @@ class EtfArbStrategy(Strategy):
                     self._record('special_events_updated', events=[asdict(e) for e in self.events])
                     self._save()
         self._reset_event_baselines(now)
-        if self.stage:
-            symbols = {self._symbol(i) for i in self._ids(self.stage.pair)}
+        for stage in list(self.stages.values()):
+            symbols = {self._symbol(i) for i in self._ids(stage.pair)}
             event = next((e for e in self.events if now >= e.flatten_ns and symbols.intersection(e.symbols)
-                          and e.reason(symbols, now, self.stage.fair.anchor_ns)), None)
-            reason = self._venue_reason(self.stage.pair, now)
+                          and e.reason(symbols, now, stage.fair.anchor_ns)), None)
+            reason = self._venue_reason(stage.pair, now)
             if event:
-                self._exit(f'special_event:{event.id}')
+                self._exit(stage, f'special_event:{event.id}')
             elif reason and (reason.startswith('venue_spec_changed:') or reason.startswith('venue_delivery:')):
-                self._exit(reason, pause=True)
-            if (self.stage.exit_reason and not self._pending() and
-                    self.pair_epochs[self.stage.pair] > self.stage.reconciled_epoch_ns):
-                self._request_capital(now, purpose='event_reconciliation')
+                self._exit(stage, reason, pause=True)
+            if (stage.exit_reason and not self._pending() and
+                    self.pair_epochs[stage.pair] > stage.reconciled_epoch_ns):
+                self._request_capital(now, purpose='event_reconciliation', pair=stage.pair)
 
     def _reference_history(self):
         while not self.background_stop.is_set():
@@ -630,7 +670,7 @@ class EtfArbStrategy(Strategy):
             asks = tuple((float(level.price), float(level.size())) for level in market.book.asks()[:5])
             self.recorder.market('d', deltas.instrument_id, self.clock.timestamp_ns(), deltas.ts_event,
                                  deltas.ts_init, (bids, asks, deltas.sequence))
-        if self.stage and deltas.instrument_id in self._ids(self.stage.pair):
+        if any(name in self.stages or name in self.confirmed for name in self.by_instrument[deltas.instrument_id]):
             self._drive()
 
     def on_data(self, data):
@@ -666,21 +706,21 @@ class EtfArbStrategy(Strategy):
             self.recorder.touch(name, now)
 
     def _capture_state(self, name, now):
-        stage = self.stage if self.stage and self.stage.pair == name else None
+        stage = self.stages.get(name)
         fair = stage.fair if stage else self._fair(name, now)
         markets = [self.markets[i] for i in self._ids(name)]
         gaps = [entry_gap(fair, *markets, side) for side in (1, -1)] if fair else None
         target = min(self.config.exit_gap_cap, self.config.exit_gap +
                      ((now - stage.started_ns) // HOUR) * self.config.exit_hour_step) if stage else self.config.exit_gap
         return {'pair': name, 'time_ns': now, 'ready': self.ready, 'paused': name in self.paused,
-                'active_pair': self.stage.pair if self.stage else None,
+                'active_pairs': list(self.stages), 'executing_pair': self.executing_pair,
                 'fair': asdict(fair) if fair else None, 'baseline_segment': self.baselines[name].segment_key,
                 'entry_gaps': gaps, 'exit_gap': exit_gap(fair, *markets, stage.side) if stage else None,
                 'exit_target': target, 'fresh': self._fresh(name, now),
                 'calendar_blocked': self.calendar.entry_blocked(now, self.config),
                 'funding_blocked': [m.funding_blocked(now, self.config.funding_block_minutes,
                                                      self.config.max_funding_age_ms) for m in markets],
-                'available_usdt': self._available_capital(), 'capital': self._capital_status(now),
+                'available_usdt': self._available_capital() if self.capital_state else None, 'capital': self._capital_status(now),
                 'venue_reason': self._venue_reason(name, now), 'event_epoch_ns': self.pair_epochs[name],
                 'confirmation': self.confirmations[name][2] if name in self.confirmations else None,
                 'stage': asdict(stage) if stage else None,
@@ -727,12 +767,12 @@ class EtfArbStrategy(Strategy):
         if self.stopping:
             return
         if not self.ready:
-            if self.stage and iid in self._ids(self.stage.pair):
+            if self.stages:
                 self._drive()
             return
         now = self.clock.timestamp_ns()
         for name in self.by_instrument[iid]:
-            fair = self.stage.fair if self.stage and self.stage.pair == name else self._fair(name, now)
+            fair = self.stages[name].fair if name in self.stages else self._fair(name, now)
             if fair is None:
                 continue
             etf, under = (self.markets[i] for i in self._ids(name))
@@ -741,46 +781,61 @@ class EtfArbStrategy(Strategy):
             plus, minus = entry_gap(fair, etf, under, 1), entry_gap(fair, etf, under, -1)
             if self.recorder:
                 self._observe_capture(name, now, max(plus, minus))
-            if self.stage or self.exiting or self.fault_reason or name in self.paused or name in self.confirmations or not self._fresh(name, now) or self._blocked(name, now):
+            candidate = self.confirmations.get(name)
+            if name in self.confirmed and (candidate[1] != fair or not self._fresh(name, now) or
+                    self._blocked(name, now) or entry_gap(fair, etf, under, candidate[0]) < self.config.entry_gap):
+                self.confirmations.pop(name)
+                self.confirmed.discard(name)
+                self._decision(name, 'confirmation_failed', reason='signal_changed_while_waiting_for_batch')
+            if name in self.stages or self.exiting or self.fault_reason or name in self.paused or name in self.confirmations or not self._fresh(name, now) or self._blocked(name, now):
                 continue
             side = 1 if plus >= minus else -1
             if max(plus, minus) < self.config.entry_gap:
                 continue
             if now < self.capital_retry_ns:
                 continue
-            if not self.confirmations:
+            if not self.confirmations and not self._pending() and self.executing_pair is None:
                 self._request_capital(now)
             self.confirmations[name] = side, fair, now
             self._decision(name, 'confirmation_started', side=side, deadline_ns=now + self.config.confirmation_ms * 1_000_000)
             self.clock.set_time_alert_ns(f'etf.confirm.{name}.{now}', now + self.config.confirmation_ms * 1_000_000,
                                          callback=self._timer_event)
-        if self.stage and iid in self._ids(self.stage.pair):
+        if any(name in self.stages or name in self.confirmed for name in self.by_instrument[iid]):
             self._drive()
 
     def _confirm(self, name):
         self._assert_thread()
         candidate = self.confirmations.get(name)
-        if candidate is None or self.stage or self.stopping or self.exiting or self.fault_reason or name in self.paused:
+        if candidate is None or name in self.stages or self.stopping or self.exiting or self.fault_reason or name in self.paused:
             self.confirmations.pop(name, None)
+            self.confirmed.discard(name)
             if candidate:
-                self._decision(name, 'confirmation_skipped', reason='stage_occupied_or_stopped_or_paused')
+                self._decision(name, 'confirmation_skipped', reason='stage_started_or_stopped_or_paused')
             return
         side, fair, triggered = candidate
         now = self.clock.timestamp_ns()
         if not self._fresh(name, now) or self._blocked(name, now) or self._fair(name, now) != fair:
             self.confirmations.pop(name, None)
+            self.confirmed.discard(name)
             self._decision(name, 'confirmation_failed', reason='freshness_window_or_baseline_changed')
             return
         etf, under = (self.markets[i] for i in self._ids(name))
         if entry_gap(fair, etf, under, side) < self.config.entry_gap:
             self.confirmations.pop(name, None)
+            self.confirmed.discard(name)
             self._decision(name, 'confirmation_failed', reason='gap_below_threshold')
             return
+        if name not in self.confirmed:
+            self.confirmed.add(name)
+            self.stats['confirmations'] += 1
+            self._decision(name, 'confirmation_passed', side=side)
+        self._drive()
+
+    def _open_stage(self, name):
+        side, fair, triggered = self.confirmations[name]
+        now = self.clock.timestamp_ns()
+        etf, under = (self.markets[i] for i in self._ids(name))
         elapsed = now - self.capital_requested_ns
-        if self.capital_inflight and elapsed < self.config.capital_timeout_ms * 1_000_000:
-            return
-        self.confirmations.pop(name, None)
-        self.stats['confirmations'] += 1
         snapshot = self.capital_snapshot
         if snapshot is None or elapsed >= self.config.capital_timeout_ms * 1_000_000:
             if elapsed >= self.config.capital_timeout_ms * 1_000_000:
@@ -788,19 +843,15 @@ class EtfArbStrategy(Strategy):
                 self.capital_retry_ns = now + 5_000_000_000
             self._decision(name, 'confirmation_failed', reason=self.capital_error or 'capital_unavailable_or_timed_out')
             return
-        for iid in self.markets:
+        for iid in self._ids(name):
             symbol = self._symbol(iid)
             native_config = snapshot.configs.get(symbol, {})
             position = snapshot.positions.get(symbol, {})
-            if iid in self._ids(name) and (int(native_config.get('leverage', 0)) < 1 or
-                                          native_config.get('marginType') != 'CROSSED'):
+            if int(native_config.get('leverage', 0)) < 1 or native_config.get('marginType') != 'CROSSED':
                 self._decision(name, 'confirmation_failed', reason='native_leverage_or_margin_mode', symbol=symbol)
                 return
-            if float(position.get('positionAmt', 0)) or float(position.get('openOrderInitialMargin', 0)):
-                self._decision(name, 'confirmation_failed', reason='native_configured_instrument_occupied', symbol=symbol)
-                return
         leverage = float(self.config.gross_leverage)
-        budget = snapshot.available * float(self.config.capital_fraction) * leverage
+        budget = self.capital_state.cash * float(self.config.capital_fraction) * leverage
         leverages = [min(leverage, float(snapshot.configs[self._symbol(iid)]['leverage'])) for iid in self._ids(name)]
         limits = []
         for iid in self._ids(name):
@@ -812,42 +863,40 @@ class EtfArbStrategy(Strategy):
         unit_values = [max(etf.ask, etf.mark), abs(fair.slope) * max(under.ask, under.mark)]
         unit_margin = sum(v / lev for v, lev in zip(unit_values, leverages))
         margin_fraction = unit_margin / sum(unit_values)
-        budget = min(budget, snapshot.available * float(self.config.capital_fraction) / margin_fraction)
+        budget = min(budget, self.capital_state.cash * float(self.config.capital_fraction) / margin_fraction)
         budget = min([budget] + [limit * sum(unit_values) / value
                                 for limit, value in zip(limits, unit_values) if limit is not None])
         gross = min(2 * float(self.config.batch_notional), budget,
-                    snapshot.available / (margin_fraction + 2 * self.config.taker_fee))
+                    self._available_capital() / (margin_fraction + 2 * self.config.taker_fee))
         plan = self._pair_plan(name, side, fair, gross, native_limits=limits)
         if plan is None:
             self._decision(name, 'confirmation_failed', reason='depth_size_cost_or_slippage', gross=gross)
             return
-        self.stage = Stage(name, side, fair, now, self.calendar.next_close(now), budget,
+        stage = Stage(name, side, fair, now, self.calendar.next_close(now), budget,
                            available_at_start=snapshot.available, capital_checked_ns=snapshot.received_ns,
                            reconciled_epoch_ns=self.pair_epochs[name], native_limits=limits, native_leverages=leverages)
+        self.stages[name] = stage
+        self.confirmations.pop(name)
+        self.confirmed.discard(name)
         self.capital_snapshot = None
         self.stats['stages'] += 1
-        for other in list(self.confirmations):
-            self._decision(other, 'confirmation_canceled', reason='another_pair_acquired_capital')
-            timer = f'etf.confirm.{other}.{self.confirmations[other][2]}'
-            if timer in self.clock.timer_names:
-                self.clock.cancel_timer(timer)
-        self.confirmations.clear()
         self._record('stage_open', pair=name, side=side, trigger_ns=triggered, confirmed_ns=now,
                      gap=entry_gap(fair, etf, under, side), budget=budget, fair=asdict(fair),
                      available_at_start=snapshot.available, capital_checked_ns=snapshot.received_ns,
                      native_leverages=leverages, native_limits=limits)
-        self._batch(plan)
+        self._batch(stage, plan)
 
     def _quantity(self, iid, value):
         step = float(self.instruments[iid].size_increment)
         return math.copysign(math.floor(abs(value) / step + 1e-10) * step, value)
 
     def _pair_plan(self, name, side, fair, gross, close_target=None, native_limits=None):
+        stage = self.stages.get(name)
         ids = self._ids(name)
         markets = [self.markets[i] for i in ids]
         signs = [-side, side * (1 if fair.multiple > 0 else -1)]
         closing = close_target is not None
-        limits = self.stage.native_limits if self.stage else (native_limits or [None, None])
+        limits = stage.native_limits if stage else (native_limits or [None, None])
         if closing:
             signs = [-sign for sign in signs]
         now = self.clock.timestamp_ns()
@@ -862,7 +911,7 @@ class EtfArbStrategy(Strategy):
                       self.config.execution_depth_fraction * sum(q for _, q in levels[0]),
                       self.config.execution_depth_fraction * sum(q for _, q in levels[1]) / slope)
         if closing:
-            maximum = min(maximum, abs(self.stage.quantities[0]))
+            maximum = min(maximum, abs(stage.quantities[0]))
         for leg, iid in enumerate(ids):
             instrument = self.instruments[iid]
             ratio = 1 if leg == 0 else slope
@@ -870,7 +919,7 @@ class EtfArbStrategy(Strategy):
             if instrument.max_notional:
                 maximum = min(maximum, float(instrument.max_notional) / levels[leg][0][0] / ratio)
             if not closing and limits[leg] is not None:
-                held = self.stage.quantities[leg] if self.stage else 0.
+                held = self._instrument_quantity(iid, absolute=True)
                 cap_price = max(levels[leg][0][0], markets[leg].ask, markets[leg].mark)
                 remaining = limits[leg] - abs(held) * cap_price
                 maximum = min(maximum, max(0., remaining) / cap_price / ratio)
@@ -880,7 +929,7 @@ class EtfArbStrategy(Strategy):
         for attempt in range(18):
             size = hi if attempt == 0 else (lo + hi) / 2
             etf_qty = self._quantity(ids[0], signs[0] * size)
-            prior = self.stage.quantities if self.stage and self.stage.pair == name else (0., 0.)
+            prior = stage.quantities if stage and stage.pair == name else (0., 0.)
             target_under = self._quantity(ids[1], -(prior[0] + etf_qty) * fair.slope)
             quantities = [etf_qty, self._quantity(ids[1], target_under - prior[1])]
             if not quantities[0] or any(q * sign < 0 for q, sign in zip(quantities, signs)) or (not closing and not all(quantities)):
@@ -907,11 +956,18 @@ class EtfArbStrategy(Strategy):
                           profit - 2 * self.config.taker_fee * total - funding > self.config.minimum_net_edge * total))
             if closing:
                 valid &= all((not q or q * held < 0) and abs(q) <= abs(held) + 1e-9
-                             for q, held in zip(quantities, self.stage.quantities))
+                             for q, held in zip(quantities, stage.quantities))
             else:
                 valid &= sum(abs(q) * (m.bid + m.ask) / 2 for q, m in zip(quantities, markets)) <= gross + 1e-6
                 valid &= all(limit is None or abs(held + q) * max(fill[0], m.ask, m.mark) <= limit + 1e-6
-                             for limit, held, q, fill, m in zip(limits, prior, quantities, fills, markets))
+                             for limit, held, q, fill, m in zip(limits,
+                                 [abs(prior[leg]) + self._instrument_quantity(iid, excluding=name, absolute=True)
+                                  for leg, iid in enumerate(ids)], map(abs, quantities), fills, markets))
+                leverages = stage.native_leverages if stage else [
+                    min(float(self.config.gross_leverage), float(self.capital_snapshot.configs[self._symbol(iid)]['leverage']))
+                    for iid in ids]
+                valid &= sum(abs(q) * max(fill[0], market.ask, market.mark) * (1 / leverage + 2 * self.config.taker_fee)
+                             for q, fill, market, leverage in zip(quantities, fills, markets, leverages)) <= self._available_capital() + 1e-6
             if valid:
                 for iid, q, fill in zip(ids, quantities, fills):
                     if closing and not q:
@@ -932,48 +988,109 @@ class EtfArbStrategy(Strategy):
                 break
         return best
 
-    def _batch(self, plan):
-        if self.fault_reason or self.stage.exit_reason:
+    def _batch(self, stage, plan):
+        if self.fault_reason or stage.exit_reason:
             return
-        self.add_wait_reason = None
-        self._decision(self.stage.pair, 'batch_plan', order_type='MARKET', **asdict(plan))
-        self.stage.batches += 1
-        self.stage.phase = 'batch'
+        stage.wait_reason = ''
+        self._decision(stage.pair, 'batch_plan', order_type='MARKET', **asdict(plan))
+        stage.batches += 1
+        stage.phase = 'batch'
         self.stats['batches'] += 1
-        self._submit(plan.quantities, 'entry', expected_prices=plan.expected_prices)
+        self._submit(stage, plan.quantities, 'entry', expected_prices=plan.expected_prices)
 
     def _pending(self):
         return any(not order.terminal for order in self.orders.values())
 
-    def _flat(self):
+    def _flat(self, stage):
         return all(abs(q) < float(self.instruments[iid].size_increment) / 2
-                   for iid, q in zip(self._ids(self.stage.pair), self.stage.quantities))
+                   for iid, q in zip(self._ids(stage.pair), stage.quantities))
 
     def _drive(self):
         self._assert_thread()
-        if self.stage is None or self.dispatching or self.driving or self.stopping or self.exiting:
+        if self.dispatching or self.driving or self.stopping or not (self.stages or self.confirmed):
             return
         self.driving = True
         try:
-            self._advance_stage()
+            self._schedule_batch()
         finally:
             self.driving = False
 
-    def _advance_stage(self):
-        now, stage = self.clock.timestamp_ns(), self.stage
+    def _schedule_batch(self):
+        now = self.clock.timestamp_ns()
+        for stage in list(self.stages.values()):
+            if now >= stage.close_ns - self.config.close_flatten_minutes * MINUTE:
+                self._exit(stage, 'scheduled_close')
+        if self._pending():
+            return
+        # 执行权一直保留到双腿订单终结且完成对冲修复。
+        if self.executing_pair:
+            stage = self.stages[self.executing_pair]
+            self._advance_stage(stage)
+            if self._pending():
+                return
+            if stage.pair in self.stages and stage.phase != 'holding' and not self._flat(stage):
+                return
+            self.executing_pair = None
+        # 先处理风险退出和已满足条件的平仓，再用剩余资金开仓。
+        for stage in sorted(list(self.stages.values()), key=lambda s: not bool(s.exit_reason)):
+            self._advance_stage(stage)
+            if self._pending() or self.executing_pair:
+                return
+        if self.exiting or self.fault_reason:
+            return
+        if self.capital_error:
+            if now >= self.capital_retry_ns:
+                self._request_capital(now)
+            return
+        candidates = []
+        for name in list(self.confirmed):
+            side, fair, triggered = self.confirmations[name]
+            etf, under = (self.markets[i] for i in self._ids(name))
+            if (name in self.paused or self._blocked(name, now) or not self._fresh(name, now) or
+                    self._fair(name, now) != fair or entry_gap(fair, etf, under, side) < self.config.entry_gap):
+                self.confirmations.pop(name)
+                self.confirmed.discard(name)
+                self._decision(name, 'confirmation_failed', reason='signal_changed_before_execution')
+                continue
+            candidates.append((entry_gap(fair, etf, under, side), triggered, name))
+        for name, stage in self.stages.items():
+            if stage.exit_reason or stage.adding_error or stage.phase != 'holding' or now < stage.next_attempt_ns:
+                continue
+            if self._blocked(name, now) or not self._fresh(name, now):
+                continue
+            etf, under = (self.markets[i] for i in self._ids(name))
+            gap = entry_gap(stage.fair, etf, under, stage.side)
+            if gap >= self.config.entry_gap:
+                candidates.append((gap, stage.started_ns, name))
+        for gap, _, name in sorted(candidates, key=lambda item: (-item[0], item[1], item[2])):
+            if name in self.stages:
+                self._advance_stage(self.stages[name], allow_entry=True)
+            else:
+                if self.capital_inflight:
+                    return
+                if self.capital_snapshot is None or now - self.capital_requested_ns >= self.config.capital_timeout_ms * 1_000_000:
+                    self._request_capital(now)
+                    return
+                self._open_stage(name)
+            if self._pending() or self.executing_pair:
+                self._record('batch_selected', pair=name, gap=gap)
+                return
+
+    def _advance_stage(self, stage, allow_entry=False):
+        now = self.clock.timestamp_ns()
         if now >= stage.close_ns - self.config.close_flatten_minutes * MINUTE:
-            self._exit('scheduled_close')
+            self._exit(stage, 'scheduled_close')
         if self._pending() or now < stage.next_attempt_ns:
             return
         if stage.phase == 'opening' and not stage.exit_reason:
             return
-        if self._flat():
-            self._finish()
+        if self._flat(stage):
+            self._finish(stage)
             return
         if stage.exit_reason:
-            self._close()
+            self._close(stage)
             return
-        if self._trim_halted_excess(now):
+        if self._trim_halted_excess(stage, now):
             return
         fresh = self._fresh(stage.pair, now)
         if stage.phase in ['batch', 'repair', 'exit', 'exit_repair']:
@@ -985,8 +1102,8 @@ class EtfArbStrategy(Strategy):
                 if not stage.repair_deadline_ns:
                     stage.repair_deadline_ns = now + self.config.hedge_timeout_ms * 1_000_000
                 if now >= stage.repair_deadline_ns:
-                    self._exit('hedge_timeout', pause=True)
-                    self._close()
+                    self._exit(stage, 'hedge_timeout', pause=True)
+                    self._close(stage)
                 elif fresh:
                     reducing = stage.phase in ['exit', 'exit_repair']
                     leg = 1
@@ -994,17 +1111,17 @@ class EtfArbStrategy(Strategy):
                         leg = 0
                         delta = self._quantity(ids[0], -stage.quantities[1] / stage.fair.slope) - stage.quantities[0]
                     reduce_only = delta * stage.quantities[leg] < 0 and abs(delta) <= abs(stage.quantities[leg]) + 1e-9
-                    plan = self._single_plan(leg, delta, reducing or reduce_only)
+                    plan = self._single_plan(stage, leg, delta, reducing or reduce_only)
                     if plan:
                         stage.phase = 'exit_repair' if reducing else 'repair'
                         quantities, prices = plan
                         self._decision(stage.pair, 'repair_plan', quantities=quantities, expected_prices=prices, reducing=reducing)
-                        self._submit(quantities, 'exit_repair' if reducing else 'repair', expected_prices=prices)
+                        self._submit(stage, quantities, 'exit_repair' if reducing else 'repair', expected_prices=prices)
                 return
             stage.phase = 'holding'
             stage.repair_deadline_ns = 0
         if not fresh:
-            self._add_wait('stale_or_consumed_quote')
+            self._add_wait(stage, 'stale_or_consumed_quote')
             return
         etf, under = (self.markets[i] for i in self._ids(stage.pair))
         target = min(self.config.exit_gap_cap,
@@ -1013,20 +1130,22 @@ class EtfArbStrategy(Strategy):
             plan = self._pair_plan(stage.pair, stage.side, stage.fair, 2 * float(self.config.batch_notional), close_target=target)
             if plan:
                 stage.phase = 'exit'
-                self.add_wait_reason = None
+                stage.wait_reason = ''
                 self._decision(stage.pair, 'exit_plan', target=target, **asdict(plan))
-                self._submit(plan.quantities, 'exit', expected_prices=plan.expected_prices)
+                self._submit(stage, plan.quantities, 'exit', expected_prices=plan.expected_prices)
             else:
-                self._add_wait('exit_depth_size_or_slippage')
+                self._add_wait(stage, 'exit_depth_size_or_slippage')
             return
         if self._blocked(stage.pair, now):
-            self._add_wait('time_or_funding_window')
+            self._add_wait(stage, 'time_or_funding_window')
             return
         if stage.adding_error:
-            self._add_wait(stage.adding_error)
+            self._add_wait(stage, stage.adding_error)
             return
         if entry_gap(stage.fair, etf, under, stage.side) < self.config.entry_gap:
-            self._add_wait('between_entry_and_exit')
+            self._add_wait(stage, 'between_entry_and_exit')
+            return
+        if not allow_entry:
             return
         used = sum(abs(q) * max(m.ask, m.mark) for q, m in zip(stage.quantities, (etf, under)))
         free = self._available_capital()
@@ -1036,17 +1155,16 @@ class EtfArbStrategy(Strategy):
                     free / (margin_fraction + 2 * self.config.taker_fee))
         plan = self._pair_plan(stage.pair, stage.side, stage.fair, gross)
         if plan:
-            self._batch(plan)
+            self._batch(stage, plan)
         else:
-            self._add_wait('depth_size_cost_or_slippage')
+            self._add_wait(stage, 'depth_size_cost_or_slippage')
 
-    def _add_wait(self, reason):
-        if reason != self.add_wait_reason:
-            self.add_wait_reason = reason
-            self._decision(self.stage.pair, 'adding_wait', reason=reason)
+    def _add_wait(self, stage, reason):
+        if reason != stage.wait_reason:
+            stage.wait_reason = reason
+            self._decision(stage.pair, 'adding_wait', reason=reason)
 
-    def _exit(self, reason, pause=False):
-        stage = self.stage
+    def _exit(self, stage, reason, pause=False):
         if stage is None:
             return
         changed = False
@@ -1060,8 +1178,7 @@ class EtfArbStrategy(Strategy):
         if changed:
             self._save()
 
-    def _single_plan(self, leg, delta, reducing):
-        stage = self.stage
+    def _single_plan(self, stage, leg, delta, reducing):
         ids = self._ids(stage.pair)
         iid, market = ids[leg], self.markets[ids[leg]]
         book = market.levels(delta > 0, self.clock.timestamp_ns(), self.config.max_depth_age_ms)
@@ -1073,7 +1190,7 @@ class EtfArbStrategy(Strategy):
             maximum = min(maximum, self._available_capital() /
                           (1 / stage.native_leverages[leg] + 2 * self.config.taker_fee) / book[0][0])
             if stage.native_limits[leg] is not None:
-                maximum = min(maximum, max(0., stage.native_limits[leg] / max(book[0][0], market.ask, market.mark) - abs(stage.quantities[leg])))
+                maximum = min(maximum, max(0., stage.native_limits[leg] / max(book[0][0], market.ask, market.mark) - self._instrument_quantity(iid, absolute=True)))
         theory = stage.fair.price((self.markets[ids[1]].bid + self.markets[ids[1]].ask) / 2)
         if theory <= 0:
             return None
@@ -1102,8 +1219,7 @@ class EtfArbStrategy(Strategy):
                 break
         return best
 
-    def _trim_halted_excess(self, now):
-        stage = self.stage
+    def _trim_halted_excess(self, stage, now):
         ids = self._ids(stage.pair)
         tradable = [self.venue_rows.get(self._symbol(i), {}).get('status') == 'TRADING' for i in ids]
         if not all(tradable):
@@ -1117,37 +1233,37 @@ class EtfArbStrategy(Strategy):
                 excess = abs(held) - (abs(matched) if held * matched > 0 else 0.)
                 if excess <= 0:
                     continue
-                plan = self._single_plan(leg, -math.copysign(excess, held), True)
+                plan = self._single_plan(stage, leg, -math.copysign(excess, held), True)
                 if plan:
                     quantities, prices = plan
                     break
             if any(quantities):
                 stage.phase = 'exit_repair'
-                self._submit(quantities, 'exit_repair', expected_prices=prices)
+                self._submit(stage, quantities, 'exit_repair', expected_prices=prices)
             else:
-                self._add_wait('halted_leg_preserving_matched_hedge')
+                self._add_wait(stage, 'halted_leg_preserving_matched_hedge')
             return True
         return False
 
-    def _close(self):
-        if self.stage is None or self._pending():
+    def _close(self, stage):
+        if stage is None or self._pending():
             return
-        stage, now = self.stage, self.clock.timestamp_ns()
+        now = self.clock.timestamp_ns()
         stage.phase = 'exit'
         ids = self._ids(stage.pair)
         if self.pair_epochs[stage.pair] > stage.reconciled_epoch_ns:
-            self._add_wait('event_position_reconciliation_required')
+            self._add_wait(stage, 'event_position_reconciliation_required')
             return
         if any(not self.venue_specs_match.get(self._symbol(i), False) for i in ids):
-            self._add_wait('venue_specification_review_required')
+            self._add_wait(stage, 'venue_specification_review_required')
             return
-        if self._trim_halted_excess(now):
+        if self._trim_halted_excess(stage, now):
             return
         quantities, prices = [], []
         bounded = now - stage.exit_started_ns < self.config.hedge_timeout_ms * 1_000_000
         values = [abs(q) * max(self.markets[i].ask, self.markets[i].mark) for i, q in zip(ids, stage.quantities)]
         if any(q and self.markets[i].ask <= 0 for i, q in zip(ids, stage.quantities)):
-            self._add_wait('exit_price_unavailable')
+            self._add_wait(stage, 'exit_price_unavailable')
             return
         fraction = min(1., float(self.config.batch_notional) / max(values)) if max(values) > 0 else 1.
         for iid, held in zip(ids, stage.quantities):
@@ -1158,48 +1274,54 @@ class EtfArbStrategy(Strategy):
                 amount = min(amount, self.config.execution_depth_fraction * sum(q for _, q in book))
             quantities.append(self._quantity(iid, -math.copysign(amount, held)))
             prices.append(None)
-        self._submit(quantities, 'exit', expected_prices=prices)
+        self._submit(stage, quantities, 'exit', expected_prices=prices)
 
-    def _submit(self, quantities, action, expected_prices=None):
+    def _submit(self, stage, quantities, action, expected_prices=None):
         self._assert_thread()
-        if self.stage is None or self._pending():
-            raise RuntimeError('order submission requires one active stage and no pending batch')
+        if stage.pair not in self.stages or self._pending() or self.executing_pair not in (None, stage.pair):
+            raise RuntimeError('order submission requires exclusive batch ownership and no pending orders')
         now = self.clock.timestamp_ns()
         headroom = self._available_capital()
         created = []
-        for leg, (iid, signed) in enumerate(zip(self._ids(self.stage.pair), quantities)):
+        reductions = []
+        for leg, (iid, signed) in enumerate(zip(self._ids(stage.pair), quantities)):
             signed = self._quantity(iid, signed)
             if abs(signed) < float(self.instruments[iid].size_increment) / 2:
                 continue
             instrument = self.instruments[iid]
+            reducing = signed * stage.quantities[leg] < 0 and abs(signed) <= abs(stage.quantities[leg]) + 1e-9
+            net = self._instrument_quantity(iid)
             kwargs = dict(instrument_id=iid, order_side=OrderSide.BUY if signed > 0 else OrderSide.SELL,
                           quantity=instrument.make_qty(abs(signed)),
-                          reduce_only=action in ['exit', 'exit_repair'] or (action == 'repair' and signed * self.stage.quantities[leg] < 0 and abs(signed) <= abs(self.stage.quantities[leg]) + 1e-9),
-                          tags=[f'etf:{self.stage.pair}', f'batch:{self.stage.batches}', action])
+                          reduce_only=reducing and signed * net < 0 and abs(signed) <= abs(net) + 1e-9,
+                          tags=[f'etf:{stage.pair}', f'batch:{stage.batches}', action])
             order = self.order_factory.market(**kwargs)
-            self.orders[str(order.client_order_id)] = Pending(str(iid), leg, signed, now, action,
+            self.orders[str(order.client_order_id)] = Pending(stage.pair, str(iid), leg, signed, now, action,
                 expected_price=expected_prices[leg] if expected_prices else None,
-                reserved_margin=0. if kwargs['reduce_only'] else abs(signed) * max(
+                reserved_margin=0. if reducing else abs(signed) * max(
                     self.markets[iid].ask, self.markets[iid].mark,
                     expected_prices[leg] if expected_prices and expected_prices[leg] else 0.) *
-                    (1 / self.stage.native_leverages[leg] + 2 * self.config.taker_fee))
+                    (1 / stage.native_leverages[leg] + 2 * self.config.taker_fee))
             created.append(order)
+            reductions.append(reducing)
         if not created:
-            self.stage.next_attempt_ns = now + self.config.retry_interval_ms * 1_000_000
+            stage.next_attempt_ns = now + self.config.retry_interval_ms * 1_000_000
             return
         required = sum(self.orders[str(o.client_order_id)].reserved_margin for o in created)
         if required > headroom + 1e-6:
             for order in created:
                 self.orders.pop(str(order.client_order_id))
-            self.stage.next_attempt_ns = now + self.config.retry_interval_ms * 1_000_000
-            self._add_wait('local_capital_reservation_insufficient')
+            stage.next_attempt_ns = now + self.config.retry_interval_ms * 1_000_000
+            self._add_wait(stage, 'local_capital_reservation_insufficient')
             return
-        if self.fault_reason and not all(order.is_reduce_only for order in created):
+        if self.fault_reason and not all(reductions):
             for order in created:
                 self.orders.pop(str(order.client_order_id))
             return
+        self.executing_pair = stage.pair
+        self.execution_revision += 1
         saved = self._save()
-        if not saved and not all(order.is_reduce_only for order in created):
+        if not saved and not all(reductions):
             for order in created:
                 self.orders.pop(str(order.client_order_id))
             self._drive()
@@ -1223,7 +1345,7 @@ class EtfArbStrategy(Strategy):
         finally:
             self.dispatching = False
         if submitted:
-            self._record('orders_sent', pair=self.stage.pair, action=action, batch=self.stage.batches,
+            self._record('orders_sent', pair=stage.pair, action=action, batch=stage.batches,
                      orders=[str(o.client_order_id) for o in submitted],
                      details=[{'id': str(o.client_order_id), 'instrument': str(o.instrument_id),
                                'side': str(o.side), 'order_type': str(o.order_type), 'quantity': str(o.quantity), 'price': str(o.price) if hasattr(o, 'price') else None,
@@ -1234,8 +1356,9 @@ class EtfArbStrategy(Strategy):
         self._assert_thread()
         key = str(event.client_order_id)
         pending = self.orders.get(key)
+        stage = self.stages.get(pending.pair) if pending else None
         unique = key, str(event.trade_id)
-        if pending is None or self.stage is None or unique in self.seen_fills:
+        if stage is None or unique in self.seen_fills:
             return
         self.seen_fills.add(unique)
         self.markets[event.instrument_id].last_fill_ns = max(self.markets[event.instrument_id].last_fill_ns, event.ts_event)
@@ -1243,11 +1366,15 @@ class EtfArbStrategy(Strategy):
         pending.filled = float(Decimal(str(pending.filled)) + event.last_qty.as_decimal())
         signed = size if event.order_side == OrderSide.BUY else -size
         commission = max(0., float(event.commission)) if str(event.commission.currency) == 'USDT' else size * float(event.last_px) * self.config.taker_fee
-        account_fill(self.stage, pending.leg, signed, float(event.last_px), commission)
-        self.stage.quantities[pending.leg] = float(Decimal(str(self.stage.quantities[pending.leg])) + Decimal(str(signed)))
+        prior_pnl, prior_fees = stage.realized_pnl, stage.fees
+        account_fill(stage, pending.leg, signed, float(event.last_px), commission)
+        self.realized_pnl += stage.realized_pnl - prior_pnl
+        self.fees += stage.fees - prior_fees
+        self.execution_revision += 1
+        stage.quantities[pending.leg] = float(Decimal(str(stage.quantities[pending.leg])) + Decimal(str(signed)))
         pending.terminal |= pending.filled >= abs(pending.quantity) - 1e-9
         self._save()
-        self._record('fill', order=key, qty=signed, price=float(event.last_px), action=pending.action,
+        self._record('fill', pair=stage.pair, order=key, qty=signed, price=float(event.last_px), action=pending.action,
                      exchange_time_ns=event.ts_event, init_ns=event.ts_init, trade_id=str(event.trade_id),
                      commission=str(event.commission), liquidity_side=str(event.liquidity_side),
                      expected_price=pending.expected_price,
@@ -1258,14 +1385,15 @@ class EtfArbStrategy(Strategy):
     def _terminal(self, event, failed=False):
         self._assert_thread()
         pending = self.orders.get(str(event.client_order_id))
-        if pending is None or self.stage is None or pending.terminal:
+        stage = self.stages.get(pending.pair) if pending else None
+        if stage is None or pending.terminal:
             return
         pending.terminal = True
-        self.stage.next_attempt_ns = self.clock.timestamp_ns() + self.config.retry_interval_ms * 1_000_000 if pending.action != 'entry' else 0
-        self._record('order_terminal', order=str(event.client_order_id), event=type(event).__name__,
+        stage.next_attempt_ns = self.clock.timestamp_ns() + self.config.retry_interval_ms * 1_000_000 if pending.action != 'entry' else 0
+        self._record('order_terminal', pair=stage.pair, order=str(event.client_order_id), event=type(event).__name__,
                      exchange_time_ns=event.ts_event, reason=getattr(event, 'reason', None))
         if failed and pending.action == 'entry':
-            self.stage.adding_error = 'entry_rejected_waiting_for_reversion'
+            stage.adding_error = 'entry_rejected_waiting_for_reversion'
         if failed and self.venue_monitor:
             self.venue_monitor.refresh.set()
         self._save()
@@ -1274,7 +1402,8 @@ class EtfArbStrategy(Strategy):
     def on_order_accepted(self, event):
         self._assert_thread()
         if str(event.client_order_id) in self.orders:
-            self._record('order_accepted', order=str(event.client_order_id), venue_order_id=str(event.venue_order_id),
+            self._record('order_accepted', pair=self.orders[str(event.client_order_id)].pair,
+                         order=str(event.client_order_id), venue_order_id=str(event.venue_order_id),
                          exchange_time_ns=event.ts_event, init_ns=event.ts_init)
 
     def on_order_rejected(self, event):
@@ -1342,14 +1471,13 @@ class EtfArbStrategy(Strategy):
                     self.query_order(order, client_id=self.exec_client)
                     if not order.is_pending_cancel:
                         self.cancel_order(order, client_id=self.exec_client)
-            self._add_wait('order_resolution_pending')
+            self._add_wait(self.stages[pending.pair], 'order_resolution_pending')
         self._drive()
-        if self.fault_reason and self.stage is None:
+        if self.fault_reason and not self.stages:
             self._request_node_stop()
 
         if self.recorder:
-            held = self.stage.pair if self.stage else None
-            self.recorder.end_due(now, held)
+            self.recorder.end_due(now, self.stages)
             if now - self.last_capture_state_ns >= 1_000_000_000:
                 self.last_capture_state_ns = now
                 for name in self.recorder.active:
@@ -1363,11 +1491,11 @@ class EtfArbStrategy(Strategy):
                 self.log.error(f'capture_issue error={issue[0]} dropped={issue[1]}; trading continues')
 
     def _health(self, now):
-        free = self._available_capital()
+        free = self._available_capital() if self.capital_state else None
         ages = sorted(self.quote_ages_ms)
         pairs = {}
         for name in self.pairs:
-            fair = self._fair(name, now)
+            fair = self.stages[name].fair if name in self.stages else self._fair(name, now)
             etf, under = (self.markets[i] for i in self._ids(name))
             pairs[name] = {'anchor_ready': fair is not None, 'correction': fair.baseline if fair else None,
                            'baseline': self.baselines[name].describe(),
@@ -1379,7 +1507,8 @@ class EtfArbStrategy(Strategy):
                      venue={'checked_ns': self.venue_checked_ns, 'error': self.venue_error,
                             'worker_alive': self.venue_monitor.worker.is_alive() if self.venue_monitor else False,
                             'events': [asdict(e) for e in self.events]}, paused=sorted(self.paused),
-                     stage=self.stage.pair if self.stage else None, pending=sum(not p.terminal for p in self.orders.values()),
+                     stages=list(self.stages), executing_pair=self.executing_pair,
+                     pending=sum(not p.terminal for p in self.orders.values()),
                      stats=dict(self.stats), pairs=pairs, capture=self.recorder.status() if self.recorder else None,
                      fault=self.fault_reason, state_failed=self.state_failed,
                      references={'worker_alive': self.reference_worker.is_alive() if self.reference_worker else False,
@@ -1391,37 +1520,44 @@ class EtfArbStrategy(Strategy):
                                       'funding_age_ms': (now-m.funding_seen_ns)/1e6 if m.funding_seen_ns else None}
                               for i, m in self.markets.items()})
 
-    def _finish(self):
+    def _finish(self, stage):
         self._assert_thread()
-        stage = self.stage
         if stage is None:
             return
-        if self._pending() or not self._flat():
+        if self._pending() or not self._flat(stage):
             raise RuntimeError('stage completion requires no pending orders and flat quantities')
         actual = self._position_quantities(stage.pair)
         if any(abs(q) >= float(self.instruments[iid].size_increment) / 2
                for iid, q in zip(self._ids(stage.pair), actual)):
             stage.quantities = actual
-            self._exit('position_mismatch', pause=True)
+            self._exit(stage, 'position_mismatch', pause=True)
             return
         if stage.pause_after_exit:
             self.paused.add(stage.pair)
         self._record('stage_closed', pair=stage.pair, batches=stage.batches,
                      reason=stage.exit_reason or ('entry_rejected' if stage.pause_after_exit else 'reversion'),
                      duration_ms=(self.clock.timestamp_ns() - stage.started_ns) / 1e6, paused=stage.pause_after_exit)
-        self.stage = None
-        self.orders.clear()
-        self.seen_fills.clear()
+        self.stages.pop(stage.pair)
+        removed = {key for key, order in self.orders.items() if order.pair == stage.pair}
+        self.orders = {key: order for key, order in self.orders.items() if key not in removed}
+        self.seen_fills = {fill for fill in self.seen_fills if fill[0] not in removed}
+        if self.executing_pair == stage.pair:
+            self.executing_pair = None
         self._save()
 
+    def _instrument_quantity(self, iid, excluding=None, absolute=False):
+        quantities = (Decimal(str(stage.quantities[self._ids(name).index(iid)]))
+                      for name, stage in self.stages.items() if name != excluding and iid in self._ids(name))
+        return float(sum((abs(q) if absolute else q for q in quantities), Decimal(0)))
+
     def _position_quantities(self, name):
-        return [float(sum((p.signed_decimal_qty() for p in self.cache.positions_open(instrument_id=iid, strategy_id=self.id)), Decimal(0)))
+        return [float(sum((p.signed_decimal_qty() for p in self.cache.positions_open(instrument_id=iid, strategy_id=self.id)), Decimal(0))) - self._instrument_quantity(iid, excluding=name)
                 for iid in self._ids(name)]
 
     def _record(self, kind, **values):
         record = {'time_ns': self.clock.timestamp_ns(), 'kind': kind, **values}
         if self.recorder:
-            name = values.get('pair') or (self.stage.pair if self.stage else None)
+            name = values.get('pair') or self.executing_pair
             captured = dict(values)
             if name in self.pairs:
                 captured['state'] = self._capture_state(name, record['time_ns'])
@@ -1445,7 +1581,11 @@ class EtfArbStrategy(Strategy):
         self._assert_thread()
         if self.state_failed:
             return False
-        payload = {'version': 1, 'strategy_id': str(self.id), 'stage': asdict(self.stage) if self.stage else None,
+        payload = {'version': 2, 'strategy_id': str(self.id),
+                   'stages': {name: asdict(stage) for name, stage in self.stages.items()},
+                   'executing_pair': self.executing_pair,
+                   'capital': asdict(self.capital_state) if self.capital_state else None,
+                   'realized_pnl': self.realized_pnl, 'fees': self.fees,
                    'orders': {key: asdict(value) for key, value in self.orders.items()},
                    'paused': sorted(self.paused), 'seen_fills': list(self.seen_fills),
                    'fault': self.fault_reason, 'stopped': self.stopping,
@@ -1466,31 +1606,49 @@ class EtfArbStrategy(Strategy):
         checkpoint = read_state(self.state_path)
         if checkpoint:
             payload = checkpoint
-            if payload['version'] != 1 or payload['strategy_id'] != str(self.id):
+            if payload['version'] not in (1, 2) or payload['strategy_id'] != str(self.id):
                 raise RuntimeError('state identity mismatch')
             self.paused = set(payload['paused'])
+            self.seen_fills = {tuple(fill) for fill in payload['seen_fills']}
             from .special_events import SpecialEvent
             self.events = tuple(SpecialEvent(**{**e, 'symbols': tuple(e['symbols'])}) for e in payload.get('special_events', []))
             self.pair_epochs.update(payload.get('event_epochs', {}))
-            if payload['stage']:
-                saved = payload['stage']
+            saved_stages = payload['stages'] if payload['version'] == 2 else (
+                {payload['stage']['pair']: payload['stage']} if payload['stage'] else {})
+            self.realized_pnl, self.fees = payload.get('realized_pnl', 0.), payload.get('fees', 0.)
+            for name, saved in saved_stages.items():
                 saved['fair'] = FairValue(**saved['fair'])
-                self.stage = Stage(**saved)
-                if self.stage.pair not in self.pairs:
+                if name not in self.pairs or saved['pair'] != name:
                     raise RuntimeError('recovered pair absent from configuration')
-                ids = self._ids(self.stage.pair)
-                if any(abs(q) > 1e-9 for iid, q in positions.items() if iid not in ids):
-                    raise RuntimeError('unexpected positions outside recovered pair')
-                self.stage.quantities = [positions[iid] for iid in ids]
-                self.stage.exit_reason = 'restart_recovery'
-                self.stage.phase = 'exit'
-                self.stage.exit_started_ns = self.clock.timestamp_ns()
-                self.stage.repair_deadline_ns = 0
-                self.stage.pause_after_exit = True
-                self.stage.next_attempt_ns = 0
-                self.orders = {str(o.client_order_id): Pending(str(o.instrument_id), ids.index(o.instrument_id),
-                               float(o.quantity) * (1 if o.side == OrderSide.BUY else -1), self.clock.timestamp_ns(),
-                               'recovery', filled=float(o.filled_qty)) for o in live_orders}
+                self.stages[name] = Stage(**saved)
+            self.executing_pair = payload.get('executing_pair') if payload['version'] == 2 else next(iter(self.stages), None)
+            if self.stages:
+                if self.executing_pair:
+                    if self.executing_pair not in self.stages:
+                        raise RuntimeError('recovered batch owner absent from stages')
+                    self.stages[self.executing_pair].quantities = self._position_quantities(self.executing_pair)
+                if any(abs(q - self._instrument_quantity(iid)) >= float(self.instruments[iid].size_increment) / 2
+                       for iid, q in positions.items()):
+                    raise RuntimeError('recovered portfolio differs from exchange positions')
+                owners = set()
+                for order in live_orders:
+                    key = str(order.client_order_id)
+                    owner = payload['orders'].get(key, {}).get('pair', self.executing_pair)
+                    if owner not in self.stages or order.instrument_id not in self._ids(owner):
+                        raise RuntimeError('recovered order has no matching stage')
+                    owners.add(owner)
+                    self.orders[key] = Pending(owner, str(order.instrument_id), self._ids(owner).index(order.instrument_id),
+                        float(order.quantity) * (1 if order.side == OrderSide.BUY else -1), self.clock.timestamp_ns(),
+                        'recovery', filled=float(order.filled_qty))
+                if len(owners) > 1 or (owners and owners != {self.executing_pair}):
+                    raise RuntimeError('recovered orders violate serial batch ownership')
+                for stage in self.stages.values():
+                    stage.exit_reason = 'restart_recovery'
+                    stage.phase = 'exit'
+                    stage.exit_started_ns = self.clock.timestamp_ns()
+                    stage.repair_deadline_ns = 0
+                    stage.pause_after_exit = True
+                    stage.next_attempt_ns = 0
                 for order in live_orders:
                     self.cancel_order(order, client_id=self.exec_client)
                 self._save()
@@ -1509,19 +1667,19 @@ class EtfArbStrategy(Strategy):
         if self.startup_failed:
             self._close_resources()
             return
-        if self.stage:
-            self.stage.quantities = self._position_quantities(self.stage.pair)
-            if self._flat() and not self.cache.orders_open(strategy_id=self.id):
-                self._record('stage_closed', pair=self.stage.pair, batches=self.stage.batches,
-                             reason=self.stage.exit_reason or 'managed_stop',
-                             duration_ms=(self.clock.timestamp_ns() - self.stage.started_ns) / 1e6,
-                             paused=self.stage.pause_after_exit)
-                if self.stage.pause_after_exit:
-                    self.paused.add(self.stage.pair)
-                self.stage = None
-                self.orders.clear()
+        if not self.cache.positions_open(strategy_id=self.id) and not self.cache.orders_open(strategy_id=self.id):
+            for stage in self.stages.values():
+                self._record('stage_closed', pair=stage.pair, batches=stage.batches,
+                             reason=stage.exit_reason or 'managed_stop',
+                             duration_ms=(self.clock.timestamp_ns() - stage.started_ns) / 1e6,
+                             paused=stage.pause_after_exit)
+                if stage.pause_after_exit:
+                    self.paused.add(stage.pair)
+            self.stages.clear()
+            self.orders.clear()
+            self.executing_pair = None
         self._save()
-        self._record('stopped', stats=self.stats, remaining=asdict(self.stage) if self.stage else None)
+        self._record('stopped', stats=self.stats, remaining={name: asdict(s) for name, s in self.stages.items()})
         self._close_resources()
 
     def _close_resources(self):
@@ -1547,10 +1705,20 @@ class EtfArbStrategy(Strategy):
         self._assert_thread()
         self.exiting = True
         self.confirmations.clear()
+        self.confirmed.clear()
         if self.startup_failed:
             return
-        if self.stage:
-            self._exit('managed_stop')
+        for stage in list(self.stages.values()):
+            self._exit(stage, 'managed_stop')
+        self._drive()
+
+    # NT的market_exit会逐合约调用close_position，统一转入双腿批次调度。
+    def close_position(self, position, client_id=None, tags=None, time_in_force=TimeInForce.GTC,
+                       reduce_only=True, quote_quantity=False, params=None):
+        if self.exiting:
+            self._drive()
+            return
+        super().close_position(position, client_id, tags, time_in_force, reduce_only, quote_quantity, params)
 
     # NT自带退出检查也由LiveClock触发，退出收尾必须回到同一线程。
     def _check_market_exit(self, event):
