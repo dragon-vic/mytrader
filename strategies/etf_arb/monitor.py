@@ -110,7 +110,7 @@ def collect(root=ROOT):
                       'order_batches_sent': counts['orders_sent'], 'fill_events': counts['fill'],
                       'fees_by_currency': {k: str(v) for k, v in fees.items()}, 'coverage': coverage},
             'latency_ms': health['quote_age_ms'], 'market_freshness': health['markets'], 'capture': health.get('capture'),
-            'references': health.get('references'),
+            'references': health.get('references'), 'notifications': health.get('notifications'),
             'capital': health.get('capital'), 'venue': health.get('venue'),
             'fault': fault,
             'recent_events': issues[-20:], 'latest_log_error_count_in_last_2mb': error_count,
@@ -141,6 +141,8 @@ def markdown(data):
         capital = data['capital']
         lines += ['', f"资金快照时间 {timestamp(capital['checked_ns'])}，原生可用USDT {capital['available_at_check']}。",
                   f"读取规则 {capital['refresh_policy']}，资金错误 {capital['error']}。"]
+    if data.get('notifications') is not None:
+        lines += ['', f"微信通知状态：{json.dumps(data['notifications'], ensure_ascii=False)}。"]
     return '\n'.join(lines) + '\n'
 
 

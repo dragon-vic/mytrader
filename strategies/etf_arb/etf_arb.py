@@ -7,6 +7,7 @@ import queue
 import threading
 from collections import deque
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -18,8 +19,9 @@ from nautilus_trader.trading.strategy import Strategy
 from nautilus_trader.common.component import LiveClock
 from nautilus_trader.common.actor import Actor
 from adapters.binance import market_order_limits
-from utils.constants import NODE_STOP_TOPIC
+from utils.constants import LOCAL_TZ, NODE_STOP_TOPIC
 from utils.live_control import NodeStopRequest
+from utils.wecom import WeComNotifier
 
 from .baseline import Baseline, DAY, FairValue, HOUR, MINUTE, MarketCalendar
 from .config import EtfArbConfig, PairConfig
@@ -60,6 +62,10 @@ class Stage:
     native_leverages: list[float] = field(default_factory=lambda: [1., 1.])
     hedge_slope: float = 0.
     entry_confirmed: bool = False
+    open_notified: bool = False
+    exit_notified: bool = False
+    estimated_fees: bool = False
+    entry_progress_notified: int = 0
 
     def __post_init__(self):
         if not self.hedge_slope:
@@ -124,6 +130,8 @@ class EtfArbStrategy(Strategy):
         self.exiting = False
         self.state_path = Path(config.state_path)
         self.audit = None
+        self.notifier = None
+        self.notification_error = None
         self.runtime_lock = None
         self.state_failed = False
         self.startup_failed = False
@@ -217,6 +225,12 @@ class EtfArbStrategy(Strategy):
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         self.runtime_lock = RuntimeLock(self.state_path.with_suffix('.lock'))
         self.audit = Path(self.config.audit_path).open('a', encoding='utf-8', buffering=1)
+        if self.config.wecom_notifications and isinstance(self.clock, LiveClock):
+            try:
+                self.notifier = WeComNotifier(Path(self.config.audit_path).parent / 'wecom_deliveries.jsonl')
+            except Exception as exc:
+                self.notification_error = f'start:{type(exc).__name__}'
+                self.log.error(f'WeCom notification startup failed error={type(exc).__name__}')
         self.recorder = EventRecorder(Path(self.config.audit_path).parent / 'capture', self.markets, self.config,
                                       {'strategy_config': json.loads(self.config.json()),
                                        'strategy_id': str(self.id), 'source': 'NT strategy callbacks',
@@ -716,6 +730,7 @@ class EtfArbStrategy(Strategy):
     def _capture_state(self, name, now):
         stage = self.stages.get(name)
         fair = stage.fair if stage else self._fair(name, now)
+        capital = self._capital_status(now)
         markets = [self.markets[i] for i in self._ids(name)]
         gaps = [entry_gap(fair, *markets, side) for side in (1, -1)] if fair else None
         target = min(self.config.exit_gap_cap, self.config.exit_gap +
@@ -728,7 +743,7 @@ class EtfArbStrategy(Strategy):
                 'calendar_blocked': self.calendar.entry_blocked(now, self.config),
                 'funding_blocked': [m.funding_blocked(now, self.config.funding_block_minutes,
                                                      self.config.max_funding_age_ms) for m in markets],
-                'available_usdt': self._available_capital() if self.capital_state else None, 'capital': self._capital_status(now),
+                'available_usdt': capital['local_headroom'], 'capital': capital,
                 'venue_reason': self._venue_reason(name, now), 'event_epoch_ns': self.pair_epochs[name],
                 'confirmation': self.confirmations[name][2] if name in self.confirmations else None,
                 'stage': asdict(stage) if stage else None,
@@ -779,11 +794,12 @@ class EtfArbStrategy(Strategy):
 
     def _stage_signal_fair(self, stage, now):
         fair = self._fair(stage.pair, now)
-        if fair is not None and fair is not stage.fair and fair != stage.fair:
+        if fair is not None and fair is not stage.fair:
             previous = stage.fair
             stage.fair = fair
-            self._record('stage_baseline_updated', pair=stage.pair, previous=asdict(previous),
-                         fair=asdict(fair), hedge_slope=stage.hedge_slope)
+            if fair != previous:
+                self._record('stage_baseline_updated', pair=stage.pair, previous=asdict(previous),
+                             fair=asdict(fair), hedge_slope=stage.hedge_slope)
         return fair
 
     def _drop_entry_confirmation(self, name):
@@ -1188,8 +1204,11 @@ class EtfArbStrategy(Strategy):
                         self._decision(stage.pair, 'repair_plan', quantities=quantities, expected_prices=prices, reducing=reducing)
                         self._submit(stage, quantities, 'exit_repair' if reducing else 'repair', expected_prices=prices)
                 return
+            adding = stage.phase in ('batch', 'repair')
             stage.phase = 'holding'
             stage.repair_deadline_ns = 0
+            if adding:
+                self._notify_entry_progress(stage)
         if not fresh:
             self._add_wait(stage, 'stale_or_consumed_quote')
             return
@@ -1441,6 +1460,8 @@ class EtfArbStrategy(Strategy):
         size = float(event.last_qty)
         pending.filled = float(Decimal(str(pending.filled)) + event.last_qty.as_decimal())
         signed = size if event.order_side == OrderSide.BUY else -size
+        reducing = signed * stage.quantities[pending.leg] < 0
+        stage.estimated_fees |= str(event.commission.currency) != 'USDT' or float(event.commission) < 0
         commission = max(0., float(event.commission)) if str(event.commission.currency) == 'USDT' else size * float(event.last_px) * self.config.taker_fee
         prior_pnl, prior_fees = stage.realized_pnl, stage.fees
         account_fill(stage, pending.leg, signed, float(event.last_px), commission)
@@ -1449,6 +1470,12 @@ class EtfArbStrategy(Strategy):
         self.execution_revision += 1
         stage.quantities[pending.leg] = float(Decimal(str(stage.quantities[pending.leg])) + Decimal(str(signed)))
         pending.terminal |= pending.filled >= abs(pending.quantity) - 1e-9
+        if not reducing and not stage.open_notified:
+            stage.open_notified = True
+            self._notify_stage(stage, 'opened')
+        if reducing and pending.action in ('exit', 'exit_repair', 'recovery') and not stage.exit_notified:
+            stage.exit_notified = True
+            self._notify_stage(stage, 'closing')
         self._save()
         self._record('fill', pair=stage.pair, order=key, qty=signed, price=float(event.last_px), action=pending.action,
                      exchange_time_ns=event.ts_event, init_ns=event.ts_init, trade_id=str(event.trade_id),
@@ -1567,7 +1594,7 @@ class EtfArbStrategy(Strategy):
                 self.log.error(f'capture_issue error={issue[0]} dropped={issue[1]}; trading continues')
 
     def _health(self, now):
-        free = self._available_capital() if self.capital_state else None
+        capital = self._capital_status(now)
         ages = sorted(self.quote_ages_ms)
         pairs = {}
         for name in self.pairs:
@@ -1579,13 +1606,14 @@ class EtfArbStrategy(Strategy):
                            'gap': max(entry_gap(fair, etf, under, 1), entry_gap(fair, etf, under, -1))
                                   if fair and etf.bid > 0 and under.bid > 0 else None}
         self._record('health', ready=self.ready, bootstrap_remaining=[str(i) for i in self.bootstrap_remaining],
-                     available_usdt=free, capital=self._capital_status(now),
+                     available_usdt=capital['local_headroom'], capital=capital,
                      venue={'checked_ns': self.venue_checked_ns, 'error': self.venue_error,
                             'worker_alive': self.venue_monitor.worker.is_alive() if self.venue_monitor else False,
                             'events': [asdict(e) for e in self.events]}, paused=sorted(self.paused),
                      stages=list(self.stages), executing_pair=self.executing_pair,
                      pending=sum(not p.terminal for p in self.orders.values()),
                      stats=dict(self.stats), pairs=pairs, capture=self.recorder.status() if self.recorder else None,
+                     notifications=self._notification_status(),
                      fault=self.fault_reason, state_failed=self.state_failed,
                      references={'worker_alive': self.reference_worker.is_alive() if self.reference_worker else False,
                                  'errors': self.reference_errors},
@@ -1595,6 +1623,79 @@ class EtfArbStrategy(Strategy):
                                       'funding_ready': m.funding_history_ready,
                                       'funding_age_ms': (now-m.funding_seen_ns)/1e6 if m.funding_seen_ns else None}
                               for i, m in self.markets.items()})
+
+    def _notification_status(self):
+        if not self.config.wecom_notifications:
+            return None
+        try:
+            status = self.notifier.status() if self.notifier else {'worker_alive': False}
+        except Exception as exc:
+            self.notification_error = f'status:{type(exc).__name__}'
+            status = {'worker_alive': False}
+        return {**status, 'strategy_error': self.notification_error}
+
+    # 仅在批次对冲完成后检查实际持仓，每个阶段各档位投递一次。
+    def _notify_entry_progress(self, stage):
+        if not self.config.wecom_notifications or stage.budget <= 0:
+            return
+        gross = sum(abs(q) * average for q, average in zip(stage.quantities, stage.average_prices))
+        progress = 100 * gross / stage.budget
+        for level in (25, 50, 75):
+            if level > stage.entry_progress_notified and progress + 1e-9 >= level:
+                stage.entry_progress_notified = level
+                self._notify_stage(stage, 'progress', level=level, progress=progress)
+
+    # 通知边界隔离格式化与发送异常，交易流程继续执行。
+    def _notify_stage(self, stage, kind, reason=None, *, level=None, progress=None):
+        try:
+            return self._send_stage_notification(stage, kind, reason, level=level, progress=progress)
+        except Exception as exc:
+            self.notification_error = f'send:{type(exc).__name__}'
+            self.log.error(f'WeCom notification failed pair={stage.pair} kind={kind} error={type(exc).__name__}')
+            return False
+
+    def _send_stage_notification(self, stage, kind, reason=None, *, level=None, progress=None):
+        if self.notifier is None:
+            return True
+        now = self.clock.timestamp_ns()
+        stamp = datetime.fromtimestamp(now / 1e9, LOCAL_TZ).strftime('%m-%d %H:%M:%S')
+        opened = datetime.fromtimestamp(stage.started_ns / 1e9, LOCAL_TZ).strftime('%m-%d %H:%M:%S.%f')
+        title = f'仓位达到{level}%' if kind == 'progress' else {
+            'opened': '开始开仓', 'closing': '开始平仓', 'closed': '完全平仓'}[kind]
+        pair = self.pairs[stage.pair]
+        directions = [-stage.side, stage.side * math.copysign(1, stage.hedge_slope)]
+        legs = ' / '.join(f'{"多" if side > 0 else "空"} {self._symbol(iid)}'
+                          for iid, side in zip((pair.etf, pair.underlying), directions))
+        lines = [f'ETF套利 · {stage.pair} · {title}',
+                 f'{stamp} 北京时间', legs, f'阶段开始 {opened}']
+        if kind == 'opened':
+            lines += [f'阶段名义预算 {stage.budget:,.2f} USDT',
+                      f'首次成交后持仓 {stage.quantities[0]:.8g} / {stage.quantities[1]:.8g}']
+        elif kind == 'progress':
+            gross = sum(abs(q) * average for q, average in zip(stage.quantities, stage.average_prices))
+            lines += [f'当前建仓进度 {progress:.1f}%', f'持仓名义额 {gross:,.2f} USDT',
+                      f'阶段名义预算 {stage.budget:,.2f} USDT', f'累计开仓批数 {stage.batches}']
+        else:
+            reason = reason or stage.exit_reason or 'reversion'
+            reasons = {'reversion': '价差回归', 'scheduled_close': '收盘前退出', 'managed_stop': '策略停止',
+                       'restart_recovery': '重启恢复', 'hedge_timeout': '对冲超时',
+                       'position_mismatch': '仓位核对异常'}
+            lines += [f'退出原因 {reasons.get(reason, reason)}',
+                      f'阶段时长 {(now - stage.started_ns) / 60e9:.1f} 分钟',
+                      f'累计开仓批数 {stage.batches}',
+                      f'已实现盈亏 {stage.realized_pnl:+.4f} USDT',
+                      f'{"估算手续费" if stage.estimated_fees else "手续费"} {stage.fees:.4f} USDT']
+            if kind == 'closing':
+                lines += [f'首笔平仓后剩余数量 {stage.quantities[0]:.8g} / {stage.quantities[1]:.8g}']
+            else:
+                lines += [f'交易净盈亏 {stage.realized_pnl - stage.fees:+.4f} USDT',
+                          '双腿仓位、在途订单已清零',
+                          '组合状态 ' + ('已暂停' if stage.pause_after_exit else '继续监控')]
+        event = f'{kind}-{level}' if kind == 'progress' else kind
+        accepted = self.notifier.send(f'{self.id}:{stage.pair}:{stage.started_ns}:{event}', '\n'.join(lines))
+        if not accepted:
+            self.log.error(f'WeCom notification rejected pair={stage.pair} kind={kind}')
+        return accepted
 
     def _finish(self, stage):
         self._assert_thread()
@@ -1610,6 +1711,8 @@ class EtfArbStrategy(Strategy):
             return
         if stage.pause_after_exit:
             self.paused.add(stage.pair)
+        if stage.open_notified or stage.exit_notified or stage.realized_pnl or stage.fees:
+            self._notify_stage(stage, 'closed')
         self._record('stage_closed', pair=stage.pair, batches=stage.batches,
                      reason=stage.exit_reason or ('entry_rejected' if stage.pause_after_exit else 'reversion'),
                      duration_ms=(self.clock.timestamp_ns() - stage.started_ns) / 1e6, paused=stage.pause_after_exit)
@@ -1698,6 +1801,8 @@ class EtfArbStrategy(Strategy):
                 if name not in self.pairs or saved['pair'] != name:
                     raise RuntimeError('recovered pair absent from configuration')
                 self.stages[name] = Stage(**saved)
+                # 旧检查点已持仓的阶段沿用原有阶段，避免恢复后重复开仓提醒。
+                self.stages[name].open_notified |= any(saved['quantities']) or bool(saved.get('fees'))
             self.executing_pair = payload.get('executing_pair') if payload['version'] == 2 else next(iter(self.stages), None)
             if self.stages:
                 # 清仓已完成但最后检查点未落盘时，以已核对的空仓结束旧阶段。
@@ -1751,6 +1856,8 @@ class EtfArbStrategy(Strategy):
             return
         if not self.cache.positions_open(strategy_id=self.id) and not self.cache.orders_open(strategy_id=self.id):
             for stage in self.stages.values():
+                if stage.open_notified or stage.exit_notified or stage.realized_pnl or stage.fees:
+                    self._notify_stage(stage, 'closed', reason=stage.exit_reason or 'managed_stop')
                 self._record('stage_closed', pair=stage.pair, batches=stage.batches,
                              reason=stage.exit_reason or 'managed_stop',
                              duration_ms=(self.clock.timestamp_ns() - stage.started_ns) / 1e6,
@@ -1765,6 +1872,13 @@ class EtfArbStrategy(Strategy):
         self._close_resources()
 
     def _close_resources(self):
+        notifier, self.notifier = self.notifier, None
+        if notifier:
+            try:
+                notifier.close()
+            except Exception as exc:
+                self.notification_error = f'close:{type(exc).__name__}'
+                self.log.error(f'WeCom notification close failed error={type(exc).__name__}')
         if self.capital_reader:
             self.capital_reader.close()
         if self.venue_monitor:

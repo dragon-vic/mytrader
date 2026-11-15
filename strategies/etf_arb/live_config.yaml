@@ -90,6 +90,7 @@ strategy:
       state_path: strategies/etf_arb/runtime/state.json
       data_client: BINANCE_USDT_FUTURES
       exec_client: BINANCE_USDT_FUTURES
+      wecom_notifications: true
       bootstrap: true
       capture_pre_seconds: 10
       capture_post_seconds: 60

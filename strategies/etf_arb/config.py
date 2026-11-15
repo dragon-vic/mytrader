@@ -61,6 +61,7 @@ class EtfArbConfig(StrategyConfig, frozen=True):
     audit_path: str
     data_client: str
     exec_client: str
+    wecom_notifications: bool
     bootstrap: bool
     capture_pre_seconds: int
     capture_post_seconds: int

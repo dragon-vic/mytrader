@@ -73,6 +73,16 @@ AWS NT LiveDataEngine压测使用80% L1和20%由实采价生成的L5，完整生
 
 ## 运维
 
+### 企业微信提醒
+
+`live_config.yaml`的`wecom_notifications: true`启用阶段提醒。首次开仓成交、阶段持仓达到目标名义额的25%/50%/75%、首次平仓成交和双腿完全平仓各提醒一次。进度在双腿批次对冲完成后，按实际持仓数量与成交均价计算双腿合计名义额，再除以本阶段目标名义预算。部分平仓后重新加仓时，各档位沿用已提醒标记。一次批次跨过多个档位时分别投递。最终提醒包含方向、开仓时间、持仓时长、累计开仓批数、退出原因、已实现盈亏、手续费、交易净盈亏及组合是否暂停。交易净盈亏使用策略账本的已实现盈亏减手续费。消息只保留汇总数据，含估算的费用使用“估算手续费”字段名。
+
+发送复用根目录`.env`中的`WECOM_CORP_ID`、`WECOM_AGENT_ID`、`WECOM_APP_SECRET`和`WECOM_ALLOWED_USER_IDS`。策略只格式化短文本并非阻塞入队，后台进行HTTP、token缓存、最多三次发送尝试和结果写盘。64条队列满或发送锁繁忙时立即拒绝，记录通知错误；首次与档位提醒按尝试去重。通知初始化、投递、状态查询及关闭异常在通知边界内处理。health及monitor的`notifications`暴露发送、失败、拒绝计数和线程状态。当前report目录的`wecom_deliveries.jsonl`按事件记录发送结果。停机时最多等待5秒排空后台队列，超时记录shutdown_delivery_timeout。后台为daemon线程，进程退出期限独立于网络重试。强制结束或超过排空期限时，待发内存消息可能丢失。
+
+修改配置与代码后，需重启ETF策略生效。
+
+同一次采集状态与health记录复用资金快照，资金扫描由两次降为一次。等值FairValue统一使用缓存对象，继续保留当期基线的数值与独立对冲斜率。十组持仓的500次快照微基准中，AWS中位耗时从60.54ms降至48.24ms，约减少20.3%。本地与AWS各65项真实LiveClock、NT sandbox及故障注入检查通过，覆盖三档进度、部分退出再加仓、旧检查点、通知初始化/发送/查询/关闭异常、队列满、锁竞争、超时、重试及token刷新。验证记录位于`research/notifications_release_20261115/`。
+
 按需监控入口为 `python strategies/etf_arb/monitor.py`，完整说明见 `MONITORING.md`。独立读取日志和检查点，打印中文摘要并更新固定 `monitor/status.json`、`monitor/status.md`，无需重启交易进程。文件保存上次查询结果，汇报时先刷新并检查数据时间。
 
 AWS目录 `/home/ubuntu/pycharm_nt`，环境 `/home/ubuntu/miniconda/envs/nt`。启动：

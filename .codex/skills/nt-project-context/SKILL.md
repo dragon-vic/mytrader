@@ -82,6 +82,7 @@ utils/config.py             YAML 加载、合并和规范化
 utils/constants.py          全局常量
 utils/runtime_setup.py      运行目录、artifact 和组件规格
 utils/live_control.py       Node 停止协议
+utils/wecom.py              通用企业微信后台发送，有界队列、重试与发送结果日志
 utils/backtest_setup.py     回测数据、instrument 和批量配置
 utils/reports.py            订单和持仓原始报告
 utils/summary.py            汇总统计、JSON、文本和终端表格
@@ -217,6 +218,8 @@ ssh aws
 服务器上的 live 报告、日志和 tmux session 属于运行态数据，读取时不得暴露密钥。
 
 ## 工具
+
+`utils/wecom.py`提供`WeComNotifier(delivery_path)`，策略调用`send(event_id, text)`非阻塞投递，返回是否入队，`close()`在停机时最多等待5秒排空，后台daemon线程随进程结束。后台复用企业微信应用凭据与`WECOM_ALLOWED_USER_IDS`白名单，缓存access token，失败最多尝试三次。64条内存队列满时拒绝并由调用方记录，发送结果写入指定JSONL，强制结束进程会丢失内存中待发消息。ETF的`wecom_notifications`在live配置启用，仅LiveClock启动发送线程，首次开仓成交、双腿匹配持仓达到本阶段目标名义额25%/50%/75%、首次平仓成交、最终双腿清零各提醒一次，阶段提醒按尝试去重，部分平仓后再加仓沿用档位标记；通知初始化、发送、状态及关闭异常均隔离，阶段标记随检查点保存。汇总复用阶段盈亏、手续费、批数和时间，交易净盈亏为已实现盈亏减手续费；消息仅保留汇总数据，用户要求去掉备注类信息。其它策略可直接复用发送接口。
 
 `tools/` 下的脚本默认独立调用，不自动接入策略、Node 或策略生命周期。
 
