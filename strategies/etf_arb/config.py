@@ -9,6 +9,7 @@ class PairConfig(NautilusConfig, frozen=True):
     etf: InstrumentId
     underlying: InstrumentId
     multiple: int
+    confirmation_ms: int | None = None
 
 
 class EtfArbConfig(StrategyConfig, frozen=True):
@@ -23,6 +24,7 @@ class EtfArbConfig(StrategyConfig, frozen=True):
     special_events_path: str
     entry_gap: float
     confirmation_ms: int
+    confirmation_reset_gap: float
     exit_gap: float
     exit_hour_step: float
     exit_gap_cap: float
@@ -73,14 +75,19 @@ class EtfArbConfig(StrategyConfig, frozen=True):
             raise ValueError('pairs must contain unique names')
         if any(p.etf == p.underlying or p.multiple == 0 for p in self.pairs):
             raise ValueError('invalid ETF pair')
+        if any(p.confirmation_ms is not None and p.confirmation_ms <= 0 for p in self.pairs):
+            raise ValueError('pair confirmation_ms must be positive')
         if self.gross_leverage <= 0 or self.batch_notional <= 0 or not 0 < self.capital_fraction < 1:
             raise ValueError('invalid leverage, batch notional or capital fraction')
-        if self.account_environment not in ('live', 'testnet') or self.capital_timeout_ms <= self.confirmation_ms:
+        confirmation_ms = max(self.confirmation_ms, *(p.confirmation_ms or self.confirmation_ms for p in self.pairs))
+        if self.account_environment not in ('live', 'testnet') or self.capital_timeout_ms <= confirmation_ms:
             raise ValueError('invalid native account environment or timeout')
         if not 0 < self.venue_poll_seconds < self.venue_max_age_seconds or not self.special_events_path:
             raise ValueError('invalid venue monitor configuration')
         if not 0 < self.exit_gap <= self.exit_gap_cap < self.entry_gap:
             raise ValueError('exit thresholds must be below entry_gap')
+        if not self.exit_gap_cap < self.confirmation_reset_gap < self.entry_gap:
+            raise ValueError('confirmation reset must be between exit cap and entry threshold')
         if not 0 < self.close_flatten_minutes < self.close_block_minutes:
             raise ValueError('flatten window must be inside entry block')
         if self.calibration_minutes != 5 or self.history_days < 28:
