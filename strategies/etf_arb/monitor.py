@@ -64,7 +64,7 @@ def collect(root=ROOT):
             interval.setdefault('first_health_today', timestamp(t))
             interval['last_health_today'] = timestamp(t)
             for name, p in row['pairs'].items():
-                if p['anchor_ready'] and p['fresh'] and p['gap'] is not None:
+                if p['anchor_ready'] and p['gap'] is not None:
                     if name not in peaks or p['gap'] * 100 > peaks[name]['gap_pct']:
                         peaks[name] = {'gap_pct': p['gap'] * 100, 'time': timestamp(t)}
         coverage.append(interval)
@@ -84,8 +84,8 @@ def collect(root=ROOT):
     fault = state.get('fault') or health.get('fault')
     status = ('stopped' if stopped else 'heartbeat_stale' if age > 90 else
               'fault' if fault else 'running' if health['ready'] else 'initializing')
-    pairs = {name: {'current_gap_pct': p['gap'] * 100 if p['gap'] is not None and age <= 90 and not stopped else None,
-                    'quote_fresh': p['fresh'] and age <= 90 and not stopped,
+    pairs = {name: {'current_gap_pct': p['gap'] * 100 if p['gap'] is not None else None,
+                    'quote_available': p['fresh'],
                     'entry_blocked': p['entry_blocked'] or age > 90 or stopped or bool(fault),
                     'baseline_ready': p['anchor_ready'], 'baseline_correction_pct': p['correction'] * 100 if p['correction'] is not None else None,
                     'baseline': p.get('baseline'),
@@ -99,7 +99,7 @@ def collect(root=ROOT):
     return {'schema_version': 1, 'generated_at': timestamp(now), 'data_asof': timestamp(health['time_ns']),
             'heartbeat_age_seconds': round(age, 2), 'status': status, 'run': folders[-1].name,
             'sources': {'report_dir': str(folders[-1]), 'checkpoint': str(checkpoint),
-                        'current_gap': 'latest_30_second_health', 'daily_peak': '30_second_health_samples_fresh_quotes_only',
+                        'current_gap': 'latest_30_second_health', 'daily_peak': '30_second_health_samples_with_baseline',
                         'positions': 'strategy_checkpoint_not_exchange_query', 'timezone': 'Asia/Shanghai'},
             'pairs': pairs, 'stages': state['stages'] if state['version'] == 2 else (
                 {state['stage']['pair']: state['stage']} if state['stage'] else {}),
@@ -122,11 +122,11 @@ def markdown(data):
         return f"ETF策略启动失败。查询时间 {data['generated_at']}，实例 {data['run']}。\n原因 {data['fault']}\n"
     lines = ['# ETF策略监控', '', f"查询时间：{data['generated_at']}；行情心跳：{data['data_asof']}（{data['heartbeat_age_seconds']}秒前）。",
              f"运行状态：{data['status']}；实例：{data['run']}。", '',
-             '| 组合 | 当前偏离 | 报价新鲜 | 禁开仓 | 今日采样峰值 | 峰值时间 |',
+             '| 组合 | 最近偏离 | 报价可用 | 禁开仓 | 今日采样峰值 | 峰值时间 |',
              '|---|---:|---|---|---:|---|']
     for name, pair in data['pairs'].items():
         gap, peak = pair['current_gap_pct'], pair['today_sampled_peak']
-        lines.append(f"| {name} | {f'{gap:.3f}%' if gap is not None else '无实时数据'} | {'是' if pair['quote_fresh'] else '否'} | {'是' if pair['entry_blocked'] else '否'} | {str(round(peak['gap_pct'], 3))+'%' if peak else '无样本'} | {peak['time'] if peak else '—'} |")
+        lines.append(f"| {name} | {f'{gap:.3f}%' if gap is not None else '等待报价'} | {'是' if pair['quote_available'] else '否'} | {'是' if pair['entry_blocked'] else '否'} | {str(round(peak['gap_pct'], 3))+'%' if peak else '无样本'} | {peak['time'] if peak else '—'} |")
     stages, capture = data['stages'], data['capture']
     lines += ['', f"持仓阶段：{json.dumps(stages, ensure_ascii=False) if stages else '空阶段'}。",
               f"当前执行组合：{data['executing_pair'] or '空闲'}。",
@@ -135,7 +135,7 @@ def markdown(data):
               f"本地资金余量USDT {data['available_usdt']}，行情延迟ms {data['latency_ms']}。",
               f"采集状态：{json.dumps(capture, ensure_ascii=False)}。",
               f"最近2MB节点日志ERROR/CRITICAL行数：{data['latest_log_error_count_in_last_2mb']}。", '',
-              '峰值口径：北京时间当日、30秒心跳、双腿报价新鲜样本；统计范围以JSON中的coverage为准。',
+              '峰值口径：北京时间当日、30秒盘口心跳、有基线的样本；统计范围以JSON中的coverage为准。',
               '文件按查询命令更新。持仓来自策略检查点；交易所持仓、挂单和盈亏需另行账户核对。']
     if data.get('capital'):
         capital = data['capital']

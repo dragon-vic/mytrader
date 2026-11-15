@@ -44,7 +44,6 @@ class EtfArbConfig(StrategyConfig, frozen=True):
     anchor_basis_cap: float
     anchor_reference_cap: float
     reference_path: str
-    max_quote_age_ms: int
     max_depth_age_ms: int
     max_funding_age_ms: int
     depth_levels: int
@@ -99,7 +98,7 @@ class EtfArbConfig(StrategyConfig, frozen=True):
             raise ValueError('invalid reference anchor controls')
         if not 0 < self.calibration_cap < self.anchor_reference_cap < self.entry_gap:
             raise ValueError('reference adjustment cap must be between calibration_cap and entry_gap')
-        if min(self.confirmation_ms, self.max_quote_age_ms, self.max_depth_age_ms,
+        if min(self.confirmation_ms, self.max_depth_age_ms,
                self.max_funding_age_ms, self.order_timeout_ms, self.hedge_timeout_ms,
                self.retry_interval_ms, self.watchdog_ms) <= 0:
             raise ValueError('execution time limits must be positive')

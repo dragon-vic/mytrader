@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from math import isfinite
 
 from nautilus_trader.model.book import OrderBook
 from nautilus_trader.model.enums import BookType
@@ -17,6 +18,8 @@ class Market:
     quote_ns: int = 0
     depth_ns: int = 0
     last_fill_ns: int = 0
+    consumed_bid_size: float = 0.
+    consumed_ask_size: float = 0.
     funding_ns: int = 0
     funding_seen_ns: int = 0
     last_funding_ns: int = 0
@@ -28,8 +31,22 @@ class Market:
     def __post_init__(self):
         self.book = OrderBook(self.instrument_id, BookType.L2_MBP)
 
-    def fresh(self, now: int, maximum_ms: int) -> bool:
-        return self.quote_ns > self.last_fill_ns and 0 <= now - self.quote_ns <= maximum_ms * 1_000_000 and 0 < self.bid <= self.ask and min(self.bid_size, self.ask_size) > 0
+    def valid_quote(self) -> bool:
+        return (self.quote_ns > 0 and all(isfinite(value) for value in
+                (self.bid, self.ask, self.bid_size, self.ask_size)) and
+                0 < self.bid <= self.ask and min(self.bid_size, self.ask_size) > 0)
+
+    def acknowledge_quote(self, stamp: int):
+        if stamp > self.last_fill_ns:
+            self.consumed_bid_size = self.consumed_ask_size = 0.
+
+    def record_fill(self, buy: bool, quantity: float, stamp: int):
+        self.last_fill_ns = max(self.last_fill_ns, stamp)
+        if self.quote_ns <= stamp:
+            if buy:
+                self.consumed_ask_size += quantity
+            else:
+                self.consumed_bid_size += quantity
 
     def funding_blocked(self, now: int, minutes: int, max_age_ms: int) -> bool:
         if not self.funding_history_ready or not self.funding_ns or not 0 <= now - self.funding_seen_ns <= max_age_ms * 1_000_000:
@@ -41,7 +58,8 @@ class Market:
         best, size = (self.ask, self.ask_size) if buy else (self.bid, self.bid_size)
         book_best = self.book.best_ask_price() if buy else self.book.best_bid_price()
         if self.depth_ns <= self.last_fill_ns or not 0 <= now - self.depth_ns <= max_age_ms * 1_000_000 or book_best is None or float(book_best) != best:
-            return [(best, size)]
+            consumed = self.consumed_ask_size if buy else self.consumed_bid_size
+            return [(best, max(0., size - consumed))]
         levels = self.book.asks() if buy else self.book.bids()
         result = [(float(level.price), float(level.size())) for level in levels[:5]]
         if result:

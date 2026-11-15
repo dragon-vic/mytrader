@@ -671,6 +671,7 @@ class EtfArbStrategy(Strategy):
         market.bid, market.ask = float(tick.bid_price), float(tick.ask_price)
         market.bid_size, market.ask_size = float(tick.bid_size), float(tick.ask_size)
         market.quote_ns = tick.ts_event
+        market.acknowledge_quote(tick.ts_event)
         now = self.clock.timestamp_ns()
         self.quote_ages_ms.append((now - tick.ts_event) / 1e6)
         self.stats['quotes'] += 1
@@ -724,7 +725,7 @@ class EtfArbStrategy(Strategy):
             self.capture_above[name] = above
             self.recorder.event('threshold_cross' if above else 'threshold_below', now,
                                 pair=name, gap=gap, state=self._capture_state(name, now))
-        if name in self.recorder.active and (gap > self.config.exit_gap or not self._fresh(name, now)):
+        if name in self.recorder.active and (gap > self.config.exit_gap or not self._quotes_ready(name)):
             self.recorder.touch(name, now)
 
     def _capture_state(self, name, now):
@@ -739,7 +740,7 @@ class EtfArbStrategy(Strategy):
                 'active_pairs': list(self.stages), 'executing_pair': self.executing_pair,
                 'fair': asdict(fair) if fair else None, 'baseline_segment': self.baselines[name].segment_key,
                 'entry_gaps': gaps, 'exit_gap': exit_gap(fair, *markets, stage.side) if stage else None,
-                'exit_target': target, 'fresh': self._fresh(name, now),
+                'exit_target': target, 'fresh': self._quotes_ready(name),
                 'calendar_blocked': self.calendar.entry_blocked(now, self.config),
                 'funding_blocked': [m.funding_blocked(now, self.config.funding_block_minutes,
                                                      self.config.max_funding_age_ms) for m in markets],
@@ -764,8 +765,8 @@ class EtfArbStrategy(Strategy):
         pair = self.pairs[name]
         return pair.etf, pair.underlying
 
-    def _fresh(self, name, now):
-        return all(self.markets[iid].fresh(now, self.config.max_quote_age_ms) for iid in self._ids(name))
+    def _quotes_ready(self, name):
+        return all(self.markets[iid].valid_quote() for iid in self._ids(name))
 
     def _blocked(self, name, now):
         minute = now // MINUTE
@@ -843,8 +844,7 @@ class EtfArbStrategy(Strategy):
             gap = plus if side > 0 else minus
             if (gap < self.config.confirmation_reset_gap and
                     (candidate or (stage and stage.entry_confirmed)) and
-                    all(0 <= now - m.quote_ns <= self.config.max_quote_age_ms * 1_000_000 and
-                        0 < m.bid <= m.ask and min(m.bid_size, m.ask_size) > 0 for m in (etf, under))):
+                    all(m.valid_quote() for m in (etf, under))):
                 if stage and stage.entry_confirmed:
                     stage.entry_confirmed = False
                     self._decision(name, 'confirmation_reset', gap=gap,
@@ -864,14 +864,14 @@ class EtfArbStrategy(Strategy):
                           entry_ready or
                           exit_gap(fair, etf, under, stage.side) <= target)
             candidate = self.confirmations.get(name)
-            if name in self.confirmed and (candidate[1] != fair or not self._fresh(name, now) or
+            if name in self.confirmed and (candidate[1] != fair or not self._quotes_ready(name) or
                     self._blocked(name, now) or entry_gap(fair, etf, under, candidate[0]) < self.config.entry_gap):
                 self._drop_entry_confirmation(name)
                 self._decision(name, 'confirmation_failed', reason='signal_changed_while_waiting_for_batch')
             drive |= name in self.confirmed
             if gap < self.config.entry_gap:
                 continue
-            if (stage and (stage.entry_confirmed or stage.exit_reason or stage.adding_error)) or self.exiting or self.fault_reason or name in self.paused or name in self.confirmations or not self._fresh(name, now) or self._blocked(name, now):
+            if (stage and (stage.entry_confirmed or stage.exit_reason or stage.adding_error)) or self.exiting or self.fault_reason or name in self.paused or name in self.confirmations or not self._quotes_ready(name) or self._blocked(name, now):
                 continue
             if not stage and now < self.capital_retry_ns:
                 continue
@@ -894,9 +894,9 @@ class EtfArbStrategy(Strategy):
         now = self.clock.timestamp_ns()
         if now - triggered < self.confirmation_ns[name]:
             return
-        if (stage and stage.side != side) or not self._fresh(name, now) or self._blocked(name, now) or self._fair(name, now) != fair:
+        if (stage and stage.side != side) or not self._quotes_ready(name) or self._blocked(name, now) or self._fair(name, now) != fair:
             self._drop_entry_confirmation(name)
-            self._decision(name, 'confirmation_failed', reason='freshness_window_or_baseline_changed')
+            self._decision(name, 'confirmation_failed', reason='quote_window_or_baseline_changed')
             return
         etf, under = (self.markets[i] for i in self._ids(name))
         if entry_gap(fair, etf, under, side) < self.config.entry_gap:
@@ -1131,7 +1131,7 @@ class EtfArbStrategy(Strategy):
         for name in list(self.confirmed):
             side, fair, triggered = self.confirmations[name]
             etf, under = (self.markets[i] for i in self._ids(name))
-            if (name in self.paused or self._blocked(name, now) or not self._fresh(name, now) or
+            if (name in self.paused or self._blocked(name, now) or not self._quotes_ready(name) or
                     self._fair(name, now) != fair or entry_gap(fair, etf, under, side) < self.config.entry_gap):
                 self.confirmations.pop(name)
                 self.confirmed.discard(name)
@@ -1141,7 +1141,7 @@ class EtfArbStrategy(Strategy):
         for name, stage in self.stages.items():
             if stage.exit_reason or stage.adding_error or not stage.entry_confirmed or stage.phase != 'holding' or now < stage.next_attempt_ns:
                 continue
-            if self._blocked(name, now) or not self._fresh(name, now):
+            if self._blocked(name, now) or not self._quotes_ready(name):
                 continue
             etf, under = (self.markets[i] for i in self._ids(name))
             gap = entry_gap(stage.fair, etf, under, stage.side)
@@ -1178,7 +1178,7 @@ class EtfArbStrategy(Strategy):
         if self._trim_halted_excess(stage, now):
             return
         fair = self._stage_signal_fair(stage, now)
-        fresh = self._fresh(stage.pair, now)
+        quotes_ready = self._quotes_ready(stage.pair)
         if stage.phase in ['batch', 'repair', 'exit', 'exit_repair']:
             ids = self._ids(stage.pair)
             under = ids[1]
@@ -1190,7 +1190,7 @@ class EtfArbStrategy(Strategy):
                 if now >= stage.repair_deadline_ns:
                     self._exit(stage, 'hedge_timeout', pause=True)
                     self._close(stage)
-                elif fresh:
+                elif quotes_ready:
                     reducing = stage.phase in ['exit', 'exit_repair']
                     leg = 1
                     if reducing and not (delta * stage.quantities[1] < 0 and abs(delta) <= abs(stage.quantities[1]) + 1e-9):
@@ -1209,8 +1209,8 @@ class EtfArbStrategy(Strategy):
             stage.repair_deadline_ns = 0
             if adding:
                 self._notify_entry_progress(stage)
-        if not fresh:
-            self._add_wait(stage, 'stale_or_consumed_quote')
+        if not quotes_ready:
+            self._add_wait(stage, 'quote_unavailable')
             return
         if fair is None:
             self._add_wait(stage, 'signal_baseline_unavailable')
@@ -1320,7 +1320,7 @@ class EtfArbStrategy(Strategy):
         if not all(tradable):
             quantities, prices = [0., 0.], [None, None]
             for leg, allowed in enumerate(tradable):
-                if not allowed or not stage.quantities[leg] or not self.markets[ids[leg]].fresh(now, self.config.max_quote_age_ms):
+                if not allowed or not stage.quantities[leg] or not self.markets[ids[leg]].valid_quote():
                     continue
                 held = stage.quantities[leg]
                 other = stage.quantities[1 - leg]
@@ -1364,7 +1364,7 @@ class EtfArbStrategy(Strategy):
         for iid, held in zip(ids, stage.quantities):
             amount = min(abs(held) * fraction, self.market_limits[iid][1])
             market = self.markets[iid]
-            if bounded and market.fresh(now, self.config.max_quote_age_ms):
+            if bounded and market.valid_quote():
                 book = market.levels(held < 0, now, self.config.max_depth_age_ms)
                 amount = min(amount, self.config.execution_depth_fraction * sum(q for _, q in book))
             quantities.append(self._quantity(iid, -math.copysign(amount, held)))
@@ -1456,8 +1456,8 @@ class EtfArbStrategy(Strategy):
         if stage is None or unique in self.seen_fills:
             return
         self.seen_fills.add(unique)
-        self.markets[event.instrument_id].last_fill_ns = max(self.markets[event.instrument_id].last_fill_ns, event.ts_event)
         size = float(event.last_qty)
+        self.markets[event.instrument_id].record_fill(event.order_side == OrderSide.BUY, size, event.ts_event)
         pending.filled = float(Decimal(str(pending.filled)) + event.last_qty.as_decimal())
         signed = size if event.order_side == OrderSide.BUY else -size
         reducing = signed * stage.quantities[pending.leg] < 0
@@ -1602,7 +1602,7 @@ class EtfArbStrategy(Strategy):
             etf, under = (self.markets[i] for i in self._ids(name))
             pairs[name] = {'anchor_ready': fair is not None, 'correction': fair.baseline if fair else None,
                            'baseline': self.baselines[name].describe(),
-                           'fresh': self._fresh(name, now), 'entry_blocked': self._blocked(name, now),
+                           'fresh': self._quotes_ready(name), 'entry_blocked': self._blocked(name, now),
                            'gap': max(entry_gap(fair, etf, under, 1), entry_gap(fair, etf, under, -1))
                                   if fair and etf.bid > 0 and under.bid > 0 else None}
         self._record('health', ready=self.ready, bootstrap_remaining=[str(i) for i in self.bootstrap_remaining],

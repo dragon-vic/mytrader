@@ -74,7 +74,6 @@ strategy:
       anchor_basis_cap: 0.01
       anchor_reference_cap: 0.01
       reference_path: strategies/etf_arb/runtime/close_references.json
-      max_quote_age_ms: 1000
       max_depth_age_ms: 250
       max_funding_age_ms: 10000
       depth_levels: 5
