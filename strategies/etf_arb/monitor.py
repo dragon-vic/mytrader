@@ -54,7 +54,7 @@ def collect(root=ROOT):
             if kind == 'fill' and row.get('commission'):
                 amount, currency = row['commission'].split()
                 fees[currency] += Decimal(amount)
-            if kind.endswith('_error') or kind in ('exit_requested', 'order_terminal', 'strategy_fault'):
+            if kind.endswith('_error') or kind in ('exit_requested', 'order_terminal', 'strategy_fault', 'pair_paused', 'execution_failed'):
                 if kind != 'order_terminal' or row.get('event') in ('OrderRejected', 'OrderDenied'):
                     issues.append({'time': timestamp(t), 'type': kind, 'pair': row.get('pair'), 'reason': row.get('reason', row.get('error'))})
             if kind == 'reference_updated' and row.get('errors'):
@@ -106,6 +106,7 @@ def collect(root=ROOT):
             'executing_pair': state.get('executing_pair'),
             'pending_orders': {k: v for k, v in state['orders'].items() if not v['terminal']},
             'paused_pairs': state['paused'], 'available_usdt': health['available_usdt'],
+            'execution_retries': state.get('execution_retries', {}),
             'today': {'date': midnight.date().isoformat(), 'stages_opened': counts['stage_open'], 'stages_closed': counts['stage_closed'],
                       'order_batches_sent': counts['orders_sent'], 'fill_events': counts['fill'],
                       'fees_by_currency': {k: str(v) for k, v in fees.items()}, 'coverage': coverage},
