@@ -42,26 +42,6 @@ def _artifacts(entry: dict[str, Any], location: str) -> None:
             raise TypeError(f"{location}.artifacts must map config fields to relative filenames")
 
 
-def normalize_batch(entry: dict[str, Any], location: str) -> None:
-    batch = entry.get("batch")
-    if batch is None:
-        return
-    if not isinstance(batch, dict):
-        raise TypeError(f"{location}.batch must be a mapping")
-    _only(batch, {"cases", "grid"}, f"{location}.batch")
-    cases = batch.get("cases", [{}])
-    if not isinstance(cases, list) or not cases:
-        raise ValueError(f"{location}.batch.cases must be a non-empty list")
-    if any(not isinstance(case, dict) for case in cases):
-        raise TypeError(f"{location}.batch.cases entries must be mappings")
-    grid = batch.get("grid", {})
-    if not isinstance(grid, dict):
-        raise TypeError(f"{location}.batch.grid must be a mapping")
-    for name, values in grid.items():
-        if not isinstance(values, list) or not values:
-            raise ValueError(f"{location}.batch.grid.{name} must be a non-empty list")
-
-
 # 策略只接受 NT 原生 import path、config 和可选批量参数。
 def normalize_strategies(settings: dict[str, Any], mode: str) -> None:
     defaults = settings.pop("strategy_defaults")
@@ -73,8 +53,6 @@ def normalize_strategies(settings: dict[str, Any], mode: str) -> None:
 
     enabled = 0
     allowed = {"enabled", "strategy_path", "config_path", "config", "artifacts"}
-    if mode == "backtest":
-        allowed.add("batch")
     for name, entry in strategies.items():
         location = f"strategy.{name}"
         if not isinstance(entry, dict):
@@ -89,8 +67,6 @@ def normalize_strategies(settings: dict[str, Any], mode: str) -> None:
             raise TypeError(f"{location}.config must be a mapping")
         entry["config"] = {**defaults, **entry["config"]}
         _artifacts(entry, location)
-        if mode == "backtest":
-            normalize_batch(entry, location)
         enabled += int(entry["enabled"])
     if enabled == 0:
         raise ValueError("at least one strategy must be enabled")
@@ -137,81 +113,10 @@ def normalize_live_clients(settings: dict[str, Any]) -> None:
             importlib.import_module(f"adapters.{cfg['adapter']}").normalize_client(cfg)
 
 
-# Backtest venue 同时拥有市场、合成 instrument 和撮合账户配置。
-def normalize_backtest(settings: dict[str, Any]) -> None:
-    backtest = settings["backtest"]
-    venues = backtest["venues"]
-    if not isinstance(venues, dict) or not venues:
-        raise ValueError("backtest.venues must contain at least one venue")
-    shared_instrument = backtest.pop("instrument")
-    if not isinstance(shared_instrument, dict):
-        raise TypeError("backtest.instrument must be a mapping")
-
-    venue_ids: set[str] = set()
-    for name, venue in venues.items():
-        location = f"backtest.venues.{name}"
-        if not isinstance(venue, dict):
-            raise TypeError(f"{location} must be a mapping")
-        _required(
-            venue,
-            (
-                "adapter",
-                "venue",
-                "instrument_kind",
-                "markets",
-                "oms_type",
-                "account_type",
-                "starting_balances",
-            ),
-            location,
-        )
-        venue_id = str(venue["venue"])
-        if venue_id in venue_ids:
-            raise ValueError(f"duplicate backtest venue: {venue_id}")
-        venue_ids.add(venue_id)
-        venue["instrument"] = {**shared_instrument, **venue.get("instrument", {})}
-        balances = venue["starting_balances"]
-        if not isinstance(balances, list) or not balances:
-            raise ValueError(f"{location}.starting_balances must be a non-empty list")
-        importlib.import_module(f"adapters.{venue['adapter']}").normalize_client(venue)
-        if venue["markets_all"] or not venue["markets"]:
-            raise ValueError(f"{location}.markets must explicitly list at least one market")
-
-    datasets = backtest["datasets"]
-    if not isinstance(datasets, list) or not datasets:
-        raise ValueError("backtest.datasets must be a non-empty list")
-    for index, dataset in enumerate(datasets):
-        location = f"backtest.datasets[{index}]"
-        if not isinstance(dataset, dict):
-            raise TypeError(f"{location} must be a mapping")
-        _required(dataset, ("type", "path"), location)
-        data_type = dataset["type"]
-        allowed = {"type", "path"}
-        if data_type == "bars":
-            allowed.update(("instrument_id", "bar_type"))
-            _required(dataset, ("instrument_id", "bar_type"), location)
-        elif data_type == "trade_tick_catalog":
-            allowed.add("venue")
-            _required(dataset, ("venue",), location)
-        elif data_type not in {"quote_tick_objects", "quote_ticks", "trade_ticks"}:
-            raise ValueError(f"{location}.type is unsupported: {data_type}")
-        _only(dataset, allowed, location)
-        relative = Path(dataset["path"])
-        if relative.is_absolute():
-            raise ValueError(f"{location}.path must be relative")
-        (PROJECT_ROOT / relative).resolve().relative_to(PROJECT_ROOT.resolve())
-
-    settings.pop("node")
-
-
 def normalize_settings(settings: dict[str, Any], mode: str) -> None:
     if mode not in CONFIG_FILES:
         raise ValueError(f"Unsupported mode: {mode}")
     normalize_strategies(settings, mode)
-    if mode == "backtest":
-        normalize_backtest(settings)
-        return
-    settings.pop("backtest")
     normalize_actors(settings)
     normalize_live_clients(settings)
 

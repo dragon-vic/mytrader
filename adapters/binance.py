@@ -13,6 +13,7 @@ from nautilus_trader.adapters.binance.config import BinanceExecClientConfig
 from nautilus_trader.adapters.binance.config import BinanceInstrumentProviderConfig
 from nautilus_trader.adapters.binance.factories import BinanceLiveDataClientFactory
 from nautilus_trader.adapters.binance.factories import BinanceLiveExecClientFactory
+from adapters.binance_execution import ConfirmedBinanceExecFactory
 from nautilus_trader.adapters.binance.futures.enums import BinanceFuturesMarginType
 from nautilus_trader.config import RoutingConfig
 from nautilus_trader.model.identifiers import Venue
@@ -64,6 +65,8 @@ def credentials(mode: str) -> tuple[str, str]:
 
 # 把 Binance 短 symbol 展开为 live 层统一使用的 InstrumentId。
 def normalize_client(cfg: dict[str, Any]) -> None:
+    if 'confirmed_orders' in cfg and type(cfg['confirmed_orders']) is not bool:
+        raise TypeError('binance.confirmed_orders must be bool')
     def normalize(value: object) -> dict[str, Any]:
         market = market_dict(value, cfg["quote_currency"])
         if "symbol" not in market:
@@ -157,5 +160,5 @@ def build_exec_client(context: LiveContext, cfg: dict[str, Any]):
             instrument_provider=instrument_provider(cfg),
             routing=routing(cfg),
         ),
-        BinanceLiveExecClientFactory,
+        ConfirmedBinanceExecFactory if cfg['confirmed_orders'] else BinanceLiveExecClientFactory,
     )

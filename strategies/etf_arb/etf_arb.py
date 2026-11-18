@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import math
 import queue
@@ -15,22 +14,24 @@ from nautilus_trader.adapters.binance.futures.types import BinanceFuturesMarkPri
 from nautilus_trader.model.data import Bar, BarType, CustomData, DataType
 from nautilus_trader.model.enums import BookType, OrderSide, TimeInForce
 from nautilus_trader.model.identifiers import ClientId, ClientOrderId
-from nautilus_trader.trading.strategy import Strategy
 from nautilus_trader.common.component import LiveClock
 from nautilus_trader.common.actor import Actor
 from adapters.binance import market_order_limits
+from adapters.binance_account import NativeAccountWorker
 from utils.constants import LOCAL_TZ, NODE_STOP_TOPIC
 from utils.live_control import NodeStopRequest
 from utils.wecom import WeComNotifier
+from utils.live_strategy import LiveStrategy, guarded_callback
+from utils.execution import OrderResolution, retry_delay_ns, order_alert_due
 
 from .baseline import Baseline, DAY, FairValue, HOUR, MINUTE, MarketCalendar
 from .config import EtfArbConfig, PairConfig
 from .market import Market, entry_gap, exit_gap, sweep
-from .runtime_lock import RuntimeLock
+from utils.runtime_lock import RuntimeLock
 from .recorder import EventRecorder
 from .close_reference import read_cache, refresh as refresh_references
-from .state import read_state, write_state
-from .capital import CapitalReader, CapitalState, account_fill, capital_headroom, portfolio_risk
+from utils.state import read_state, write_state
+from .capital import CapitalState, account_fill, capital_headroom, portfolio_risk
 from .special_events import VenueMonitor, load_events, specification
 
 
@@ -66,6 +67,8 @@ class Stage:
     exit_notified: bool = False
     estimated_fees: bool = False
     entry_progress_notified: int = 0
+    exit_failures: int = 0
+    last_failed_exit_batch: str = ''
 
     def __post_init__(self):
         if not self.hedge_slope:
@@ -87,6 +90,9 @@ class Pending:
     reserved_margin: float = 0.
     resolution_attempts: int = 0
     batch_id: str = ''
+    unresolved: bool = False
+    alerted: bool = False
+    alert_ns: int = 0
 
 
 @dataclass
@@ -110,7 +116,7 @@ class ExecutionPlan:
     expected_gross: float
 
 
-class EtfArbStrategy(Strategy):
+class EtfArbStrategy(LiveStrategy):
     def __init__(self, config: EtfArbConfig):
         super().__init__(config)
         self.pairs = {p.name: p for p in config.pairs}
@@ -120,6 +126,9 @@ class EtfArbStrategy(Strategy):
             for instrument in (pair.etf, pair.underlying):
                 self.by_instrument.setdefault(instrument, []).append(pair.name)
         self.markets = {iid: Market(iid) for iid in self.by_instrument}
+        self.quote_revisions = {iid: 0 for iid in self.markets}
+        self.entry_quote_barrier = None
+        self.batch_awaiting_completion = False
         self.instruments = {}
         self.market_limits = {}
         self.baselines = {}
@@ -149,6 +158,8 @@ class EtfArbStrategy(Strategy):
         self.runtime_lock = None
         self.state_failed = False
         self.startup_failed = False
+        self.startup_complete = False
+        self.audit_failed = False
         self.fault_reason = ''
         self.node_stop_requested = False
         self.owner_thread = None
@@ -200,11 +211,11 @@ class EtfArbStrategy(Strategy):
         self.pair_epochs = {name: 0 for name in self.pairs}
 
     def on_start(self):
-        self.owner_thread = threading.get_ident()
-        if isinstance(self.clock, LiveClock):
-            self.event_loop = asyncio.get_running_loop()
+        self.bind_owner()
         try:
             self._start_strategy()
+            self.startup_complete = True
+            self._save()
         except Exception as exc:
             self.startup_failed = True
             self.fault_reason = f'startup_failed:{type(exc).__name__}:{exc}'
@@ -255,6 +266,7 @@ class EtfArbStrategy(Strategy):
                                                        for i, v in self.instruments.items()},
                                        'price_encoding': 'float64; instrument precision in exchange specification'})
         self._recover()
+        self.msgbus.subscribe(f'events.order_resolution.{self.id}', self._receive_order_resolution)
         symbols = [self._symbol(iid) for iid in self.markets]
         events = load_events(self.config.special_events_path, symbols)
         self._validate_events(events, now)
@@ -263,7 +275,7 @@ class EtfArbStrategy(Strategy):
         self._save()
         if self.config.bootstrap:
             self._apply_references(read_cache(self.config.reference_path))
-        self.capital_reader = CapitalReader(self.config.account_environment, self._capital_wakeup)
+        self.capital_reader = NativeAccountWorker(self.config.account_environment, self._capital_wakeup)
         self.capital_reader.worker.start()
         self.venue_monitor = VenueMonitor(self.config.special_events_path, symbols, self.config.account_environment,
                                            self.config.venue_poll_seconds)
@@ -288,23 +300,11 @@ class EtfArbStrategy(Strategy):
                                 callback=self._timer_event)
         self._record('started', pairs=list(self.pairs), recovered=list(self.stages))
 
-    def _assert_thread(self):
-        if self.owner_thread != threading.get_ident():
-            raise RuntimeError('ETF state mutation outside its event loop thread')
-
     # Rust LiveClock在线程池触发，先回到NT事件循环再访问状态。
     def _timer_event(self, event):
         if self.stopping:
             return
-        if self.event_loop is not None:
-            if not self.event_loop.is_closed():
-                try:
-                    self.event_loop.call_soon_threadsafe(self._handle_timer, event)
-                except RuntimeError:
-                    if not self.stopping:
-                        raise
-        else:
-            self._handle_timer(event)
+        self.dispatch_to_owner(self._handle_timer, event)
 
     def _handle_timer(self, event):
         self._assert_thread()
@@ -338,6 +338,13 @@ class EtfArbStrategy(Strategy):
         else:
             self._request_node_stop()
 
+    def on_callback_error(self, name, error):
+        try:
+            self._fail_strategy(f'callback_error:{name}:{type(error).__name__}')
+        except Exception as exc:
+            self.log.exception('ETF fault cleanup requires manual review', exc)
+            self._request_node_stop()
+
     def _request_node_stop(self):
         if self.node_stop_requested:
             return
@@ -364,12 +371,8 @@ class EtfArbStrategy(Strategy):
         return str(iid.symbol).removesuffix('-PERP')
 
     def _capital_wakeup(self):
-        if self.event_loop is not None and not self.event_loop.is_closed() and not self.stopping:
-            try:
-                self.event_loop.call_soon_threadsafe(self._receive_capital)
-            except RuntimeError:
-                if not self.stopping:
-                    raise
+        if not self.stopping:
+            self.dispatch_to_owner(self._receive_capital)
 
     def _request_capital(self, now, purpose='new_stage', pair=None):
         if self.capital_inflight or now < self.capital_retry_ns:
@@ -401,6 +404,11 @@ class EtfArbStrategy(Strategy):
                     self.clock.timestamp_ns() - self.capital_requested_ns >= self.config.capital_timeout_ms * 1_000_000):
                 snapshot, error = None, 'capital_read_timeout'
             self.capital_inflight = False
+            if error is None:
+                missing = [self._symbol(iid) for iid in self.markets
+                           if self._symbol(iid) not in snapshot.positions or self._symbol(iid) not in snapshot.configs]
+                if missing:
+                    error = 'native_account_symbols_missing:' + ','.join(missing)
             if error:
                 snapshot = None
             if error is None and self.capital_purpose == 'new_stage':
@@ -437,6 +445,12 @@ class EtfArbStrategy(Strategy):
                 if self.capital_purpose == 'event_reconciliation':
                     self.capital_snapshot = None
                 if self.capital_purpose == 'event_reconciliation' and stage and not self._pending():
+                    if self._has_shared_position(stage.pair):
+                        self._pause_pair(stage.pair, 'shared_event_position_review_required')
+                        stage.adding_error = 'shared_event_position_review_required'
+                        self.capital_retry_ns = self.clock.timestamp_ns() + 30_000_000_000
+                        self._save()
+                        continue
                     positions = [snapshot.positions.get(self._symbol(iid), {}) for iid in self._ids(stage.pair)]
                     if not any(float(p.get('openOrderInitialMargin', 0)) for p in positions):
                         quantities = [float(p.get('positionAmt', 0)) - self._instrument_quantity(iid, excluding=stage.pair)
@@ -597,6 +611,7 @@ class EtfArbStrategy(Strategy):
                         if self.background_stop.wait(5):
                             return
 
+    @guarded_callback
     def on_historical_data(self, data):
         self._assert_thread()
         if isinstance(data, Bar):
@@ -657,6 +672,7 @@ class EtfArbStrategy(Strategy):
         self._record('baseline_ready', baselines={name: b.describe()
                                                  for name, b in self.baselines.items()})
 
+    @guarded_callback
     def on_bar(self, bar: Bar):
         self._assert_thread()
         iid, minute = self._store_bar(bar)
@@ -677,11 +693,13 @@ class EtfArbStrategy(Strategy):
             if old < minute - 2 * MINUTE:
                 del self.bars[iid][old]
 
+    @guarded_callback
     def on_quote_tick(self, tick):
         self._assert_thread()
         market = self.markets[tick.instrument_id]
         if tick.ts_event < market.quote_ns:
             return
+        self.quote_revisions[tick.instrument_id] += 1
         market.bid, market.ask = float(tick.bid_price), float(tick.ask_price)
         market.bid_size, market.ask_size = float(tick.bid_size), float(tick.ask_size)
         market.quote_ns = tick.ts_event
@@ -694,6 +712,7 @@ class EtfArbStrategy(Strategy):
                                  (market.bid, market.ask, market.bid_size, market.ask_size))
         self._market_changed(tick.instrument_id)
 
+    @guarded_callback
     def on_order_book_deltas(self, deltas):
         self._assert_thread()
         market = self.markets[deltas.instrument_id]
@@ -710,6 +729,7 @@ class EtfArbStrategy(Strategy):
         if any(name in self.stages or name in self.confirmed for name in self.by_instrument[deltas.instrument_id]):
             self._market_changed(deltas.instrument_id)
 
+    @guarded_callback
     def on_data(self, data):
         self._assert_thread()
         item = data.data if isinstance(data, CustomData) else data
@@ -788,7 +808,7 @@ class EtfArbStrategy(Strategy):
             self.blocked_minute = minute
             self.calendar_blocked = self.calendar.entry_blocked(now, self.config)
         retry = self.execution_retries.get(name)
-        return name in self.paused or bool(retry and (retry.halted or now < retry.next_attempt_ns)) or bool(self._venue_reason(name, now)) or self.calendar_blocked or any(
+        return self.audit_failed or name in self.paused or bool(retry and (retry.halted or now < retry.next_attempt_ns)) or bool(self._venue_reason(name, now)) or self.calendar_blocked or any(
             self.markets[iid].funding_blocked(now, self.config.funding_block_minutes, self.config.max_funding_age_ms)
             for iid in self._ids(name))
 
@@ -825,7 +845,7 @@ class EtfArbStrategy(Strategy):
             timer = f'etf.confirm.{name}.{candidate[2]}'
             if timer in self.clock.timer_names:
                 try:
-                    self.clock.cancel_timer(timer)
+                    self.cancel_timer_if_active(timer)
                 except KeyError:
                     pass  # LiveClock可能已触发并把回调排入事件循环，token检查继续隔离旧回调。
 
@@ -871,7 +891,7 @@ class EtfArbStrategy(Strategy):
                 target = min(self.config.exit_gap_cap,
                              self.config.exit_gap + ((now - stage.started_ns) // HOUR) * self.config.exit_hour_step)
                 entry_ready = (self.executing_pair is None and stage.entry_confirmed and
-                               gap >= self.config.entry_gap and not stage.adding_error)
+                               gap >= self.config.entry_gap and not stage.adding_error and self._entry_quote_ready(name))
                 if entry_ready:
                     used = sum(abs(q) * max(m.ask, m.mark) for q, m in zip(stage.quantities, (etf, under)))
                     entry_ready = used < stage.budget and self._available_capital() > 0
@@ -883,7 +903,7 @@ class EtfArbStrategy(Strategy):
                     self._blocked(name, now) or entry_gap(fair, etf, under, candidate[0]) < self.config.entry_gap):
                 self._drop_entry_confirmation(name)
                 self._decision(name, 'confirmation_failed', reason='signal_changed_while_waiting_for_batch')
-            drive |= name in self.confirmed
+            drive |= name in self.confirmed and self._entry_quote_ready(name)
             if gap < self.config.entry_gap:
                 continue
             if (stage and (stage.entry_confirmed or stage.exit_reason or stage.adding_error)) or self.exiting or self.fault_reason or name in self.paused or name in self.confirmations or not self._quotes_ready(name) or self._blocked(name, now):
@@ -930,6 +950,8 @@ class EtfArbStrategy(Strategy):
         self._drive()
 
     def _open_stage(self, name):
+        if not self._entry_quote_ready(name):
+            return
         side, fair, triggered = self.confirmations[name]
         now = self.clock.timestamp_ns()
         etf, under = (self.markets[i] for i in self._ids(name))
@@ -1105,6 +1127,10 @@ class EtfArbStrategy(Strategy):
     def _pending(self):
         return any(not order.terminal for order in self.orders.values())
 
+    def _entry_quote_ready(self, name):
+        return self.entry_quote_barrier is None or any(
+            self.quote_revisions[iid] > self.entry_quote_barrier[iid] for iid in self._ids(name))
+
     def _pause_pair(self, name, reason):
         if name in self.paused:
             return
@@ -1120,8 +1146,18 @@ class EtfArbStrategy(Strategy):
                 self.log.error(f'WeCom pause notification failed error={type(exc).__name__}')
 
     # 同一双腿批次只计一次失败，恢复中的失败单独限次。
-    def _execution_failed(self, stage, pending, reason):
+    def _execution_failed(self, stage, pending, reason, *, order_id=None, exchange_reason=None):
         now = self.clock.timestamp_ns()
+        if pending.action in ('exit', 'exit_repair', 'recovery'):
+            if stage.last_failed_exit_batch == pending.batch_id:
+                return
+            stage.last_failed_exit_batch = pending.batch_id
+            stage.exit_failures += 1
+            stage.next_attempt_ns = now + retry_delay_ns(stage.exit_failures)
+            self._record('exit_execution_failed', pair=stage.pair, order=order_id,
+                         reason=reason, exchange_reason=exchange_reason,
+                         failures=stage.exit_failures, retry_at_ns=stage.next_attempt_ns)
+            return
         retry = self.execution_retries.setdefault(stage.pair, ExecutionRetry(self.calendar.next_close(now)))
         if retry.last_failed_batch == pending.batch_id:
             return
@@ -1131,6 +1167,7 @@ class EtfArbStrategy(Strategy):
             if retry.recovery_failures >= 3:
                 retry.halted = True
                 self._pause_pair(stage.pair, 'execution_recovery_failed_review_required')
+                stage.next_attempt_ns = now + retry_delay_ns(retry.recovery_failures)
             else:
                 stage.next_attempt_ns = now + retry.recovery_failures * 1_000_000_000
         else:
@@ -1140,6 +1177,7 @@ class EtfArbStrategy(Strategy):
         if not stage.adding_error or stage.adding_error == 'execution_recovery':
             stage.adding_error = 'execution_recovery'
         self._record('execution_failed', pair=stage.pair, action=pending.action, reason=reason,
+                     batch_id=pending.batch_id, order=order_id, exchange_reason=exchange_reason,
                      failures=retry.failures, recovery_failures=retry.recovery_failures,
                      halted=retry.halted, next_attempt_ns=stage.next_attempt_ns)
 
@@ -1148,6 +1186,8 @@ class EtfArbStrategy(Strategy):
         retry = self.execution_retries.get(stage.pair)
         if retry is None:
             return
+        if self._flat(stage):
+            retry.halted = False
         if retry.recovering:
             retry.recovering = False
             retry.recovery_failures = 0
@@ -1158,8 +1198,6 @@ class EtfArbStrategy(Strategy):
             stage.next_attempt_ns = retry.next_attempt_ns
             if stage.adding_error == 'execution_recovery':
                 stage.adding_error = ''
-            if stage.exit_reason == 'hedge_timeout':
-                stage.pause_after_exit = stage.pair in self.paused
             self._record('execution_balanced', pair=stage.pair, failures=retry.failures,
                          retry_at_ns=retry.next_attempt_ns, paused=stage.pair in self.paused)
             self._save()
@@ -1205,15 +1243,27 @@ class EtfArbStrategy(Strategy):
                 self._exit(stage, 'scheduled_close')
         if self._pending():
             return
+        if self.batch_awaiting_completion:
+            self.entry_quote_barrier = dict(self.quote_revisions)
+            self.batch_awaiting_completion = False
+            self._record('batch_completed_waiting_quote', pair=self.executing_pair,
+                         quote_revisions={str(iid): revision for iid, revision in self.entry_quote_barrier.items()})
         # 执行权一直保留到双腿订单终结且完成对冲修复。
         if self.executing_pair:
             stage = self.stages[self.executing_pair]
             self._advance_stage(stage)
             if self._pending():
                 return
-            retry = self.execution_retries.get(stage.pair)
-            if stage.pair in self.stages and stage.phase != 'holding' and not self._flat(stage) and not (retry and retry.halted):
-                return
+            if stage.pair in self.stages and stage.phase != 'holding' and not self._flat(stage):
+                external_waits = {'halted_leg_preserving_matched_hedge', 'venue_specification_review_required',
+                                  'event_position_reconciliation_required'}
+                hedge_delta = stage.quantities[1] + stage.quantities[0] * stage.hedge_slope
+                balanced = abs(hedge_delta) < float(self.instruments[self._ids(stage.pair)[1]].size_increment) / 2
+                exit_backoff = (
+                    balanced and (stage.exit_reason or stage.phase in ('exit', 'exit_repair'))
+                    and stage.wait_reason in ('execution_retry_delay', 'exit_retry_delay'))
+                if not exit_backoff and (stage.wait_reason not in external_waits or not (balanced or stage.exit_reason)):
+                    return
             self.executing_pair = None
         # 先处理风险退出和已满足条件的平仓，再用剩余资金开仓。
         for stage in sorted(list(self.stages.values()), key=lambda s: not bool(s.exit_reason)):
@@ -1247,6 +1297,8 @@ class EtfArbStrategy(Strategy):
             if gap >= self.config.entry_gap:
                 candidates.append((gap, stage.started_ns, name))
         for gap, _, name in sorted(candidates, key=lambda item: (-item[0], item[1], item[2])):
+            if not self._entry_quote_ready(name):
+                continue
             if name in self.stages:
                 self._advance_stage(self.stages[name], allow_entry=True)
             else:
@@ -1264,22 +1316,24 @@ class EtfArbStrategy(Strategy):
         now = self.clock.timestamp_ns()
         if now >= stage.close_ns - self.config.close_flatten_minutes * MINUTE:
             self._exit(stage, 'scheduled_close')
-        if self._pending() or now < stage.next_attempt_ns:
+        if self._pending():
             return
+        if now < stage.next_attempt_ns:
+            self._add_wait(stage, 'execution_retry_delay')
+            return
+        stage.wait_reason = ''
         if stage.phase == 'opening' and not stage.exit_reason:
             return
         if self._flat(stage):
             self._finish(stage)
             return
         retry = self.execution_retries.get(stage.pair)
-        if retry and retry.halted:
-            self._add_wait(stage, 'execution_recovery_manual_review')
+        if retry and retry.halted and not stage.exit_reason:
+            self._exit(stage, 'hedge_timeout', pause=True)
+            self._close(stage)
             return
         if stage.exit_reason:
             self._close(stage)
-            return
-        if stage.pair in self.paused:
-            self._add_wait(stage, 'pair_paused_manual_review')
             return
         if self._trim_halted_excess(stage, now):
             return
@@ -1294,10 +1348,10 @@ class EtfArbStrategy(Strategy):
                 if not stage.repair_deadline_ns:
                     stage.repair_deadline_ns = now + self.config.hedge_timeout_ms * 1_000_000
                 if now >= stage.repair_deadline_ns:
-                    self._exit(stage, 'hedge_timeout', pause=True)
+                    self._exit(stage, 'hedge_timeout', pause=not (retry and retry.recovering))
                     self._close(stage)
                 elif quotes_ready:
-                    reducing = stage.phase in ['exit', 'exit_repair']
+                    reducing = stage.phase in ['exit', 'exit_repair'] or stage.pair in self.paused
                     leg = 1
                     if reducing and not (delta * stage.quantities[1] < 0 and abs(delta) <= abs(stage.quantities[1]) + 1e-9):
                         leg = 0
@@ -1316,7 +1370,7 @@ class EtfArbStrategy(Strategy):
             self._execution_balanced(stage)
             if adding:
                 self._notify_entry_progress(stage)
-            if now < stage.next_attempt_ns or stage.pair in self.paused:
+            if now < stage.next_attempt_ns:
                 return
         if not quotes_ready:
             self._add_wait(stage, 'quote_unavailable')
@@ -1347,6 +1401,9 @@ class EtfArbStrategy(Strategy):
             self._add_wait(stage, 'between_entry_and_exit')
             return
         if not allow_entry:
+            return
+        if not self._entry_quote_ready(stage.pair):
+            self._add_wait(stage, 'next_batch_quote_required')
             return
         if not stage.entry_confirmed:
             self._add_wait(stage, 'entry_confirmation_required')
@@ -1453,6 +1510,9 @@ class EtfArbStrategy(Strategy):
         if stage is None or self._pending():
             return
         now = self.clock.timestamp_ns()
+        if now < stage.next_attempt_ns:
+            self._add_wait(stage, 'exit_retry_delay')
+            return
         stage.phase = 'exit'
         ids = self._ids(stage.pair)
         if self.pair_epochs[stage.pair] > stage.reconciled_epoch_ns:
@@ -1532,6 +1592,7 @@ class EtfArbStrategy(Strategy):
                 self.orders.pop(str(order.client_order_id))
             self._drive()
             return
+        self.batch_awaiting_completion = True
         self.dispatching = True
         attempted = 0
         submitted = []
@@ -1558,6 +1619,7 @@ class EtfArbStrategy(Strategy):
                                'reduce_only': o.is_reduce_only, 'time_ns': now} for o in submitted])
         self._drive()
 
+    @guarded_callback
     def on_order_filled(self, event):
         self._assert_thread()
         key = str(event.client_order_id)
@@ -1580,6 +1642,8 @@ class EtfArbStrategy(Strategy):
         self.fees += stage.fees - prior_fees
         self.execution_revision += 1
         stage.quantities[pending.leg] = float(Decimal(str(stage.quantities[pending.leg])) + Decimal(str(signed)))
+        if reducing:
+            stage.exit_failures = 0
         pending.terminal |= pending.filled >= abs(pending.quantity) - 1e-9
         if not reducing and not stage.open_notified:
             stage.open_notified = True
@@ -1596,18 +1660,27 @@ class EtfArbStrategy(Strategy):
                                   if pending.expected_price else None)
         self._drive()
 
+    @guarded_callback
     def _terminal(self, event, failed=False):
         self._assert_thread()
         pending = self.orders.get(str(event.client_order_id))
         stage = self.stages.get(pending.pair) if pending else None
         if stage is None or pending.terminal:
             return
+        reason = getattr(event, 'reason', '')
+        if type(event).__name__ in ('OrderCanceled', 'OrderExpired'):
+            pending.unresolved = True
+            pending.checked_ns = 0
+            self._record('order_unresolved', pair=stage.pair, order=str(event.client_order_id), reason=reason)
+            self._save()
+            return
         pending.terminal = True
         self._record('order_terminal', pair=stage.pair, order=str(event.client_order_id), event=type(event).__name__,
                      exchange_time_ns=event.ts_event, reason=getattr(event, 'reason', None))
         incomplete = pending.filled < abs(pending.quantity) - 1e-9
         if failed or (incomplete and pending.action != 'recovery'):
-            self._execution_failed(stage, pending, type(event).__name__)
+            self._execution_failed(stage, pending, type(event).__name__,
+                                   order_id=str(event.client_order_id), exchange_reason=getattr(event, 'reason', None))
         if failed and self.venue_monitor:
             self.venue_monitor.refresh.set()
         self._save()
@@ -1619,6 +1692,29 @@ class EtfArbStrategy(Strategy):
             self._record('order_accepted', pair=self.orders[str(event.client_order_id)].pair,
                          order=str(event.client_order_id), venue_order_id=str(event.venue_order_id),
                          exchange_time_ns=event.ts_event, init_ns=event.ts_init)
+
+    @guarded_callback
+    def _receive_order_resolution(self, resolution: OrderResolution):
+        self._assert_thread()
+        if self.stopping:
+            return
+        pending = self.orders.get(resolution.client_order_id)
+        if pending is None or pending.terminal:
+            return
+        if abs(Decimal(str(pending.filled)) - resolution.filled) > Decimal('0.000000001'):
+            pending.unresolved = True
+            self._record('order_resolution_mismatch', order=resolution.client_order_id,
+                         native_filled=str(resolution.filled), local_filled=pending.filled)
+            return
+        pending.unresolved = False
+        pending.terminal = True
+        stage = self.stages[pending.pair]
+        if pending.filled < abs(pending.quantity) - 1e-9 and pending.action != 'recovery':
+            self._execution_failed(stage, pending, 'native_' + resolution.status.lower(), order_id=resolution.client_order_id)
+        self._record('order_resolved', pair=stage.pair, order=resolution.client_order_id,
+                     status=resolution.status, filled=str(resolution.filled))
+        self._save()
+        self._drive()
 
     def on_order_rejected(self, event):
         self._terminal(event, True)
@@ -1635,14 +1731,10 @@ class EtfArbStrategy(Strategy):
     def on_order_cancel_rejected(self, event):
         self._assert_thread()
         order = self.cache.order(event.client_order_id)
-        if order and order.is_closed:
+        if order:
             pending = self.orders.get(str(event.client_order_id))
             if pending and not pending.terminal:
-                pending.terminal = True
-                if pending.filled < abs(pending.quantity) - 1e-9 and pending.action != 'recovery':
-                    self._execution_failed(self.stages[pending.pair], pending, 'cancel_rejected_closed_incomplete')
-                self._save()
-            self._drive()
+                pending.unresolved = True
 
     def _watchdog(self, _event):
         self._assert_thread()
@@ -1676,22 +1768,27 @@ class EtfArbStrategy(Strategy):
         for key, pending in list(self.orders.items()):
             if pending.terminal or now - pending.sent_ns < self.config.order_timeout_ms * 1_000_000:
                 continue
-            resolution_interval = (1, 2, 5)[min(pending.resolution_attempts, 2)] * 1_000_000_000
+            resolution_interval = retry_delay_ns(pending.resolution_attempts + 1)
             if now - pending.checked_ns < resolution_interval:
                 continue
             pending.checked_ns = now
             pending.resolution_attempts += 1
+            pending.unresolved = True
+            if order_alert_due(pending.sent_ns, pending.alert_ns, now):
+                pending.alerted = True
+                pending.alert_ns = now
+                self._record('order_resolution_alert', pair=pending.pair, order=key,
+                             age_ms=(now - pending.sent_ns) / 1e6)
+                if self.notifier:
+                    try:
+                        self.notifier.send(f'{self.id}:{key}:unresolved',
+                                           f'ETF套利 · {pending.pair} · 订单核单超过60秒\n订单 {key}\n保留在途状态与资金预留，请核查')
+                    except Exception as exc:
+                        self.notification_error = f'order_alert:{type(exc).__name__}'
+                self._save()
             order = self.cache.order(ClientOrderId(key))
             if order is not None:
-                if order.is_closed:
-                    pending.terminal = True
-                    if pending.filled < abs(pending.quantity) - 1e-9 and pending.action != 'recovery':
-                        self._execution_failed(self.stages[pending.pair], pending, 'closed_incomplete')
-                    self._save()
-                else:
-                    self.query_order(order, client_id=self.exec_client)
-                    if not order.is_pending_cancel:
-                        self.cancel_order(order, client_id=self.exec_client)
+                self.query_order(order, client_id=self.exec_client)
             self._add_wait(self.stages[pending.pair], 'order_resolution_pending')
         for name, retry in list(self.execution_retries.items()):
             if (retry.next_attempt_ns and now >= retry.next_attempt_ns and not retry.recovering and
@@ -1724,11 +1821,13 @@ class EtfArbStrategy(Strategy):
             fair = self.stages[name].fair if name in self.stages else self._fair(name, now)
             etf, under = (self.markets[i] for i in self._ids(name))
             pairs[name] = {'anchor_ready': fair is not None, 'correction': fair.baseline if fair else None,
+                           'entry_quote_ready': self._entry_quote_ready(name),
                            'baseline': self.baselines[name].describe(),
                            'fresh': self._quotes_ready(name), 'entry_blocked': self._blocked(name, now),
                            'gap': max(entry_gap(fair, etf, under, 1), entry_gap(fair, etf, under, -1))
                                   if fair and etf.bid > 0 and under.bid > 0 else None}
         self._record('health', ready=self.ready, bootstrap_remaining=[str(i) for i in self.bootstrap_remaining],
+                     audit_failed=self.audit_failed,
                      available_usdt=capital['local_headroom'], capital=capital,
                      venue={'checked_ns': self.venue_checked_ns, 'error': self.venue_error,
                             'worker_alive': self.venue_monitor.worker.is_alive() if self.venue_monitor else False,
@@ -1803,6 +1902,7 @@ class EtfArbStrategy(Strategy):
             reason = reason or stage.exit_reason or 'reversion'
             reasons = {'reversion': '价差回归', 'scheduled_close': '收盘前退出', 'managed_stop': '策略停止',
                        'restart_recovery': '重启恢复', 'hedge_timeout': '对冲超时',
+                       'execution_recovery': '执行异常回退', 'entry_rejected': '开仓失败',
                        'position_mismatch': '仓位核对异常'}
             lines += [f'退出原因 {reasons.get(reason, reason)}',
                       f'阶段时长 {(now - stage.started_ns) / 60e9:.1f} 分钟',
@@ -1830,17 +1930,29 @@ class EtfArbStrategy(Strategy):
         actual = self._position_quantities(stage.pair)
         if any(abs(q) >= float(self.instruments[iid].size_increment) / 2
                for iid, q in zip(self._ids(stage.pair), actual)):
-            stage.quantities = actual
-            self._exit(stage, 'position_mismatch', pause=True)
+            if stage.wait_reason != 'position_reconciliation_required':
+                for iid in self._ids(stage.pair):
+                    for name in self.by_instrument[iid]:
+                        self._pause_pair(name, 'position_reconciliation_required')
+                self._add_wait(stage, 'position_reconciliation_required')
+                self._record('position_reconciliation_required', pair=stage.pair, cached=actual,
+                             virtual=stage.quantities)
+                self._save()
             return
+        reason = stage.exit_reason or 'reversion'
+        retry = self.execution_retries.get(stage.pair)
+        if not stage.exit_reason and retry and retry.recovering:
+            reason = 'execution_recovery'
+        elif not stage.exit_reason and stage.pause_after_exit:
+            reason = 'entry_rejected'
         self._execution_balanced(stage)
         stage.pause_after_exit |= stage.pair in self.paused
         if stage.pause_after_exit:
             self.paused.add(stage.pair)
         if stage.open_notified or stage.exit_notified or stage.realized_pnl or stage.fees:
-            self._notify_stage(stage, 'closed')
+            self._notify_stage(stage, 'closed', reason=reason)
         self._record('stage_closed', pair=stage.pair, batches=stage.batches,
-                     reason=stage.exit_reason or ('entry_rejected' if stage.pause_after_exit else 'reversion'),
+                     reason=reason,
                      duration_ms=(self.clock.timestamp_ns() - stage.started_ns) / 1e6, paused=stage.pause_after_exit)
         self.stages.pop(stage.pair)
         self._drop_entry_confirmation(stage.pair)
@@ -1860,6 +1972,11 @@ class EtfArbStrategy(Strategy):
         return [float(sum((p.signed_decimal_qty() for p in self.cache.positions_open(instrument_id=iid, strategy_id=self.id)), Decimal(0))) - self._instrument_quantity(iid, excluding=name)
                 for iid in self._ids(name)]
 
+    def _has_shared_position(self, name):
+        return any(other != name and iid in self._ids(other) and
+                   abs(stage.quantities[self._ids(other).index(iid)]) > 1e-9
+                   for iid in self._ids(name) for other, stage in self.stages.items())
+
     def _record(self, kind, **values):
         record = {'time_ns': self.clock.timestamp_ns(), 'kind': kind, **values}
         if self.recorder:
@@ -1878,13 +1995,19 @@ class EtfArbStrategy(Strategy):
                     stream.close()
                 except OSError:
                     pass
-                if not self.stopping:
-                    self._fail_strategy('audit_write_failed')
+                self.audit_failed = True
+                if self.notifier:
+                    try:
+                        self.notifier.send(f'{self.id}:audit_failed', 'ETF套利 · 审计写入失败\n已暂停新增风险，现有仓位继续退出。')
+                    except Exception as notify_error:
+                        self.notification_error = f'audit_alert:{type(notify_error).__name__}'
         if kind in ['started', 'stage_open', 'stage_closed', 'exit_requested', 'baseline_anchor_missing']:
             self.log.info(json.dumps(record, ensure_ascii=False))
 
     def _save(self):
         self._assert_thread()
+        if not self.startup_complete:
+            return True
         if self.state_failed:
             return False
         payload = {'version': 2, 'strategy_id': str(self.id),
@@ -1903,18 +2026,29 @@ class EtfArbStrategy(Strategy):
         except (OSError, ValueError, TypeError) as exc:
             self.state_failed = True
             self.log.exception('ETF checkpoint write failed', exc)
+            if not self.is_running:
+                raise
             self._fail_strategy(f'checkpoint_failed:{type(exc).__name__}')
             return False
 
     def _recover(self):
         positions = {iid: float(sum((p.signed_decimal_qty() for p in self.cache.positions_open(instrument_id=iid)), Decimal(0)))
                      for iid in self.markets}
-        live_orders = [o for iid in self.markets for o in self.cache.orders_open(instrument_id=iid)]
+        live_orders = {str(o.client_order_id): o for iid in self.markets
+                       for o in self.cache.orders_open(instrument_id=iid) + self.cache.orders_inflight(instrument_id=iid)}
         checkpoint = read_state(self.state_path)
         if checkpoint:
             payload = checkpoint
             if payload['version'] not in (1, 2) or payload['strategy_id'] != str(self.id):
                 raise RuntimeError('state identity mismatch')
+            # 未决原单缺少缓存或成交账不同步时保留检查点，交由人工核单后恢复。
+            for key, saved in payload['orders'].items():
+                if saved['terminal']:
+                    continue
+                order = self.cache.order(ClientOrderId(key))
+                if order is None or order.strategy_id != self.id or abs(float(order.filled_qty) - saved['filled']) > 1e-9:
+                    raise RuntimeError(f'restart requires original order reconciliation: {key}')
+                live_orders[key] = order
             self.paused = set(payload['paused']).intersection(self.pairs)
             self.execution_retries = {name: ExecutionRetry(**values) for name, values in
                                       payload.get('execution_retries', {}).items() if name in self.pairs}
@@ -1942,21 +2076,26 @@ class EtfArbStrategy(Strategy):
                 if self.executing_pair:
                     if self.executing_pair not in self.stages:
                         raise RuntimeError('recovered batch owner absent from stages')
-                    self.stages[self.executing_pair].quantities = self._position_quantities(self.executing_pair)
+                    actual = self._position_quantities(self.executing_pair)
+                    owner = self.stages[self.executing_pair]
+                    if any(abs(a - b) >= float(self.instruments[iid].size_increment) / 2
+                           for a, b, iid in zip(actual, owner.quantities, self._ids(owner.pair))):
+                        raise RuntimeError('checkpoint position requires manual reconciliation')
                 if any(abs(q - self._instrument_quantity(iid)) >= float(self.instruments[iid].size_increment) / 2
                        for iid, q in positions.items()):
                     raise RuntimeError('recovered portfolio differs from exchange positions')
                 owners = set()
-                for order in live_orders:
+                for key, order in live_orders.items():
                     key = str(order.client_order_id)
-                    owner = payload['orders'].get(key, {}).get('pair', self.executing_pair)
+                    saved = payload['orders'].get(key)
+                    owner = saved['pair'] if saved else None
                     if owner not in self.stages or order.instrument_id not in self._ids(owner):
                         raise RuntimeError('recovered order has no matching stage')
                     owners.add(owner)
-                    self.orders[key] = Pending(owner, str(order.instrument_id), self._ids(owner).index(order.instrument_id),
-                        float(order.quantity) * (1 if order.side == OrderSide.BUY else -1), self.clock.timestamp_ns(),
-                        'recovery', filled=float(order.filled_qty),
-                        batch_id=payload['orders'].get(key, {}).get('batch_id', f'recovery:{owner}'))
+                    self.orders[key] = Pending(**saved)
+                    self.orders[key].terminal = False
+                    self.orders[key].unresolved = True
+                    self.orders[key].checked_ns = 0
                 if len(owners) > 1 or (owners and owners != {self.executing_pair}):
                     raise RuntimeError('recovered orders violate serial batch ownership')
                 for stage in self.stages.values():
@@ -1966,8 +2105,6 @@ class EtfArbStrategy(Strategy):
                     stage.repair_deadline_ns = 0
                     stage.pause_after_exit = True
                     stage.next_attempt_ns = 0
-                for order in live_orders:
-                    self.cancel_order(order, client_id=self.exec_client)
                 self._save()
                 return
         if any(abs(q) > 1e-9 for q in positions.values()) or live_orders:
@@ -1977,15 +2114,19 @@ class EtfArbStrategy(Strategy):
     def on_stop(self):
         self._assert_thread()
         self.stopping = True
+        if self.msgbus.is_subscribed(f'events.order_resolution.{self.id}', self._receive_order_resolution):
+            self.msgbus.unsubscribe(f'events.order_resolution.{self.id}', self._receive_order_resolution)
         self.background_stop.set()
         for name in list(self.clock.timer_names):
             if name.startswith('etf.'):
-                self.clock.cancel_timer(name)
+                self.cancel_timer_if_active(name)
         if self.startup_failed:
             self._close_resources()
             return
-        if not self.cache.positions_open(strategy_id=self.id) and not self.cache.orders_open(strategy_id=self.id):
+        if (not self._pending() and not self.cache.positions_open(strategy_id=self.id)
+                and not self.cache.orders_open(strategy_id=self.id) and not self.cache.orders_inflight(strategy_id=self.id)):
             for stage in self.stages.values():
+                self._execution_balanced(stage)
                 if stage.open_notified or stage.exit_notified or stage.realized_pnl or stage.fees:
                     self._notify_stage(stage, 'closed', reason=stage.exit_reason or 'managed_stop')
                 self._record('stage_closed', pair=stage.pair, batches=stage.batches,
@@ -2058,4 +2199,7 @@ class EtfArbStrategy(Strategy):
                     raise
             return
         self._assert_thread()
+        if self._pending() or self.stages:
+            self._drive()
+            return
         super()._check_market_exit(event)

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from urllib.parse import urlencode
 
 import requests
+from utils.background import BackgroundReader
 
 from .binance import credentials
 
@@ -101,3 +102,8 @@ class BinanceAccountReader:
 
     def close(self):
         self.session.close()
+
+
+class NativeAccountWorker(BackgroundReader):
+    def __init__(self, environment, notify):
+        super().__init__(lambda: BinanceAccountReader(environment), notify, 'native-account-reader')

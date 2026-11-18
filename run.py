@@ -183,24 +183,8 @@ def parse_style(raw: str) -> str:
 
 
 def run(config_name: str, mode: str) -> None:
-    if mode == "backtest":
-        import backtest
-
-        started = time.perf_counter()
-        result = backtest.main(config_name)
-        elapsed = result.get("total_elapsed_sec") if isinstance(result, dict) else None
-        if elapsed is None:
-            elapsed = time.perf_counter() - started
-        print(f"回测完成，耗时：{format_duration(elapsed)}")
-    else:
-        import live
-
-        live.main(config_name, mode=mode)
-
-
-def show_backtest_running(config_name: str) -> None:
-    if os.name == "nt":
-        clear_screen()
+    import live
+    live.main(config_name, mode=mode)
 
 
 def tmux_available() -> bool:
@@ -323,7 +307,7 @@ def background_report_dir(config_name: str, mode: str, start_time: str) -> Path:
     root = Path(settings["reports"]["root"])
     if not root.is_absolute():
         root = Path(settings["project"]["strategy_dir"]) / root
-    run_kind = "backtest" if mode == "backtest" else "live"
+    run_kind = "live"
     return root / f"{run_kind}-{start_time}"
 
 
@@ -486,8 +470,6 @@ def run_interactive() -> None:
                 run_background(selected_config, mode)
                 return
 
-        if mode == "backtest":
-            show_backtest_running(selected_config)
         run(selected_config, mode)
         return
 
@@ -508,13 +490,11 @@ def main() -> None:
         if style == "background":
             run_background(config_name, mode)
         else:
-            if mode == "backtest":
-                show_backtest_running(config_name)
             run(config_name, mode)
         return
 
     if len(sys.argv) != 1:
-        raise ValueError("Usage: python run.py [config_name] [backtest|testnet|live] [background|foreground]")
+        raise ValueError("Usage: python run.py [config_name] [testnet|live] [background|foreground]")
 
     if not sys.stdin.isatty():
         raise RuntimeError("交互模式需要真实终端；非终端环境请用 python run.py 配置名 模式")

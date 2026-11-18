@@ -15,14 +15,14 @@ class RuntimeLock:
                 msvcrt.locking(self.stream.fileno(), msvcrt.LK_NBLCK, 1)
             except OSError:
                 self.stream.close()
-                raise RuntimeError(f'another ETF process owns {path}') from None
+                raise RuntimeError(f'another process owns {path}') from None
         else:
             import fcntl
             try:
                 fcntl.flock(self.stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             except OSError:
                 self.stream.close()
-                raise RuntimeError(f'another ETF process owns {path}') from None
+                raise RuntimeError(f'another process owns {path}') from None
 
     def close(self):
         self.stream.close()
