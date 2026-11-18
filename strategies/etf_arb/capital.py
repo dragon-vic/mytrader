@@ -1,46 +1,5 @@
 """每阶段一次账户读取，阶段内使用成交与在途预留记账。"""
-import queue
-import threading
 from dataclasses import dataclass
-
-from adapters.binance_account import BinanceAccountReader
-
-
-class CapitalReader:
-    def __init__(self, environment, notify):
-        self.environment, self.notify = environment, notify
-        self.requests = queue.Queue(maxsize=1)
-        self.results = queue.Queue(maxsize=1)
-        self.stop = threading.Event()
-        self.worker = threading.Thread(target=self._run, name='etf-native-capital', daemon=True)
-
-    def request(self, token):
-        self.requests.put_nowait(token)
-
-    def _run(self):
-        reader = None
-        try:
-            while not self.stop.is_set():
-                try:
-                    token = self.requests.get(timeout=.2)
-                except queue.Empty:
-                    continue
-                try:
-                    if reader is None:
-                        reader = BinanceAccountReader(self.environment)
-                    snapshot, error = reader.read(), None
-                except (RuntimeError, ValueError, KeyError, StopIteration, TypeError) as exc:
-                    snapshot, error = None, f'{type(exc).__name__}:{exc}'
-                if self.stop.is_set():
-                    return
-                self.results.put((token, snapshot, error))
-                self.notify()
-        finally:
-            if reader:
-                reader.close()
-
-    def close(self):
-        self.stop.set()
 
 
 @dataclass

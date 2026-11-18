@@ -25,3 +25,4 @@ output/
 strategies/*/runtime/
 tools/.telegram_codex_session
 strategies/max_funding/data/
+.runtime/

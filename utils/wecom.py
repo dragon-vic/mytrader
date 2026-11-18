@@ -30,20 +30,14 @@ class WeComNotifier:
         self.worker.start()
 
     def send(self, event_id: str, message: str) -> bool:
-        if not self.lock.acquire(blocking=False):
+        if self.closed.is_set() or not message.strip() or len(message.encode('utf-8')) > 2048:
             self.rejected += 1
             return False
         try:
-            if self.closed.is_set() or not message.strip() or len(message.encode('utf-8')) > 2048:
-                self.rejected += 1
-                return False
-            try:
-                self.queue.put_nowait((event_id, message))
-            except queue.Full:
-                self.rejected += 1
-                return False
-        finally:
-            self.lock.release()
+            self.queue.put_nowait((event_id, message))
+        except queue.Full:
+            self.rejected += 1
+            return False
         return True
 
     def status(self) -> dict:

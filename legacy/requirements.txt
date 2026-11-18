@@ -1,0 +1,15 @@
+nautilus-trader==1.230.0
+py-clob-client-v2
+pandas
+requests
+PyYAML
+python-dotenv
+rich
+openai
+pyarrow
+nautilus-ibapi>=10.43.2
+ccxt
+websockets
+pypdf==6.14.2
+jsonschema>=4.26.0
+exchange-calendars

@@ -1,15 +1,12 @@
 from __future__ import annotations
 
-import os
-import queue
-import threading
+import json
 from dataclasses import dataclass
 from decimal import ROUND_CEILING, Decimal
 from pathlib import Path
 
-import requests
-from dotenv import load_dotenv
 from nautilus_trader.config import StrategyConfig
+from nautilus_trader.common.actor import Actor
 from nautilus_trader.model.data import MarkPriceUpdate
 from nautilus_trader.model.enums import OrderSide, TimeInForce
 from nautilus_trader.model.events import (
@@ -20,14 +17,18 @@ from nautilus_trader.model.events import (
     OrderRejected,
 )
 from nautilus_trader.model.identifiers import InstrumentId
-from nautilus_trader.trading.strategy import Strategy
+from utils.live_strategy import LiveStrategy, guarded_callback
+from utils.wecom import WeComNotifier
+from utils.execution import retry_delay_ns, order_alert_due
+from utils.runtime_lock import RuntimeLock
+from utils.state import read_state, write_state
+from adapters.binance_account import NativeAccountWorker
 
 from utils.constants import NODE_STOP_TOPIC
 from utils.live_control import NodeStopRequest
 
 ADR_COMMON_SHARE_RATIO = Decimal("0.1")
 NANOSECONDS_PER_SECOND = 1_000_000_000
-ROOT = Path(__file__).resolve().parents[2]
 
 
 @dataclass
@@ -35,46 +36,7 @@ class PendingLeg:
     instrument_id: InstrumentId
     target_qty: Decimal
     filled_qty: Decimal = Decimal(0)
-
-
-class TelegramSender:
-    def __init__(self, token: str, chat_id: str) -> None:
-        self.url = f"https://api.telegram.org/bot{token}/sendMessage"
-        self.chat_id = chat_id
-        self.messages: queue.Queue[str | None] = queue.Queue()
-        self.errors: queue.SimpleQueue[str] = queue.SimpleQueue()
-        self.worker = threading.Thread(target=self._run, name="sk-adr-telegram", daemon=True)
-        self.worker.start()
-
-    def send(self, message: str) -> None:
-        self.messages.put_nowait(message)
-
-    def close(self) -> None:
-        self.messages.put_nowait(None)
-
-    def pop_error(self) -> str | None:
-        try:
-            return self.errors.get_nowait()
-        except queue.Empty:
-            return None
-
-    # Telegram 网络请求放在后台线程，不能阻塞策略的价格检查和下单。
-    def _run(self) -> None:
-        session = requests.Session()
-        while True:
-            message = self.messages.get()
-            if message is None:
-                return
-            try:
-                response = session.post(
-                    self.url,
-                    data={"chat_id": self.chat_id, "text": message},
-                    timeout=5,
-                )
-                response.raise_for_status()
-            except requests.RequestException as exc:
-                # 异常文本可能包含带 token 的 URL，只记录异常类型避免泄露凭据。
-                self.errors.put(type(exc).__name__)
+    terminal: bool = False
 
 
 class SkAdrArbConfig(StrategyConfig, frozen=True):
@@ -88,14 +50,22 @@ class SkAdrArbConfig(StrategyConfig, frozen=True):
     standard_stage_notional: Decimal
     large_stage_notional: Decimal
     order_notional: Decimal
-    retry_delay_sec: Decimal
+    round_interval_sec: Decimal
+    exit_retry_sec: Decimal
     price_check_interval_sec: Decimal
     max_mark_age_sec: Decimal
-    telegram_notify_step: Decimal
+    notification_step: Decimal
+    notification_path: str
+    lock_path: str
+    wecom_notifications: bool
+    state_path: str
+    account_environment: str
+    capital_fraction: Decimal
+    taker_fee: Decimal
     exit_premium: Decimal
 
 
-class SkAdrArbStrategy(Strategy):
+class SkAdrArbStrategy(LiveStrategy):
     def __init__(self, config: SkAdrArbConfig) -> None:
         super().__init__(config)
         self.sk_id = InstrumentId.from_str(config.sk_instrument)
@@ -109,12 +79,13 @@ class SkAdrArbStrategy(Strategy):
         self.standard_stage_notional = Decimal(str(config.standard_stage_notional))
         self.large_stage_notional = Decimal(str(config.large_stage_notional))
         self.order_notional = Decimal(str(config.order_notional))
-        self.retry_delay_ns = int(Decimal(str(config.retry_delay_sec)) * NANOSECONDS_PER_SECOND)
+        self.round_interval_ns = int(Decimal(str(config.round_interval_sec)) * NANOSECONDS_PER_SECOND)
+        self.exit_retry_ns = int(Decimal(str(config.exit_retry_sec)) * NANOSECONDS_PER_SECOND)
         self.price_check_interval_ns = int(
             Decimal(str(config.price_check_interval_sec)) * NANOSECONDS_PER_SECOND,
         )
         self.max_mark_age_ns = int(Decimal(str(config.max_mark_age_sec)) * NANOSECONDS_PER_SECOND)
-        self.telegram_notify_step = Decimal(str(config.telegram_notify_step))
+        self.notification_step = Decimal(str(config.notification_step))
         self.exit_premium = Decimal(str(config.exit_premium))
         if not Decimal(0) <= self.exit_premium < Decimal(self.first_add_position) / 100:
             raise ValueError("exit_premium must be below the first add threshold")
@@ -137,10 +108,12 @@ class SkAdrArbStrategy(Strategy):
             or self.large_stage_notional % self.order_notional != 0
         ):
             raise ValueError("stage notionals must be multiples of order_notional")
-        if self.retry_delay_ns <= 0 or self.price_check_interval_ns <= 0 or self.max_mark_age_ns <= 0:
+        if min(self.round_interval_ns, self.exit_retry_ns, self.price_check_interval_ns, self.max_mark_age_ns) <= 0:
             raise ValueError("alert intervals and max_mark_age_sec are invalid")
-        if self.telegram_notify_step <= 0:
-            raise ValueError("telegram notification step must be positive")
+        if self.notification_step <= 0:
+            raise ValueError("notification step must be positive")
+        if not 0 < config.capital_fraction < 1 or config.taker_fee < 0:
+            raise ValueError('invalid capital fraction or taker fee')
         self.marks: dict[InstrumentId, MarkPriceUpdate] = {}
         self.pending: dict[str, PendingLeg] | None = None
         self.active_add_position: int | None = None
@@ -151,22 +124,71 @@ class SkAdrArbStrategy(Strategy):
         self.alert_name: str | None = None
         self.alert_seq = 0
         self.round_count = 0
-        self.telegram: TelegramSender | None = None
+        self.notifier = None
+        self.runtime_lock = None
+        self.stopping = False
+        self.fill_ids = set()
+        self.order_checks = {}
+        self.order_alert_ns = {}
+        self.rollback_requested = False
+        self.rollback_orders = {}
+        self.rollback_failures = 0
+        self.rollback_retry_ns = 0
+        self.rollback_alert_ns = 0
+        self.account_reader = None
+        self.account_inflight = False
+        self.account_retry_ns = 0
+        self.available_margin = Decimal(0)
+        self.capital_ready = False
         self.last_notify_premium: Decimal | None = None
         self.exit_requested = False
         self.exit_orders: list = []
+        self.unresolved_exits = set()
         self.stop_requested = False
         self.flat_checks = 0
         self.next_exit_attempt_ns = 0
         self.next_add_attempt_ns = 0
+        self.startup_failed = False
 
     def on_start(self) -> None:
+        self.bind_owner()
+        try:
+            self._start_strategy()
+        except Exception as exc:
+            self.startup_failed = True
+            self.stopping = True
+            self.log.error(f'startup_failed error={type(exc).__name__} reason={exc}')
+            self.event_loop.call_soon(self._abort_startup)
+
+    def _abort_startup(self):
+        self._assert_thread()
+        Actor.stop(self)
+        self.msgbus.publish(NODE_STOP_TOPIC, NodeStopRequest(source='sk_adr_arb', reason='startup_failed'))
+
+    def _start_strategy(self):
+        Path(self.config.lock_path).parent.mkdir(parents=True, exist_ok=True)
+        self.runtime_lock = RuntimeLock(Path(self.config.lock_path))
         self._check_startup()
-        load_dotenv(ROOT / ".env")
-        self.telegram = TelegramSender(
-            token=os.environ["TELEGRAM_MONIOR_BOT_TOKEN"],
-            chat_id=os.environ["TELEGRAM_MONIOR_CHAT_ID"],
-        )
+        checkpoint = read_state(self.config.state_path)
+        if checkpoint:
+            if checkpoint['strategy_id'] != str(self.id):
+                raise RuntimeError('SK checkpoint identity mismatch')
+            self.add_position = checkpoint['completed_threshold']
+            self.active_add_position = checkpoint['active_threshold']
+            self.stage_round, self.stage_rounds = checkpoint['round'], checkpoint['rounds']
+            self.halted = checkpoint['halted'] or bool(checkpoint['pending'])
+            self.exit_requested = checkpoint['exit_requested']
+            actual = self._position_quantities()
+            if checkpoint['pending'] or checkpoint.get('exit_orders') or checkpoint.get('quantities', actual) != actual:
+                raise RuntimeError('SK checkpoint requires native order and position reconciliation')
+        self.account_reader = NativeAccountWorker(self.config.account_environment, self._account_wakeup)
+        self.account_reader.worker.start()
+        self.msgbus.subscribe(f'events.order_resolution.{self.id}', self._receive_order_resolution)
+        if self.config.wecom_notifications:
+            try:
+                self.notifier = WeComNotifier(Path(self.config.notification_path))
+            except Exception as exc:
+                self.log.error(f'notification_start_failed error={type(exc).__name__}')
         for instrument_id in self.instrument_ids:
             self.subscribe_mark_prices(instrument_id)
         self._schedule_attempt(self.price_check_interval_ns)
@@ -180,23 +202,63 @@ class SkAdrArbStrategy(Strategy):
         )
 
     def on_stop(self) -> None:
+        self._assert_thread()
         # 人工停止不自动平仓；阈值退出路径在两腿归零后才请求停止 node。
         if self.alert_name is not None:
-            self.clock.cancel_timer(self.alert_name)
+            self.cancel_timer_if_active(self.alert_name)
             self.alert_name = None
-        if self.telegram is not None:
-            self.telegram.close()
-            self.telegram = None
+        self.stopping = True
+        if self.msgbus.is_subscribed(f'events.order_resolution.{self.id}', self._receive_order_resolution):
+            self.msgbus.unsubscribe(f'events.order_resolution.{self.id}', self._receive_order_resolution)
+        if self.notifier is not None:
+            try:
+                self.notifier.close()
+            except Exception as exc:
+                self.log.error(f'notification_close_failed error={type(exc).__name__}')
+            self.notifier = None
+        if not self.startup_failed:
+            self._save_checkpoint()
+        if self.runtime_lock:
+            self.runtime_lock.close()
+            self.runtime_lock = None
+        if self.account_reader:
+            self.account_reader.close()
 
+    def on_callback_error(self, name, error):
+        self._pause(f'callback_error:{name}:{type(error).__name__}')
+
+    @guarded_callback
     def on_order_filled(self, event: OrderFilled) -> None:
+        self._assert_thread()
+        self._audit('fill', order=str(event.client_order_id), trade_id=str(event.trade_id),
+                    instrument=str(event.instrument_id), quantity=str(event.last_qty),
+                    price=str(event.last_px), commission=str(event.commission), ts_event=event.ts_event)
+        order = self.cache.order(event.client_order_id)
+        if order and order.filled_qty >= order.quantity:
+            self.unresolved_exits.discard(str(event.client_order_id))
+        rollback = self.rollback_orders.get(str(event.client_order_id))
+        if rollback is not None:
+            key = (str(event.client_order_id), str(event.trade_id))
+            if key not in self.fill_ids:
+                self.fill_ids.add(key)
+                rollback.filled_qty += event.last_qty.as_decimal()
+                rollback.terminal = rollback.filled_qty >= rollback.target_qty
+                self._save_checkpoint()
+            return
         if self.pending is None:
             return
         leg = self.pending.get(str(event.client_order_id))
         if leg is None:
             return
+        key = (str(event.client_order_id), str(event.trade_id))
+        if key in self.fill_ids:
+            return
+        self.fill_ids.add(key)
         leg.filled_qty += event.last_qty.as_decimal()
+        leg.terminal = leg.filled_qty >= leg.target_qty
         # 本轮所有订单都累计到各自目标数量，才允许进入下一轮等待。
         if not all(item.filled_qty >= item.target_qty for item in self.pending.values()):
+            self._save_checkpoint()
             return
 
         self.pending = None
@@ -215,9 +277,11 @@ class SkAdrArbStrategy(Strategy):
             self.active_add_position = None
             self.stage_round = 0
             self.stage_rounds = 0
+            self.capital_ready = False
             self.log.warning(f"add_stage_completed add_position={self.add_position}")
         # 加仓仍间隔五秒，但等待期间继续检查退出阈值。
-        self.next_add_attempt_ns = self.clock.timestamp_ns() + self.retry_delay_ns
+        self.next_add_attempt_ns = self.clock.timestamp_ns() + self.round_interval_ns
+        self._save_checkpoint()
         self._schedule_attempt(self.price_check_interval_ns)
 
     def on_order_rejected(self, event: OrderRejected) -> None:
@@ -293,17 +357,12 @@ class SkAdrArbStrategy(Strategy):
         self._notify_market(sk_price, adr_price, premium)
 
         # 退出优先于在途加仓、加仓等待和暂停状态；触发后不可恢复加仓。
-        if premium <= self.exit_premium:
-            self.exit_requested = True
-            self.log.warning(
-                f"exit_triggered premium={premium:.4%} threshold={self.exit_premium:.2%}",
-            )
-            for instrument_id in self.instrument_ids:
-                self.cancel_all_orders(instrument_id)
+        if self._trigger_exit(premium):
             self._try_exit()
             return
         if (
             self.halted
+            or self.rollback_requested
             or not self.ready
             or self.pending is not None
             or self.clock.timestamp_ns() < self.next_add_attempt_ns
@@ -345,18 +404,51 @@ class SkAdrArbStrategy(Strategy):
 
         self.ready = False
         self.pending = pending
+        margin = sum((quantity.as_decimal() * self.marks[iid].value.as_decimal() *
+                      (1 / self.leverage + 2 * self.config.taker_fee)
+                      for iid, quantity in quantities.items()), Decimal(0))
+        if margin > self.available_margin:
+            self.pending = None
+            self._pause('native_available_margin_insufficient')
+            return
+        self.available_margin -= margin
+        if not self._save_checkpoint():
+            self.pending = None
+            return
         self.log.info(
             f"submit_pair add_position={self.active_add_position} "
             f"stage_round={self.stage_round + 1}/{self.stage_rounds} "
             f"premium={premium:.4%} order_notional={self.order_notional:.4f}",
         )
         for order in orders:
-            if self.halted:
-                break
-            self.submit_order(order)
+            try:
+                self.submit_order(order)
+            except Exception as exc:
+                if self.cache.order(order.client_order_id) is None:
+                    self.pending[str(order.client_order_id)].terminal = True
+                self.rollback_requested = True
+                self._pause(f'order_submit_error:{type(exc).__name__}')
+        self._audit('orders_sent', orders=[str(order.client_order_id) for order in orders],
+                    threshold=self.active_add_position, round=self.stage_round)
+
+    def _trigger_exit(self, premium):
+        if premium > self.exit_premium:
+            return False
+        self.exit_requested = True
+        self.log.warning(f'exit_triggered premium={premium:.4%} threshold={self.exit_premium:.2%}')
+        self._save_checkpoint()
+        for instrument_id in self.instrument_ids:
+            self.cancel_all_orders(instrument_id)
+        return True
 
     def _try_exit(self) -> None:
         if self.stop_requested:
+            return
+        if self.unresolved_exits:
+            return
+        if any(not leg.terminal for leg in self.rollback_orders.values()):
+            return
+        if self.pending and any(not leg.terminal for leg in self.pending.values()):
             return
         # 等待上一批及正在撤销的加仓订单进入终态，避免重复平仓。
         if any(not order.is_closed for order in self.exit_orders):
@@ -396,7 +488,7 @@ class SkAdrArbStrategy(Strategy):
             quantity = instrument.make_qty(abs(signed_qty))
             if quantity.as_decimal() != abs(signed_qty):
                 self.log.error(f"exit_quantity_not_exact position={position.id}")
-                self.next_exit_attempt_ns = self.clock.timestamp_ns() + self.retry_delay_ns
+                self.next_exit_attempt_ns = self.clock.timestamp_ns() + self.exit_retry_ns
                 return
             order = self.order_factory.market(
                 instrument_id=position.instrument_id,
@@ -407,7 +499,7 @@ class SkAdrArbStrategy(Strategy):
             )
             orders.append((order, position.id))
         self.exit_orders = [order for order, _ in orders]
-        self.next_exit_attempt_ns = self.clock.timestamp_ns() + self.retry_delay_ns
+        self.next_exit_attempt_ns = self.clock.timestamp_ns() + self.exit_retry_ns
         for order, position_id in orders:
             self.log.warning(
                 f"exit_submit instrument={order.instrument_id} qty={order.quantity} "
@@ -416,13 +508,20 @@ class SkAdrArbStrategy(Strategy):
             self.submit_order(order, position_id=position_id)
 
     def _prepare_add_stage(self, premium: Decimal) -> bool:
-        if self.active_add_position is not None:
+        if self.active_add_position is not None and self.capital_ready:
             return True
         next_position = self.first_add_position if self.add_position == 0 else self.add_position + 1
         if next_position > self.max_add_position:
             return False
-        if premium <= Decimal(next_position) / Decimal(100):
+        if self.active_add_position is None and premium <= Decimal(next_position) / Decimal(100):
             return False
+        if not self.capital_ready:
+            if not self.account_inflight and self.clock.timestamp_ns() >= self.account_retry_ns:
+                self.account_inflight = True
+                self.account_reader.request(1)
+            return False
+        if self.active_add_position is not None:
+            return True
         stage_notional = (
             self.large_stage_notional
             if next_position >= self.large_add_position
@@ -436,6 +535,115 @@ class SkAdrArbStrategy(Strategy):
             f"stage_notional={stage_notional:.4f} rounds={self.stage_rounds}",
         )
         return True
+
+    def _try_rollback(self):
+        if (self.pending and any(not leg.terminal for leg in self.pending.values())) or any(
+                not leg.terminal for leg in self.rollback_orders.values()):
+            return
+        now = self.clock.timestamp_ns()
+        if now < self.rollback_retry_ns:
+            return
+        orders = []
+        for iid in self.instrument_ids:
+            opened = sum((leg.filled_qty for leg in (self.pending or {}).values() if leg.instrument_id == iid), Decimal(0))
+            reverted = sum((leg.filled_qty for leg in self.rollback_orders.values() if leg.instrument_id == iid), Decimal(0))
+            remaining = opened - reverted
+            if remaining <= 0:
+                continue
+            instrument = self.cache.instrument(iid)
+            quantity = instrument.make_qty(remaining)
+            held = sum((p.signed_decimal_qty() for p in self.cache.positions_open(instrument_id=iid)), Decimal(0))
+            sign = Decimal(1) if iid == self.sk_id else Decimal(-1)
+            if quantity.as_decimal() != remaining or held * sign < remaining:
+                self.rollback_retry_ns = now + 5_000_000_000
+                self.log.error(f'rollback_position_review_required instrument={iid} remaining={remaining} held={held}')
+                if not self.rollback_alert_ns or now - self.rollback_alert_ns >= 300_000_000_000:
+                    self.rollback_alert_ns = now
+                    if self.notifier:
+                        try:
+                            self.notifier.send(f'{self.id}:rollback_review:{now}',
+                                f'SK/ADR 回退仓位需核对\n合约 {iid}\n待回退 {remaining}\n实际持仓 {held}')
+                        except Exception as exc:
+                            self.log.error(f'notification_send_failed error={type(exc).__name__}')
+                return
+            order = self.order_factory.market(instrument_id=iid, quantity=quantity,
+                order_side=OrderSide.SELL if iid == self.sk_id else OrderSide.BUY, reduce_only=True)
+            orders.append(order)
+        if not orders:
+            self.rollback_requested = False
+            self.pending = None
+            self.rollback_orders.clear()
+            self._audit('rollback_completed')
+            self._save_checkpoint()
+            return
+        for order in orders:
+            self.rollback_orders[str(order.client_order_id)] = PendingLeg(order.instrument_id, order.quantity.as_decimal())
+        if not self._save_checkpoint():
+            for order in orders:
+                self.rollback_orders.pop(str(order.client_order_id))
+            return
+        self._audit('rollback_submitted', orders=[str(order.client_order_id) for order in orders])
+        for order in orders:
+            try:
+                self.submit_order(order)
+            except Exception as exc:
+                if self.cache.order(order.client_order_id) is None:
+                    self.rollback_orders[str(order.client_order_id)].terminal = True
+                self.rollback_failures += 1
+                self.rollback_retry_ns = now + retry_delay_ns(self.rollback_failures)
+                self.log.error(f'rollback_submit_error error={type(exc).__name__}')
+
+    def _account_wakeup(self):
+        if not self.stopping:
+            self.dispatch_to_owner(self._receive_account)
+
+    def _receive_account(self):
+        self._assert_thread()
+        if self.stopping:
+            return
+        while not self.account_reader.results.empty():
+            _, snapshot, error = self.account_reader.results.get_nowait()
+            self.account_inflight = False
+            if error:
+                self.account_retry_ns = self.clock.timestamp_ns() + 5_000_000_000
+                self.log.warning(f'native_capital_unavailable error={error}')
+                continue
+            if self.clock.timestamp_ns() - snapshot.received_ns > 10_000_000_000:
+                self.account_retry_ns = self.clock.timestamp_ns() + 5_000_000_000
+                continue
+            for iid in self.instrument_ids:
+                symbol = str(iid.symbol).removesuffix('-PERP')
+                native = snapshot.configs.get(symbol, {})
+                if Decimal(str(native.get('leverage', 0))) != self.leverage or native.get('marginType') != 'CROSSED':
+                    self._pause('native_account_configuration_mismatch')
+                    return
+            self.available_margin = Decimal(str(snapshot.available)) * self.config.capital_fraction
+            self.capital_ready = True
+
+    def _save_checkpoint(self):
+        try:
+            write_state(self.config.state_path, {'version': 1, 'strategy_id': str(self.id),
+                'completed_threshold': self.add_position, 'active_threshold': self.active_add_position,
+                'round': self.stage_round, 'rounds': self.stage_rounds,
+                'pending': {key: {'instrument': str(leg.instrument_id), 'target': str(leg.target_qty),
+                                  'filled': str(leg.filled_qty), 'terminal': leg.terminal}
+                            for key, leg in (self.pending or {}).items() if not leg.terminal or self.rollback_requested},
+                'exit_orders': sorted(self.unresolved_exits | {str(order.client_order_id) for order in self.exit_orders if not order.is_closed}
+                                      | {key for key, leg in self.rollback_orders.items() if not leg.terminal}),
+                'quantities': self._position_quantities(),
+                'halted': self.halted, 'exit_requested': self.exit_requested})
+            return True
+        except (OSError, ValueError, TypeError) as exc:
+            self.halted = True
+            self.log.error(f'checkpoint_failed error={type(exc).__name__}')
+            return False
+
+    def _position_quantities(self):
+        return {str(iid): str(sum((p.signed_decimal_qty() for p in self.cache.positions_open(instrument_id=iid)), Decimal(0)))
+                for iid in self.instrument_ids}
+
+    def _audit(self, kind, **values):
+        self.log.info(json.dumps({'kind': kind, 'time_ns': self.clock.timestamp_ns(), **values}, separators=(',', ':')))
 
     # 市价单数量向上对齐合约步长，使每腿至少达到本轮名义金额。
     @staticmethod
@@ -454,31 +662,109 @@ class SkAdrArbStrategy(Strategy):
         if self.stop_requested:
             return
         if self.alert_name is not None:
-            self.clock.cancel_timer(self.alert_name)
+            self.cancel_timer_if_active(self.alert_name)
         self.alert_seq += 1
         self.alert_name = f"sk_adr_price_check_{self.alert_seq}"
         self.clock.set_time_alert_ns(
             self.alert_name,
             self.clock.timestamp_ns() + delay_ns,
-            callback=lambda _event: self._on_attempt_alert(),
+            callback=self._timer_event,
             allow_past=True,
         )
 
+    def _timer_event(self, event):
+        if not self.stopping:
+            self.dispatch_to_owner(self._handle_timer, event)
+
+    def _handle_timer(self, event):
+        self._assert_thread()
+        if not self.stopping and event.name == self.alert_name:
+            try:
+                self._on_attempt_alert()
+            except Exception as exc:
+                self._pause(f'timer_error:{type(exc).__name__}')
+
+    def _resolve_pending_orders(self):
+        now = self.clock.timestamp_ns()
+        orders = {str(order.client_order_id): order for order in self.exit_orders}
+        for key in set(self.pending or {}) | set(self.rollback_orders):
+            from nautilus_trader.model.identifiers import ClientOrderId
+            order = self.cache.order(ClientOrderId(key))
+            if order:
+                orders[key] = order
+        for key, order in orders.items():
+            leg = (self.pending or {}).get(key) or self.rollback_orders.get(key)
+            if order.is_closed and (leg is None or leg.terminal) and key not in self.unresolved_exits:
+                continue
+            checked, attempts = self.order_checks.get(key, (order.ts_init, 0))
+            if now - checked < retry_delay_ns(attempts + 1):
+                continue
+            self.order_checks[key] = (now, attempts + 1)
+            self.query_order(order)
+            if order_alert_due(order.ts_init, self.order_alert_ns.get(key, 0), now):
+                self.order_alert_ns[key] = now
+                self._audit('order_resolution_alert', order=key, instrument=str(order.instrument_id))
+                if self.notifier:
+                    try:
+                        self.notifier.send(f'{self.id}:{key}:unresolved:{now}',
+                            f'SK/ADR 订单核单超过60秒\n订单 {key}\n合约 {order.instrument_id}\n仓位 {self._position_quantities()}')
+                    except Exception as exc:
+                        self.log.error(f'notification_send_failed error={type(exc).__name__}')
+
+    @guarded_callback
+    def _receive_order_resolution(self, resolution):
+        self._assert_thread()
+        if self.stopping:
+            return
+        if resolution.client_order_id in self.rollback_orders:
+            leg = self.rollback_orders[resolution.client_order_id]
+            leg.filled_qty = resolution.filled
+            leg.terminal = True
+            if leg.filled_qty < leg.target_qty:
+                self.rollback_failures += 1
+                self.rollback_retry_ns = self.clock.timestamp_ns() + retry_delay_ns(self.rollback_failures)
+            self._save_checkpoint()
+            return
+        if resolution.client_order_id in self.unresolved_exits:
+            self.unresolved_exits.discard(resolution.client_order_id)
+            self._save_checkpoint()
+        if self.pending and resolution.client_order_id in self.pending:
+            leg = self.pending[resolution.client_order_id]
+            if leg.filled_qty != resolution.filled:
+                leg.filled_qty = resolution.filled
+                leg.terminal = True
+                self.rollback_requested = True
+                self._pause('native_fill_quantity_mismatch')
+            elif leg.filled_qty < leg.target_qty:
+                leg.terminal = True
+                self._handle_order_failure(resolution.client_order_id, resolution.status.lower())
+            self._audit('order_resolved', order=resolution.client_order_id, status=resolution.status,
+                        native_filled=str(resolution.filled))
+            self._save_checkpoint()
+
     # 每秒监控退出条件，包括在途订单、加仓等待或已暂停加仓时。
     def _on_attempt_alert(self) -> None:
+        self._assert_thread()
         self.alert_name = None
+        self._receive_account()
+        self._resolve_pending_orders()
+        marks = {iid: self.cache.mark_price(iid) for iid in self.instrument_ids}
+        marks_ready = all(mark is not None for mark in marks.values())
+        if marks_ready:
+            self.marks = marks
+            self.ready = True
+        if self.rollback_requested and not self.exit_requested and marks_ready and self._marks_are_current():
+            sk_price = self.marks[self.sk_id].value.as_decimal()
+            if sk_price > 0:
+                premium = self.marks[self.adr_id].value.as_decimal() / ADR_COMMON_SHARE_RATIO / sk_price - 1
+                self._trigger_exit(premium)
         if self.exit_requested:
             # 触发后不再依赖行情；断流或溢价回升都不能中断平仓。
             self._try_exit()
-        else:
-            marks = {
-                instrument_id: self.cache.mark_price(instrument_id)
-                for instrument_id in self.instrument_ids
-            }
-            if all(mark is not None for mark in marks.values()):
-                self.marks = marks
-                self.ready = True
-                self._try_submit_pair()
+        elif self.rollback_requested:
+            self._try_rollback()
+        elif marks_ready:
+            self._try_submit_pair()
         if not self.stop_requested:
             self._schedule_attempt(self.price_check_interval_ns)
 
@@ -493,17 +779,13 @@ class SkAdrArbStrategy(Strategy):
 
     # 首次以及较上次通知变化达到设定百分点时推送行情。
     def _notify_market(self, sk_price: Decimal, adr_price: Decimal, premium: Decimal) -> None:
-        if self.telegram is None:
+        if self.notifier is None:
             return
-        error = self.telegram.pop_error()
-        if error is not None:
-            self.log.warning(f"telegram_send_failed error={error}")
-
         if self.last_notify_premium is None:
             self._send_market_notice("策略启动", sk_price, adr_price, premium)
             return
 
-        moved = abs(premium - self.last_notify_premium) >= self.telegram_notify_step
+        moved = abs(premium - self.last_notify_premium) >= self.notification_step
         if moved:
             direction = "价差扩大" if premium > self.last_notify_premium else "价差收窄"
             self._send_market_notice(direction, sk_price, adr_price, premium)
@@ -524,7 +806,10 @@ class SkAdrArbStrategy(Strategy):
             f"换算溢价: {premium:.2%}\n"
             f"较上次通知: {change:+.2%}"
         )
-        self.telegram.send(message)
+        try:
+            self.notifier.send(f'{self.id}:{self.clock.timestamp_ns()}', message)
+        except Exception as exc:
+            self.log.error(f'notification_send_failed error={type(exc).__name__}')
         self.last_notify_premium = premium
 
     def _margin_used(self) -> Decimal:
@@ -555,14 +840,35 @@ class SkAdrArbStrategy(Strategy):
         return minimum is None or instrument.notional_value(quantity, price) >= minimum
 
     def _handle_order_failure(self, order_id: str, status: str) -> None:
+        self._assert_thread()
+        self._audit('order_failure', order=order_id, status=status)
+        if order_id in self.rollback_orders:
+            leg = self.rollback_orders[order_id]
+            if status in ('canceled', 'expired'):
+                return
+            leg.terminal = True
+            self.rollback_failures += 1
+            self.rollback_retry_ns = self.clock.timestamp_ns() + retry_delay_ns(self.rollback_failures)
+            self._save_checkpoint()
+            return
+        leg = (self.pending or {}).get(order_id)
+        if leg and status in ('denied', 'rejected'):
+            leg.terminal = True
+        if leg and status in ('canceled', 'expired') and not leg.terminal:
+            return
+        if status in ('canceled', 'expired') and any(str(order.client_order_id) == order_id for order in self.exit_orders):
+            self.unresolved_exits.add(order_id)
+            self._save_checkpoint()
+            return
         if self.exit_requested:
             self.log.warning(
                 f"exit_order_{status} order={order_id}; recheck remaining positions before retry",
             )
-            self.next_exit_attempt_ns = self.clock.timestamp_ns() + self.retry_delay_ns
+            self.next_exit_attempt_ns = self.clock.timestamp_ns() + self.exit_retry_ns
             return
-        if self.halted or self.pending is None or order_id not in self.pending:
+        if self.pending is None or order_id not in self.pending:
             return
+        self.rollback_requested = True
         self._pause(f"pair_order_{status} order={order_id}")
         for instrument_id in self.instrument_ids:
             self.cancel_all_orders(instrument_id)
@@ -572,7 +878,14 @@ class SkAdrArbStrategy(Strategy):
         self.halted = True
         self.ready = False
         if self.alert_name is not None:
-            self.clock.cancel_timer(self.alert_name)
+            self.cancel_timer_if_active(self.alert_name)
             self.alert_name = None
         self.log.error(f"strategy_paused reason={reason}; exit monitoring remains active")
+        if self.notifier:
+            try:
+                self.notifier.send(f'{self.id}:pause:{self.clock.timestamp_ns()}',
+                                   f'SK/ADR 暂停加仓\n{reason}\n仓位 {self._position_quantities()}')
+            except Exception as exc:
+                self.log.error(f'notification_send_failed error={type(exc).__name__}')
+        self._save_checkpoint()
         self._schedule_attempt(self.price_check_interval_ns)

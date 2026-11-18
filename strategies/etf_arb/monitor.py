@@ -11,7 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT.parents[1]))
-from strategies.etf_arb.state import read_state
+from utils.state import read_state
 ZONE = timezone(timedelta(hours=8))
 
 

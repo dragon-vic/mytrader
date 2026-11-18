@@ -3,12 +3,14 @@ strategy:
     enabled: true
     strategy_path: strategies.sk_adr_arb.sk_adr_arb:SkAdrArbStrategy
     config_path: strategies.sk_adr_arb.sk_adr_arb:SkAdrArbConfig
+    artifacts:
+      notification_path: wecom_deliveries.jsonl
     config:
       order_id_tag: SKADR
       sk_instrument: SKHYNIXUSDT-PERP.BINANCE
       adr_instrument: SKHYUSDT-PERP.BINANCE
       leverage: 10
-      # 最后完整完成的加仓阈值；0 表示 40% 档尚未执行。每次启动前人工确认。
+      # 首次无检查点启动的已完成档位；后续以持久化进度为准。
       current_add_position: 42
       first_add_position: 40
       large_add_position: 43
@@ -18,10 +20,17 @@ strategy:
       large_stage_notional: 4000
       # 所有金额均为单腿名义价值；每组双腿完全成交后等待 5 秒。
       order_notional: 1000
-      retry_delay_sec: 5
+      round_interval_sec: 5
+      exit_retry_sec: 5
       price_check_interval_sec: 1
       max_mark_age_sec: 5
-      telegram_notify_step: 0.01
+      notification_step: 0.01
+      wecom_notifications: true
+      lock_path: strategies/sk_adr_arb/runtime/state.lock
+      state_path: strategies/sk_adr_arb/runtime/state.json
+      account_environment: live
+      capital_fraction: 0.9
+      taker_fee: 0.0004
       # 标记价溢价 <=35% 时只减仓平掉两腿；确认归零后停止 node。
       exit_premium: 0.35
 
@@ -40,6 +49,7 @@ node:
   exec:
     engine:
       reconciliation_scope: configured_markets
+      inflight_check_interval_ms: 0
 
     clients:
       binance_futures:
@@ -49,3 +59,4 @@ node:
           - SKHY/USDT
         margin_type: CROSS
         leverage: 10
+        confirmed_orders: true

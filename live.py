@@ -10,6 +10,7 @@ from nautilus_trader.config import LoggingConfig
 from nautilus_trader.config import TradingNodeConfig
 from nautilus_trader.live.config import LiveDataEngineConfig
 from nautilus_trader.live.config import LiveExecEngineConfig
+from nautilus_trader.live.config import LiveRiskEngineConfig
 from nautilus_trader.live.node import TradingNode
 from nautilus_trader.model.identifiers import InstrumentId
 
@@ -28,6 +29,8 @@ from utils.runtime_setup import runtime_start_ns
 from utils.runtime_setup import strategy_components
 from utils.runtime_setup import strategy_specs
 from utils.summary import print_live_summary
+from utils.execution_lease import ExecutionLease
+from utils.live_node import LiveTradingNode
 
 
 def adapter_module(name: str):
@@ -66,6 +69,10 @@ def data_engine_config(settings: dict[str, Any]) -> LiveDataEngineConfig:
 def exec_engine_config(settings: dict[str, Any]) -> LiveExecEngineConfig:
     cfg = dict(settings["node"]["exec"]["engine"])
     cfg.pop("reconciliation_scope")
+    confirmed = any(client['enabled'] and client.get('confirmed_orders')
+                    for client in settings['node']['exec']['clients'].values())
+    if confirmed and cfg.get('inflight_check_interval_ms') != 0:
+        raise ValueError('confirmed order resolution requires strategy-owned inflight checks')
     return LiveExecEngineConfig(
         **cfg,
         reconciliation_instrument_ids=reconciliation_instrument_ids(settings),
@@ -131,11 +138,12 @@ def build_live_node(settings: dict[str, Any]) -> TradingNode:
         data_clients=data_clients,
         exec_clients=exec_clients,
         exec_engine=exec_engine_config(settings),
+        risk_engine=LiveRiskEngineConfig(graceful_shutdown_on_exception=True),
         actors=actor_specs(settings),
         strategies=strategy_specs(settings),
     )
 
-    node = TradingNode(config=config)
+    node = LiveTradingNode(config=config)
     for client_id, factory in data_factories.items():
         node.add_data_client_factory(client_id, factory)
     for client_id, factory in exec_factories.items():
@@ -185,14 +193,17 @@ def main(config_name: str | None = None, mode: str = "live") -> None:
         bool(settings["reports"]["enabled"]),
         runtime_start_ns(settings),
     )
-    node = build_live_node(settings)
-    stop = NodeStopController(node)
-    built = False
-    stop.attach()
-
+    lease = ExecutionLease(settings)
     try:
-        node.build()
-        built = True
-        run_live_node(node, stop)
+        node = build_live_node(settings)
+        stop = NodeStopController(node)
+        built = False
+        stop.attach()
+        try:
+            node.build()
+            built = True
+            run_live_node(node, stop)
+        finally:
+            finalize_live(node, stop, writer, settings, built)
     finally:
-        finalize_live(node, stop, writer, settings, built)
+        lease.close()
