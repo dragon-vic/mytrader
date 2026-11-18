@@ -1,4 +1,5 @@
 from decimal import Decimal
+from math import isfinite
 
 from nautilus_trader.config import NautilusConfig, StrategyConfig
 from nautilus_trader.model.identifiers import InstrumentId
@@ -69,6 +70,7 @@ class EtfArbConfig(StrategyConfig, frozen=True):
     capture_file_mb: int
     capture_max_disk_mb: int
     capture_min_free_mb: int
+    entry_gap_cap: float = 0.25
 
     def __post_init__(self):
         if not self.pairs or len({p.name for p in self.pairs}) != len(self.pairs):
@@ -86,6 +88,8 @@ class EtfArbConfig(StrategyConfig, frozen=True):
             raise ValueError('invalid venue monitor configuration')
         if not 0 < self.exit_gap <= self.exit_gap_cap < self.entry_gap:
             raise ValueError('exit thresholds must be below entry_gap')
+        if not isfinite(self.entry_gap_cap) or self.entry_gap_cap < self.entry_gap:
+            raise ValueError('entry_gap_cap must be finite and at least entry_gap')
         if not self.exit_gap_cap < self.confirmation_reset_gap < self.entry_gap:
             raise ValueError('confirmation reset must be between exit cap and entry threshold')
         if not 0 < self.close_flatten_minutes < self.close_block_minutes:

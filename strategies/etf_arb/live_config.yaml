@@ -50,6 +50,7 @@ strategy:
       venue_max_age_seconds: 45
       special_events_path: strategies/etf_arb/special_events.yaml
       entry_gap: 0.02
+      entry_gap_cap: 0.25
       confirmation_ms: 100
       confirmation_reset_gap: 0.01
       exit_gap: 0.002
