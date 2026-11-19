@@ -1,9 +1,6 @@
 from __future__ import annotations
 
 import importlib
-import os
-import sys
-from threading import Thread
 from typing import Any
 
 from nautilus_trader.config import LoggingConfig
@@ -19,7 +16,6 @@ from adapters.common import LiveContext
 from utils.config import load_settings
 from utils.config import proxy_url
 from utils.live_control import NodeStopController
-from utils.live_control import NodeStopRequest
 from utils.reports import TraderReportWriter
 from utils.runtime_setup import actor_specs
 from utils.runtime_setup import claim_run
@@ -28,17 +24,13 @@ from utils.runtime_setup import prepare_run_dir
 from utils.runtime_setup import runtime_start_ns
 from utils.runtime_setup import strategy_components
 from utils.runtime_setup import strategy_specs
-from utils.summary import print_live_summary
+from utils.summary import write_live_summary
 from utils.execution_lease import ExecutionLease
 from utils.live_node import LiveTradingNode
 
 
 def adapter_module(name: str):
     return importlib.import_module(f"adapters.{name}")
-
-
-def live_context(settings: dict[str, Any]) -> LiveContext:
-    return LiveContext(mode=settings["mode"], proxy_url=proxy_url())
 
 
 # configured_markets 对所有启用的 exec client 聚合显式 InstrumentId。
@@ -117,7 +109,7 @@ def build_exec_clients(
 
 # 为当前 set 创建尚未 build 的 TradingNode。
 def build_live_node(settings: dict[str, Any]) -> TradingNode:
-    context = live_context(settings)
+    context = LiveContext(proxy_url=proxy_url())
     data_clients, data_factories = build_data_clients(settings, context)
     exec_clients, exec_factories = build_exec_clients(settings, context)
     logging = settings["node"]["logging"]
@@ -151,20 +143,6 @@ def build_live_node(settings: dict[str, Any]) -> TradingNode:
     return node
 
 
-# Windows 保留回车停止；Linux/tmux 用 Ctrl+C 停止。
-def run_live_node(node: TradingNode, stop: NodeStopController) -> None:
-    def wait_enter() -> None:
-        try:
-            input()
-        except EOFError:
-            return
-        stop.request(NodeStopRequest(source="stdin", reason="enter"))
-
-    if os.name == "nt" and sys.stdin.isatty():
-        Thread(target=wait_enter, daemon=True).start()
-    node.run()
-
-
 # 无论报告是否成功，都释放 node 并尝试生成结束摘要。
 def finalize_live(
     node: TradingNode,
@@ -181,12 +159,11 @@ def finalize_live(
         try:
             node.dispose()
         finally:
-            print_live_summary(settings, writer.output_dir)
+            write_live_summary(settings, writer.output_dir)
 
 
-# 运行 live/testnet，由 run.py 负责传入配置名和模式。
-def main(config_name: str | None = None, mode: str = "live") -> None:
-    settings = claim_run(load_settings(config_name, mode=mode))
+def main(config_name: str) -> None:
+    settings = claim_run(load_settings(config_name))
     output_dir = prepare_run_dir(settings)
     writer = TraderReportWriter(
         output_dir,
@@ -202,7 +179,10 @@ def main(config_name: str | None = None, mode: str = "live") -> None:
         try:
             node.build()
             built = True
-            run_live_node(node, stop)
+            try:
+                node.run(raise_exception=True)
+            except KeyboardInterrupt:
+                node.get_event_loop().run_until_complete(node.stop_async())
         finally:
             finalize_live(node, stop, writer, settings, built)
     finally:

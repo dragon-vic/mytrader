@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 import requests
 from utils.background import BackgroundReader
 
-from .binance import credentials
+from .binance import BINANCE_FUTURES_URL, credentials
 
 
 @dataclass(frozen=True)
@@ -23,10 +23,8 @@ class FuturesAccountSnapshot:
 
 
 class BinanceAccountReader:
-    def __init__(self, environment):
-        self.key, self.secret = credentials(environment)
-        self.url = {'live': 'https://fapi.binance.com',
-                    'testnet': 'https://testnet.binancefuture.com'}[environment]
+    def __init__(self):
+        self.key, self.secret = credentials()
         self.session = requests.Session()
         self.session.headers['X-MBX-APIKEY'] = self.key
         self.offset_ms = 0
@@ -44,7 +42,7 @@ class BinanceAccountReader:
                 query = urlencode(params)
                 params['signature'] = hmac.new(self.secret.encode(), query.encode(), hashlib.sha256).hexdigest()
             try:
-                response = self.session.get(self.url + path, params=params, timeout=(3, 5))
+                response = self.session.get(BINANCE_FUTURES_URL + path, params=params, timeout=(3, 5))
             except requests.RequestException as exc:
                 raise RuntimeError(f'Binance GET {path}: {type(exc).__name__}') from None
             if response.status_code in (418, 429):
@@ -105,5 +103,5 @@ class BinanceAccountReader:
 
 
 class NativeAccountWorker(BackgroundReader):
-    def __init__(self, environment, notify):
-        super().__init__(lambda: BinanceAccountReader(environment), notify, 'native-account-reader')
+    def __init__(self, notify):
+        super().__init__(BinanceAccountReader, notify, 'native-account-reader')

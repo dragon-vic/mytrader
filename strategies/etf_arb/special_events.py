@@ -10,6 +10,8 @@ from pathlib import Path
 import requests
 import yaml
 
+from adapters.binance import BINANCE_FUTURES_URL
+
 
 def timestamp(value):
     stamp = datetime.fromisoformat(value)
@@ -73,10 +75,8 @@ def specification(info):
 
 
 class VenueMonitor:
-    def __init__(self, path, symbols, environment, interval_seconds):
+    def __init__(self, path, symbols, interval_seconds):
         self.path, self.symbols = path, set(symbols)
-        self.url = {'live': 'https://fapi.binance.com',
-                    'testnet': 'https://testnet.binancefuture.com'}[environment]
         self.interval = interval_seconds
         self.results = queue.Queue(maxsize=1)
         self.stop = threading.Event()
@@ -92,7 +92,7 @@ class VenueMonitor:
                 last_request = time.monotonic()
                 try:
                     events = load_events(self.path, self.symbols)
-                    response = session.get(self.url + '/fapi/v1/exchangeInfo', timeout=(3, 5))
+                    response = session.get(BINANCE_FUTURES_URL + '/fapi/v1/exchangeInfo', timeout=(3, 5))
                     if response.status_code != 200:
                         raise RuntimeError(f'exchangeInfo HTTP {response.status_code}')
                     rows = {r['symbol']: r for r in response.json()['symbols'] if r['symbol'] in self.symbols}

@@ -22,7 +22,7 @@ from utils.constants import LOCAL_TZ, NODE_STOP_TOPIC
 from utils.live_control import NodeStopRequest
 from utils.wecom import WeComNotifier
 from utils.live_strategy import LiveStrategy, guarded_callback
-from utils.execution import OrderResolution, retry_delay_ns, order_alert_due
+from utils.execution import OrderCheck, OrderResolution, margin_with_fees, retry_delay_ns, submit_order_batch
 
 from .baseline import Baseline, DAY, FairValue, HOUR, MINUTE, MarketCalendar
 from .config import EtfArbConfig, PairConfig
@@ -76,7 +76,7 @@ class Stage:
 
 
 @dataclass
-class Pending:
+class Pending(OrderCheck):
     pair: str
     instrument: str
     leg: int
@@ -85,14 +85,11 @@ class Pending:
     action: str
     filled: float = 0.
     terminal: bool = False
-    checked_ns: int = 0
     expected_price: float | None = None
     reserved_margin: float = 0.
-    resolution_attempts: int = 0
     batch_id: str = ''
     unresolved: bool = False
     alerted: bool = False
-    alert_ns: int = 0
 
 
 @dataclass
@@ -275,9 +272,9 @@ class EtfArbStrategy(LiveStrategy):
         self._save()
         if self.config.bootstrap:
             self._apply_references(read_cache(self.config.reference_path))
-        self.capital_reader = NativeAccountWorker(self.config.account_environment, self._capital_wakeup)
+        self.capital_reader = NativeAccountWorker(self._capital_wakeup)
         self.capital_reader.worker.start()
-        self.venue_monitor = VenueMonitor(self.config.special_events_path, symbols, self.config.account_environment,
+        self.venue_monitor = VenueMonitor(self.config.special_events_path, symbols,
                                            self.config.venue_poll_seconds)
         self.venue_monitor.worker.start()
         self.bootstrap_remaining = set(self.markets) if self.config.bootstrap else set()
@@ -1559,6 +1556,7 @@ class EtfArbStrategy(LiveStrategy):
         now = self.clock.timestamp_ns()
         headroom = self._available_capital()
         created = []
+        pending = {}
         reductions = []
         for leg, (iid, signed) in enumerate(zip(self._ids(stage.pair), quantities)):
             signed = self._quantity(iid, signed)
@@ -1572,30 +1570,27 @@ class EtfArbStrategy(LiveStrategy):
                           reduce_only=reducing and signed * net < 0 and abs(signed) <= abs(net) + 1e-9,
                           tags=[f'etf:{stage.pair}', f'batch:{stage.batches}', action])
             order = self.order_factory.market(**kwargs)
-            self.orders[str(order.client_order_id)] = Pending(stage.pair, str(iid), leg, signed, now, action,
+            pending[str(order.client_order_id)] = Pending(stage.pair, str(iid), leg, signed, now, action,
                 expected_price=expected_prices[leg] if expected_prices else None,
-                reserved_margin=0. if reducing else abs(signed) * max(
-                    self.markets[iid].ask, self.markets[iid].mark,
-                    expected_prices[leg] if expected_prices and expected_prices[leg] else 0.) *
-                    (1 / stage.native_leverages[leg] + 2 * self.config.taker_fee))
+                reserved_margin=0. if reducing else margin_with_fees(signed,
+                    max(self.markets[iid].ask, self.markets[iid].mark,
+                        expected_prices[leg] if expected_prices and expected_prices[leg] else 0.),
+                    stage.native_leverages[leg], self.config.taker_fee))
             created.append(order)
             reductions.append(reducing)
         if not created:
             stage.next_attempt_ns = now + self.config.retry_interval_ms * 1_000_000
             return
-        for order in created:
-            self.orders[str(order.client_order_id)].batch_id = str(created[0].client_order_id)
-        required = sum(self.orders[str(o.client_order_id)].reserved_margin for o in created)
+        required = sum(entry.reserved_margin for entry in pending.values())
         if required > headroom + 1e-6:
-            for order in created:
-                self.orders.pop(str(order.client_order_id))
             stage.next_attempt_ns = now + self.config.retry_interval_ms * 1_000_000
             self._add_wait(stage, 'local_capital_reservation_insufficient')
             return
         if self.fault_reason and not all(reductions):
-            for order in created:
-                self.orders.pop(str(order.client_order_id))
             return
+        for entry in pending.values():
+            entry.batch_id = str(created[0].client_order_id)
+        self.orders.update(pending)
         self.executing_pair = stage.pair
         self.execution_revision += 1
         saved = self._save()
@@ -1606,23 +1601,14 @@ class EtfArbStrategy(LiveStrategy):
             return
         self.batch_awaiting_completion = True
         self.dispatching = True
-        attempted = 0
-        submitted = []
         try:
-            for order in created:
-                attempted += 1
-                self.submit_order(order, client_id=self.exec_client)
-                submitted.append(order)
-        except Exception as exc:
-            for order in created[attempted:]:
-                self.orders[str(order.client_order_id)].terminal = True
-            failed = created[attempted - 1]
-            if self.cache.order(failed.client_order_id) is None:
-                self.orders[str(failed.client_order_id)].terminal = True
-            self.log.exception('ETF order submission failed', exc)
-            self._fail_strategy(f'submit_error:{type(exc).__name__}')
+            submission = submit_order_batch(self, created, pending, client_id=self.exec_client)
+            if submission.error is not None:
+                self.log.exception('ETF order submission failed', submission.error)
+                self._fail_strategy(f'submit_error:{type(submission.error).__name__}')
         finally:
             self.dispatching = False
+        submitted = submission.submitted
         if submitted:
             self._record('orders_sent', pair=stage.pair, action=action, batch=stage.batches,
                      orders=[str(o.client_order_id) for o in submitted],
@@ -1778,17 +1764,14 @@ class EtfArbStrategy(LiveStrategy):
                 self._record('reference_updated', checked_ns=snapshot.get('checked_ns'), errors=snapshot.get('errors'),
                              latest={name: data['rows'][-1]['date'] for name, data in snapshot.get('pairs', {}).items() if data['rows']})
         for key, pending in list(self.orders.items()):
-            if pending.terminal or now - pending.sent_ns < self.config.order_timeout_ms * 1_000_000:
+            if pending.terminal:
                 continue
-            resolution_interval = retry_delay_ns(pending.resolution_attempts + 1)
-            if now - pending.checked_ns < resolution_interval:
+            alert = pending.poll(pending.sent_ns, now, self.config.order_timeout_ms * 1_000_000)
+            if alert is None:
                 continue
-            pending.checked_ns = now
-            pending.resolution_attempts += 1
             pending.unresolved = True
-            if order_alert_due(pending.sent_ns, pending.alert_ns, now):
+            if alert:
                 pending.alerted = True
-                pending.alert_ns = now
                 self._record('order_resolution_alert', pair=pending.pair, order=key,
                              age_ms=(now - pending.sent_ns) / 1e6)
                 if self.notifier:

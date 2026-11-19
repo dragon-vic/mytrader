@@ -66,7 +66,7 @@ LiveClock在线程池触发，回调先回到NT事件循环。事件入口检查
 
 ## 运维与验证
 
-运行入口为`python run.py etf_arb live background`。监控使用`python strategies/etf_arb/monitor.py`，按`MONITORING.md`先刷新再汇报。配置/代码变更需经过验证和明确部署安排。
+用 `python run.py start etf_arb --background` 启动，`python run.py status` 查看会话，`python run.py stop etf_arb` 请求受管理的退出。监控使用 `python strategies/etf_arb/monitor.py`，按 `MONITORING.md` 先刷新再汇报。
 
 人工复核状态会在停机期间保持连接、保存检查点并输出STOP_WAITING，处理对应订单/单位/仓位后继续退出。紧急结束进程前保留报告和检查点，下一次启动按原订单及真实仓位恢复流程核对。系统ShutdownSystem、Ctrl+C和NodeStopController汇入同一受管理停止任务。
 

@@ -1,14 +1,10 @@
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from rich.columns import Columns
-from rich.console import Console
-from rich.table import Table
 
 from utils.constants import LOCAL_TZ
 from utils.constants import ORDERS_FILE
@@ -17,9 +13,10 @@ from utils.constants import SUMMARY_FILE
 from utils.reports import commissions_to_float
 from utils.reports import money_to_float
 from utils.reports import read_report_csv
+from utils.state import write_state
 
 
-def print_live_summary(settings: dict[str, Any], output_dir: Path) -> None:
+def write_live_summary(settings: dict[str, Any], output_dir: Path) -> None:
     if not settings["reports"]["enabled"]:
         return
     elapsed_days = report_elapsed_days(output_dir)
@@ -34,7 +31,6 @@ def print_live_summary(settings: dict[str, Any], output_dir: Path) -> None:
         ("订单执行统计", ("指标", "数值"), order_stats_rows(output_dir, elapsed_days)),
     ]
     write_summary_json("运行摘要", sections, output_dir)
-    print_summary_tables(Console(), sections)
 
 
 def write_summary_json(
@@ -55,56 +51,14 @@ def write_summary_json(
             if rows
         ],
     }
-    (output_dir / SUMMARY_FILE).write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-
-
-def print_summary_tables(
-    console: Console,
-    sections: list[tuple[str, tuple[str, ...], list[tuple[Any, ...]]]],
-) -> None:
-    top = [
-        summary_table(title, headers, rows)
-        for title, headers, rows in sections
-        if rows and title != "标的统计"
-    ]
-    if top:
-        console.print(Columns(top, equal=True, expand=True))
-    for title, headers, rows in sections:
-        if title != "标的统计" or not rows:
-            continue
-        console.print(summary_table(title, headers, rows))
-
-
-def summary_table(title: str, headers: tuple[str, ...], rows: list[tuple[Any, ...]]) -> Table:
-    table = Table(title=title)
-    for index, header in enumerate(headers):
-        table.add_column(str(header), justify="left" if index == 0 else "right")
-    for row in rows:
-        table.add_row(*(str(value) for value in row))
-    return table
-
-
-def print_saved_summary(path: Path) -> None:
-    payload = json.loads(path.read_text(encoding="utf-8-sig"))
-    sections = [
-        (
-            str(section["title"]),
-            tuple(str(header) for header in section["headers"]),
-            [tuple(str(value) for value in row) for row in section["rows"]],
-        )
-        for section in payload["sections"]
-    ]
-    print_summary_tables(Console(), sections)
+    write_state(output_dir / SUMMARY_FILE, payload)
 
 
 def live_overview_rows(settings: dict[str, Any], output_dir: Path) -> list[tuple[str, str]]:
     return [
         ("配置名", settings["project"]["config_name"]),
         ("策略名", settings["project"]["config_name"]),
-        ("运行模式", settings["mode"]),
+        ("运行模式", "live"),
         ("报告目录", output_dir.name),
         ("交易标的", traded_symbol_count(output_dir)),
         ("净收益", format_number(net_pnl(output_dir))),

@@ -18,7 +18,6 @@ class EtfArbConfig(StrategyConfig, frozen=True):
     gross_leverage: Decimal
     capital_fraction: Decimal
     batch_notional: Decimal
-    account_environment: str
     capital_timeout_ms: int
     venue_poll_seconds: int
     venue_max_age_seconds: int
@@ -82,8 +81,8 @@ class EtfArbConfig(StrategyConfig, frozen=True):
         if self.gross_leverage <= 0 or self.batch_notional <= 0 or not 0 < self.capital_fraction < 1:
             raise ValueError('invalid leverage, batch notional or capital fraction')
         confirmation_ms = max(self.confirmation_ms, *(p.confirmation_ms or self.confirmation_ms for p in self.pairs))
-        if self.account_environment not in ('live', 'testnet') or self.capital_timeout_ms <= confirmation_ms:
-            raise ValueError('invalid native account environment or timeout')
+        if self.capital_timeout_ms <= confirmation_ms:
+            raise ValueError('native account timeout must exceed the confirmation window')
         if not 0 < self.venue_poll_seconds < self.venue_max_age_seconds or not self.special_events_path:
             raise ValueError('invalid venue monitor configuration')
         if not 0 < self.exit_gap <= self.exit_gap_cap < self.entry_gap:

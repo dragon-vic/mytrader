@@ -9,19 +9,7 @@ STRATEGIES_DIR = PROJECT_ROOT / "strategies"
 GLOBAL_CONFIG_PATH = STRATEGIES_DIR / "global.yaml"
 LOCAL_TZ = ZoneInfo("Asia/Shanghai")
 
-# run.py 的交互模式和命令行模式。
-MODE_OPTIONS = [
-    ("实盘", "live"),
-    ("模拟盘", "testnet"),
-]
-RUN_MODES = ("testnet", "live")
-
-# 项目默认入口参数。
-DEFAULT_CONFIG_NAME = "etf_arb"
-CONFIG_FILES = {
-    "live": "live_config.yaml",
-    "testnet": "live_config.yaml",
-}
+LIVE_CONFIG_FILENAME = "live_config.yaml"
 
 # 单向外部 JSON data client 默认值。
 EXTERNAL_JSON_CLIENT_NAME = "EXTERNAL_JSON"

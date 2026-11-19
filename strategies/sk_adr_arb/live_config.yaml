@@ -28,7 +28,6 @@ strategy:
       wecom_notifications: true
       lock_path: strategies/sk_adr_arb/runtime/state.lock
       state_path: strategies/sk_adr_arb/runtime/state.json
-      account_environment: live
       capital_fraction: 0.9
       taker_fee: 0.0004
       # 标记价溢价 <=35% 时只减仓平掉两腿；确认归零后停止 node。

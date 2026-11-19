@@ -3,7 +3,6 @@ pandas
 requests
 PyYAML
 python-dotenv
-rich
 pyarrow
 aiohttp
 msgspec

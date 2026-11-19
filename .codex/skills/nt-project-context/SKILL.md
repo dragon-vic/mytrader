@@ -18,7 +18,7 @@ description: nt_quant 当前实盘入口、共享模块、策略职责、目录�
 - 本地根目录 `D:/project/nt_quant`，Python `D:/app/miniconda/envs/nt/python.exe`，PowerShell 7。
 - AWS SSH alias `aws`，生产项目 `/home/ubuntu/pycharm_nt`，Python `/home/ubuntu/miniconda/envs/nt/bin/python`。
 - Python依赖 `requirements.txt`，固定NT版本1.230.0。凭据在根目录`.env`，保留本地和服务器独立配置。
-- 入口 `python run.py <策略名> live|testnet [background]`，Linux后台使用tmux。
+- 实盘入口 `python run.py start <策略名> [--background]`，Linux后台使用tmux。Agent使用 `list`、`status`、`stop <策略名>`、`report <策略名>`。
 - 配置依次合并 `strategies/global.yaml`、策略`live_config.yaml`，由NT config类验证策略参数。
 - 每次运行独立 `strategies/<策略>/report/live-<时间>/`，统一写订单、持仓与摘要。
 
@@ -33,7 +33,7 @@ description: nt_quant 当前实盘入口、共享模块、策略职责、目录�
 | `adapters/binance_account.py` | 原生USDT可用保证金、模式、逐合约杠杆与限额 |
 | `utils/live_strategy.py` | owner线程归属、跨线程投递与到期计时器取消 |
 | `utils/background.py` | 单请求和单结果邮箱的后台读取 |
-| `utils/execution.py` | 订单错误分类、确认结果契约与1/2/5秒退避 |
+| `utils/execution.py` | 已登记批次提交、同步异常保留原单、核单与告警退避、保证金预留费用计算 |
 | `utils/state.py`、`utils/runtime_lock.py` | 原子JSON检查点、跨进程排他锁 |
 | `utils/execution_lease.py` | 运行模式、venue、账户类型、合约级执行归属锁 |
 | `utils/wecom.py` | 有界企业微信队列、后台HTTP、发送记录与失败隔离 |

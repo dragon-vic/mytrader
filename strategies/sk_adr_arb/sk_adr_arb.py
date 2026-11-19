@@ -19,7 +19,7 @@ from nautilus_trader.model.events import (
 from nautilus_trader.model.identifiers import InstrumentId
 from utils.live_strategy import LiveStrategy, guarded_callback
 from utils.wecom import WeComNotifier
-from utils.execution import retry_delay_ns, order_alert_due
+from utils.execution import OrderCheck, margin_with_fees, retry_delay_ns, submit_order_batch
 from utils.runtime_lock import RuntimeLock
 from utils.state import read_state, write_state
 from adapters.binance_account import NativeAccountWorker
@@ -59,7 +59,6 @@ class SkAdrArbConfig(StrategyConfig, frozen=True):
     lock_path: str
     wecom_notifications: bool
     state_path: str
-    account_environment: str
     capital_fraction: Decimal
     taker_fee: Decimal
     exit_premium: Decimal
@@ -129,7 +128,6 @@ class SkAdrArbStrategy(LiveStrategy):
         self.stopping = False
         self.fill_ids = set()
         self.order_checks = {}
-        self.order_alert_ns = {}
         self.rollback_requested = False
         self.rollback_orders = {}
         self.rollback_failures = 0
@@ -181,7 +179,7 @@ class SkAdrArbStrategy(LiveStrategy):
             actual = self._position_quantities()
             if checkpoint['pending'] or checkpoint.get('exit_orders') or checkpoint.get('quantities', actual) != actual:
                 raise RuntimeError('SK checkpoint requires native order and position reconciliation')
-        self.account_reader = NativeAccountWorker(self.config.account_environment, self._account_wakeup)
+        self.account_reader = NativeAccountWorker(self._account_wakeup)
         self.account_reader.worker.start()
         self.msgbus.subscribe(f'events.order_resolution.{self.id}', self._receive_order_resolution)
         if self.config.wecom_notifications:
@@ -404,8 +402,8 @@ class SkAdrArbStrategy(LiveStrategy):
 
         self.ready = False
         self.pending = pending
-        margin = sum((quantity.as_decimal() * self.marks[iid].value.as_decimal() *
-                      (1 / self.leverage + 2 * self.config.taker_fee)
+        margin = sum((margin_with_fees(quantity.as_decimal(), self.marks[iid].value.as_decimal(),
+                                       self.leverage, self.config.taker_fee)
                       for iid, quantity in quantities.items()), Decimal(0))
         if margin > self.available_margin:
             self.pending = None
@@ -414,22 +412,20 @@ class SkAdrArbStrategy(LiveStrategy):
         self.available_margin -= margin
         if not self._save_checkpoint():
             self.pending = None
+            self.available_margin += margin
             return
         self.log.info(
             f"submit_pair add_position={self.active_add_position} "
             f"stage_round={self.stage_round + 1}/{self.stage_rounds} "
             f"premium={premium:.4%} order_notional={self.order_notional:.4f}",
         )
-        for order in orders:
-            try:
-                self.submit_order(order)
-            except Exception as exc:
-                if self.cache.order(order.client_order_id) is None:
-                    self.pending[str(order.client_order_id)].terminal = True
-                self.rollback_requested = True
-                self._pause(f'order_submit_error:{type(exc).__name__}')
-        self._audit('orders_sent', orders=[str(order.client_order_id) for order in orders],
-                    threshold=self.active_add_position, round=self.stage_round)
+        submission = submit_order_batch(self, orders, pending)
+        if submission.error is not None:
+            self.rollback_requested = True
+            self._pause(f'order_submit_error:{type(submission.error).__name__}')
+        if submission.submitted:
+            self._audit('orders_sent', orders=[str(order.client_order_id) for order in submission.submitted],
+                        threshold=self.active_add_position, round=self.stage_round)
 
     def _trigger_exit(self, premium):
         if premium > self.exit_premium:
@@ -692,17 +688,19 @@ class SkAdrArbStrategy(LiveStrategy):
             order = self.cache.order(ClientOrderId(key))
             if order:
                 orders[key] = order
+        for key in self.order_checks.keys() - orders.keys():
+            del self.order_checks[key]
         for key, order in orders.items():
             leg = (self.pending or {}).get(key) or self.rollback_orders.get(key)
             if order.is_closed and (leg is None or leg.terminal) and key not in self.unresolved_exits:
                 continue
-            checked, attempts = self.order_checks.get(key, (order.ts_init, 0))
-            if now - checked < retry_delay_ns(attempts + 1):
+            if key not in self.order_checks:
+                self.order_checks[key] = OrderCheck(checked_ns=order.ts_init)
+            alert = self.order_checks[key].poll(order.ts_init, now)
+            if alert is None:
                 continue
-            self.order_checks[key] = (now, attempts + 1)
             self.query_order(order)
-            if order_alert_due(order.ts_init, self.order_alert_ns.get(key, 0), now):
-                self.order_alert_ns[key] = now
+            if alert:
                 self._audit('order_resolution_alert', order=key, instrument=str(order.instrument_id))
                 if self.notifier:
                     try:

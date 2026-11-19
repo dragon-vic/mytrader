@@ -2,15 +2,12 @@ from __future__ import annotations
 
 import importlib
 import os
-from pathlib import Path
 from typing import Any
 
 import yaml
 
-from utils.constants import DEFAULT_CONFIG_NAME
-from utils.constants import CONFIG_FILES
 from utils.constants import GLOBAL_CONFIG_PATH
-from utils.constants import PROJECT_ROOT
+from utils.constants import LIVE_CONFIG_FILENAME
 from utils.constants import STRATEGIES_DIR
 
 
@@ -43,7 +40,7 @@ def _artifacts(entry: dict[str, Any], location: str) -> None:
 
 
 # 策略只接受 NT 原生 import path、config 和可选批量参数。
-def normalize_strategies(settings: dict[str, Any], mode: str) -> None:
+def normalize_strategies(settings: dict[str, Any]) -> None:
     defaults = settings.pop("strategy_defaults")
     if not isinstance(defaults, dict):
         raise TypeError("strategy_defaults must be a mapping")
@@ -113,39 +110,18 @@ def normalize_live_clients(settings: dict[str, Any]) -> None:
             importlib.import_module(f"adapters.{cfg['adapter']}").normalize_client(cfg)
 
 
-def normalize_settings(settings: dict[str, Any], mode: str) -> None:
-    if mode not in CONFIG_FILES:
-        raise ValueError(f"Unsupported mode: {mode}")
-    normalize_strategies(settings, mode)
+def normalize_settings(settings: dict[str, Any]) -> None:
+    normalize_strategies(settings)
     normalize_actors(settings)
     normalize_live_clients(settings)
 
 
-def config_names(mode: str | None = None) -> list[str]:
+def config_names() -> list[str]:
     return sorted(
         path.name
         for path in STRATEGIES_DIR.iterdir()
-        if path.is_dir() and has_config(path, mode)
+        if path.is_dir() and (path / LIVE_CONFIG_FILENAME).is_file()
     )
-
-
-def has_config(path: Path, mode: str | None = None) -> bool:
-    if mode is not None:
-        return (path / config_filename(mode)).exists()
-    return any((path / filename).exists() for filename in set(CONFIG_FILES.values()))
-
-
-def config_filename(mode: str) -> str:
-    if mode not in CONFIG_FILES:
-        raise ValueError(f"Unsupported mode: {mode}")
-    return CONFIG_FILES[mode]
-
-
-def config_path(config_name: str, mode: str) -> Path:
-    path = STRATEGIES_DIR / config_name / config_filename(mode)
-    if not path.exists():
-        raise FileNotFoundError(f"Config not found: {path.relative_to(PROJECT_ROOT)}")
-    return path
 
 
 def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -159,19 +135,19 @@ def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]
 
 
 # 加载 global 与单个策略 set，并立即转换为唯一有效 schema。
-def load_settings(config_name: str | None = None, mode: str = "live") -> dict[str, Any]:
-    name = config_name or DEFAULT_CONFIG_NAME
-    path = config_path(name, mode)
+def load_settings(config_name: str) -> dict[str, Any]:
+    if config_name not in config_names():
+        raise ValueError(f"Unknown live strategy: {config_name}")
+    path = STRATEGIES_DIR / config_name / LIVE_CONFIG_FILENAME
     with GLOBAL_CONFIG_PATH.open("r", encoding="utf-8") as stream:
         global_settings = yaml.safe_load(stream)
     with path.open("r", encoding="utf-8") as stream:
         strategy_settings = yaml.safe_load(stream)
     settings = deep_merge(global_settings, strategy_settings)
-    settings["mode"] = mode
-    settings["project"]["config_name"] = name
+    settings["project"]["config_name"] = config_name
     settings["project"]["config_path"] = str(path)
     settings["project"]["strategy_dir"] = str(path.parent)
-    normalize_settings(settings, mode)
+    normalize_settings(settings)
     return settings
 
 

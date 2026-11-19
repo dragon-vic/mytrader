@@ -24,18 +24,7 @@ from adapters.common import market_dict
 from adapters.common import normalize_markets
 from utils.constants import PROJECT_ROOT
 
-BINANCE_ENVS = {
-    "testnet": {
-        "environment": "TESTNET",
-        "api_key": "BINANCE_FUTURES_TESTNET_API_KEY",
-        "api_secret": "BINANCE_FUTURES_TESTNET_API_SECRET",
-    },
-    "live": {
-        "environment": "LIVE",
-        "api_key": "BINANCE_FUTURES_API_KEY",
-        "api_secret": "BINANCE_FUTURES_API_SECRET",
-    },
-}
+BINANCE_FUTURES_URL = "https://fapi.binance.com"
 
 
 # NT通用数量字段使用LOT_SIZE；市价单额外检查MARKET_LOT_SIZE。
@@ -52,15 +41,13 @@ def market_order_limits(instrument) -> tuple[float, float]:
     return minimum, maximum
 
 
-# 根据运行模式推导 Binance 环境。
-def environment(mode: str) -> BinanceEnvironment:
-    return getattr(BinanceEnvironment, BINANCE_ENVS[mode]["environment"])
-
-
-# 根据运行模式从 .env 读取 Binance 执行凭证。
-def credentials(mode: str) -> tuple[str, str]:
-    envs = BINANCE_ENVS[mode]
-    return os.environ[envs["api_key"]], os.environ[envs["api_secret"]]
+def credentials() -> tuple[str, str]:
+    load_dotenv(PROJECT_ROOT / ".env")
+    names = ("BINANCE_FUTURES_API_KEY", "BINANCE_FUTURES_API_SECRET")
+    for name in names:
+        if not os.environ.get(name, "").strip():
+            raise ValueError(f"Missing Binance credential: {name}")
+    return os.environ[names[0]], os.environ[names[1]]
 
 
 # 把 Binance 短 symbol 展开为 live 层统一使用的 InstrumentId。
@@ -134,7 +121,7 @@ def build_data_client(context: LiveContext, cfg: dict[str, Any]):
         cfg["client_id"],
         BinanceDataClientConfig(
             account_type=getattr(BinanceAccountType, cfg["account_type"]),
-            environment=environment(context.mode),
+            environment=BinanceEnvironment.LIVE,
             proxy_url=context.proxy_url,
             instrument_provider=instrument_provider(cfg),
             routing=routing(cfg),
@@ -145,15 +132,14 @@ def build_data_client(context: LiveContext, cfg: dict[str, Any]):
 
 # 构建 Binance live exec client 配置。
 def build_exec_client(context: LiveContext, cfg: dict[str, Any]):
-    load_dotenv(PROJECT_ROOT / ".env")
-    api_key, api_secret = credentials(context.mode)
+    api_key, api_secret = credentials()
     return (
         cfg["client_id"],
         BinanceExecClientConfig(
             api_key=api_key,
             api_secret=api_secret,
             account_type=getattr(BinanceAccountType, cfg["account_type"]),
-            environment=environment(context.mode),
+            environment=BinanceEnvironment.LIVE,
             proxy_url=context.proxy_url,
             futures_leverages=futures_leverages(cfg),
             futures_margin_types=futures_margin_types(cfg),

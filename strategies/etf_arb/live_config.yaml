@@ -44,7 +44,6 @@ strategy:
       gross_leverage: "10"
       capital_fraction: "0.9"
       batch_notional: "1000"
-      account_environment: live
       capital_timeout_ms: 10000
       venue_poll_seconds: 15
       venue_max_age_seconds: 45

@@ -10,7 +10,6 @@ from nautilus_trader.model.identifiers import InstrumentId
 
 @dataclass(frozen=True)
 class LiveContext:
-    mode: str
     proxy_url: str | None
 
 

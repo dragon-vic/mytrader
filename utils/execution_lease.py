@@ -15,7 +15,8 @@ class ExecutionLease:
                 continue
             if client['markets_all']:
                 raise ValueError('live execution requires explicit instrument ownership')
-            scope = f"{settings['mode']}:{client['venue']}:{client.get('account_type', '')}"
+            # 保持旧实盘进程使用的锁键，滚动升级时仍互斥。
+            scope = f"live:{client['venue']}:{client.get('account_type', '')}"
             for market in client['markets']:
                 resources.add(scope + ':' + market['instrument_id'])
         try:
